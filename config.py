@@ -287,6 +287,28 @@ def iter_known_video_dirs():
             yield item
 
 
+def iter_known_training_dirs():
+    seen = set()
+
+    def _append(path_value):
+        try:
+            resolved = _normalize_path(path_value)
+        except Exception:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        yield resolved
+
+    for item in _append(STORAGE_TRAINING_CORPUS_DIR):
+        yield item
+    for item in _append(BASE_DIR / "temp_train_data"):
+        yield item
+    for item in _append(BASE_DIR / "training_corpus"):
+        yield item
+
+
 def iter_known_project_asset_dirs():
     seen = set()
 
@@ -304,6 +326,8 @@ def iter_known_project_asset_dirs():
     for item in _append(DEFAULT_PATHS["project_assets"]):
         yield item
     for item in _append(LEGACY_DEFAULT_PATHS["project_assets"]):
+        yield item
+    for item in _append(BASE_DIR / "uploaded" / "projects"):
         yield item
 
     config_paths = [USER_CONFIG_PATH]
@@ -341,6 +365,46 @@ def iter_known_user_asset_dirs():
     for item in _append(STORAGE_USERS_DIR):
         yield item
     for item in _append(BASE_DIR / "user_assets"):
+        yield item
+
+
+def iter_known_style_dirs():
+    seen = set()
+
+    def _append(path_value):
+        try:
+            resolved = _normalize_path(path_value)
+        except Exception:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        yield resolved
+
+    for item in _append(STORAGE_STYLES_DIR):
+        yield item
+    for item in _append(BASE_DIR / "styles"):
+        yield item
+
+
+def iter_known_style_extracted_dirs():
+    seen = set()
+
+    def _append(path_value):
+        try:
+            resolved = _normalize_path(path_value)
+        except Exception:
+            return
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        yield resolved
+
+    for item in _append(STORAGE_STYLES_EXTRACTED_DIR):
+        yield item
+    for item in _append(BASE_DIR / "styles" / "extracted"):
         yield item
 
 

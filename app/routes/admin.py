@@ -19,6 +19,7 @@ from config import (
     BASE_DIR,
     MODEL_DIR,
     iter_known_model_dirs,
+    iter_known_video_dirs,
     MODFLOWS_B0_CHECKPOINT,
     MODFLOWS_B6_CHECKPOINT,
     STORAGE_CACHE_DIR,
@@ -26,6 +27,8 @@ from config import (
     STORAGE_IMAGE_UPLOADS_DIR,
     STORAGE_LOGS_DIR,
     STORAGE_PROJECTS_DIR,
+    iter_known_style_dirs,
+    iter_known_training_dirs,
     STORAGE_TRAINING_CORPUS_DIR,
     STORAGE_USERS_DIR,
     STORAGE_VIDEO_FRAMES_DIR,
@@ -820,11 +823,12 @@ async def _collect_overview(db: AsyncSession):
     model_total_stats = _scan_paths_unique(
         [*model_dirs, *_hf_model_cache_roots()]
     )
-    train_stats = _scan_paths_unique([TRAINING_DATA_ROOT, BASE_DIR / "temp_train_data"])
-    legacy_training_stats = _scan_dir(BASE_DIR / "temp_train_data")
+    training_dirs = list(iter_known_training_dirs())
+    train_stats = _scan_paths_unique(training_dirs)
+    legacy_training_stats = _scan_paths_unique(training_dirs)
     training_corpus_stats = _scan_training_corpus(TRAINING_CORPUS_ROOT)
     export_stats = _scan_paths_unique(
-        [STORAGE_VIDEOS_DIR, BASE_DIR / "videos"],
+        list(iter_known_video_dirs()),
         extensions={
             ".jpg",
             ".jpeg",
@@ -839,7 +843,7 @@ async def _collect_overview(db: AsyncSession):
         },
     )
     upload_stats = _scan_dir(STORAGE_IMAGE_UPLOADS_DIR)
-    style_stats = _scan_dir(BASE_DIR / "styles")
+    style_stats = _scan_paths_unique(list(iter_known_style_dirs()))
     asset_storage_stats = _scan_dir(STORAGE_USERS_DIR)
     storage_stats = _scan_paths_unique(
         [

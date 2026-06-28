@@ -57,6 +57,8 @@ from config import (
     get_user_images_dir,
     get_user_profiles_dir,
     get_user_references_dir,
+    iter_known_project_asset_dirs,
+    iter_known_style_dirs,
 )
 from database import get_db
 from models import Asset, Project, User
@@ -74,6 +76,14 @@ USER_LOCAL_DIR = USER_ASSET_DIR / "local_user"
 USER_LOCAL_IMAGE_DIR = get_user_images_dir()
 USER_LOCAL_REFERENCE_DIR = get_user_references_dir()
 USER_LOCAL_PROFILE_DIR = get_user_profiles_dir()
+
+
+def _iter_cleanup_project_roots():
+    yield from iter_known_project_asset_dirs()
+
+
+def _iter_cleanup_style_roots():
+    yield from iter_known_style_dirs()
 
 
 def _auth_cookie_secure() -> bool:
@@ -590,7 +600,6 @@ def _resolve_virtual_asset_path(value):
     route_roots = {
         "/assets/": USER_ASSET_DIR,
         "/videos/": _runtime_video_result_dir(),
-        "/styles/": BASE_DIR / "styles",
     }
     for prefix, root in route_roots.items():
         if not route_path.startswith(prefix):
@@ -600,6 +609,15 @@ def _resolve_virtual_asset_path(value):
             return None
         candidate = root / Path(relative)
         return _resolve_within_cleanup_roots(candidate)
+    if route_path.startswith("/styles/"):
+        relative = route_path[len("/styles/"):].strip("/")
+        if not relative:
+            return None
+        for root in _iter_cleanup_style_roots():
+            candidate = root / Path(relative)
+            resolved = _resolve_within_cleanup_roots(candidate)
+            if resolved is not None:
+                return resolved
     return None
 
 
@@ -882,9 +900,8 @@ async def delete_account(
     cleanup_paths = set()
 
     for project in projects:
-        cleanup_paths.add(STORAGE_PROJECT_ASSETS_DIR / str(project.id))
-        cleanup_paths.add(BASE_DIR / "user_assets" / "projects" / str(project.id))
-        cleanup_paths.add(BASE_DIR / "uploaded" / "projects" / str(project.id))
+        for root in _iter_cleanup_project_roots():
+            cleanup_paths.add(root / str(project.id))
         snapshot = project.workspace_snapshot or ""
         if snapshot:
             try:

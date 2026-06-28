@@ -29,7 +29,6 @@ from config import (
 
 router = APIRouter()
 
-UPLOADED_PROJECTS_ROOT = BASE_DIR / "uploaded" / "projects"
 USER_LOCAL_ROOT = get_user_assets_dir() / "local_user"
 USER_LOCAL_IMAGE_DIR = get_user_images_dir()
 USER_LOCAL_REFERENCE_DIR = get_user_references_dir()
@@ -74,6 +73,23 @@ def _project_asset_roots():
     for root in list(iter_known_project_asset_dirs()) + [_project_assets_root()]:
         try:
             resolved = root.resolve()
+        except Exception:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(resolved)
+    return roots
+
+
+def _project_storage_roots(project_id: int):
+    roots = []
+    seen = set()
+    for root in _project_asset_roots():
+        candidate = root / str(project_id)
+        try:
+            resolved = candidate.resolve()
         except Exception:
             continue
         key = str(resolved)
@@ -416,7 +432,7 @@ def _build_user_project_inventory(projects, asset_rows):
                 export_size_files.add(video_result)
                 export_size += _safe_file_size(video_result)
 
-        for root in (_project_assets_root() / str(project.id), UPLOADED_PROJECTS_ROOT / str(project.id)):
+        for root in _project_storage_roots(project.id):
             if not root.exists():
                 continue
             for file_path in root.rglob("*"):
@@ -506,7 +522,7 @@ def _format_runtime_dt(value) -> str:
 def _scan_project_storage(project_ids):
     total_size = 0
     for project_id in project_ids:
-        for project_dir in (_project_assets_root() / str(project_id), UPLOADED_PROJECTS_ROOT / str(project_id)):
+        for project_dir in _project_storage_roots(project_id):
             if not project_dir.exists():
                 continue
             for item in project_dir.rglob("*"):
@@ -520,7 +536,7 @@ def _scan_project_storage(project_ids):
 
 
 def _remove_project_storage(project_id: int):
-    for project_dir in (_project_assets_root() / str(project_id), UPLOADED_PROJECTS_ROOT / str(project_id)):
+    for project_dir in _project_storage_roots(project_id):
         if not project_dir.exists():
             continue
         try:
@@ -677,7 +693,7 @@ def _count_unique_exported_photos(projects, asset_rows):
             has_export = any(_looks_like_export_name(asset.file_name) for asset in project_assets)
 
         if not has_export:
-            for root in (_project_assets_root() / str(project.id), UPLOADED_PROJECTS_ROOT / str(project.id)):
+            for root in _project_storage_roots(project.id):
                 if not root.exists():
                     continue
                 for file_path in root.rglob("*"):
@@ -1939,10 +1955,7 @@ async def delete_project_assets(
     if not normalized_paths:
         return {"deleted": [], "missing": []}
 
-    project_roots = [
-        (_project_assets_root() / str(project_id)).resolve(),
-        (UPLOADED_PROJECTS_ROOT / str(project_id)).resolve(),
-    ]
+    project_roots = list(_project_storage_roots(project_id))
 
     deleted = []
     missing = []

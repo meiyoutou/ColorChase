@@ -211,6 +211,8 @@ from config import (
     get_temp_lut_dir,
     get_project_assets_dir,
     iter_known_project_asset_dirs,
+    iter_known_style_dirs,
+    iter_known_style_extracted_dirs,
     get_user_assets_dir,
     get_user_images_dir,
     get_user_profiles_dir,
@@ -222,7 +224,6 @@ ensure_runtime_dirs()
 os.makedirs(str(MODEL_DIR), exist_ok=True)
 
 STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
-LEGACY_STYLES_EXTRACTED_DIR = BASE_DIR / "styles" / "extracted"
 os.makedirs(str(STYLES_EXTRACTED_DIR), exist_ok=True)
 STYLES_DIR = BASE_DIR / "styles"
 os.makedirs(str(STYLES_DIR), exist_ok=True)
@@ -241,17 +242,7 @@ _write_task_log = create_task_log_writer(BASE_DIR, _user_profile_record, record_
 
 
 def _iter_style_extracted_roots():
-    seen = set()
-    for root in (STYLES_EXTRACTED_DIR, LEGACY_STYLES_EXTRACTED_DIR):
-        try:
-            resolved = root.resolve()
-        except Exception:
-            continue
-        key = str(resolved)
-        if key in seen:
-            continue
-        seen.add(key)
-        yield resolved
+    yield from iter_known_style_extracted_dirs()
 
 
 def _resolve_style_dir(style_id: str):

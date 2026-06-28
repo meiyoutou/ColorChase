@@ -200,6 +200,7 @@ from config import (
     NEURALPRESET_NORM_WEIGHTS,
     NEURALPRESET_STYLE_WEIGHTS,
     STORAGE_CACHE_DIR,
+    STORAGE_STYLES_EXTRACTED_DIR,
     STATIC_DIR,
     ensure_runtime_dirs,
     get_neuralpreset_weight_status,
@@ -220,7 +221,8 @@ from config import (
 ensure_runtime_dirs()
 os.makedirs(str(MODEL_DIR), exist_ok=True)
 
-STYLES_EXTRACTED_DIR = BASE_DIR / "styles" / "extracted"
+STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
+LEGACY_STYLES_EXTRACTED_DIR = BASE_DIR / "styles" / "extracted"
 os.makedirs(str(STYLES_EXTRACTED_DIR), exist_ok=True)
 STYLES_DIR = BASE_DIR / "styles"
 os.makedirs(str(STYLES_DIR), exist_ok=True)
@@ -236,6 +238,52 @@ os.makedirs(str(get_project_assets_dir()), exist_ok=True)
 
 MODEL_MANAGEMENT_PATH = STORAGE_CACHE_DIR / "model_management.json"
 _write_task_log = create_task_log_writer(BASE_DIR, _user_profile_record, record_task_log)
+
+
+def _iter_style_extracted_roots():
+    seen = set()
+    for root in (STYLES_EXTRACTED_DIR, LEGACY_STYLES_EXTRACTED_DIR):
+        try:
+            resolved = root.resolve()
+        except Exception:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield resolved
+
+
+def _resolve_style_dir(style_id: str):
+    safe_id = Path(str(style_id or "")).name
+    if not safe_id:
+        return None
+    for root in _iter_style_extracted_roots():
+        candidate = root / safe_id
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _resolve_style_extracted_file(file_path: str):
+    safe_parts = [part for part in Path(str(file_path or "")).parts if part not in ("", ".", "..")]
+    if not safe_parts:
+        return None
+    for root in _iter_style_extracted_roots():
+        candidate = (root.joinpath(*safe_parts)).resolve()
+        if root == candidate or root in candidate.parents:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+    return None
+
+
+@app.get("/styles/extracted/{file_path:path}")
+async def serve_style_extracted_file(file_path: str):
+    target = _resolve_style_extracted_file(file_path)
+    if not target:
+        raise HTTPException(status_code=404, detail="Style asset not found")
+    return FileResponse(str(target))
+
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if not IS_PRODUCTION:
@@ -1859,12 +1907,19 @@ async def api_prepare_lr_preset(
 @app.get("/api/list_styles")
 async def api_list_styles():
     styles = []
-    if not os.path.exists(str(STYLES_EXTRACTED_DIR)):
-        return JSONResponse(styles)
-    for folder_name in sorted(os.listdir(str(STYLES_EXTRACTED_DIR))):
-        folder_path = os.path.join(str(STYLES_EXTRACTED_DIR), folder_name)
-        if not os.path.isdir(folder_path):
+    seen = set()
+    style_dirs = []
+    for root in _iter_style_extracted_roots():
+        if not root.exists():
             continue
+        for folder in sorted(root.iterdir()):
+            if not folder.is_dir() or folder.name in seen:
+                continue
+            seen.add(folder.name)
+            style_dirs.append(folder)
+    for folder in style_dirs:
+        folder_name = folder.name
+        folder_path = str(folder)
         ccs_path = os.path.join(folder_path, "style.ccs")
         name = folder_name
         camera = ""
@@ -1889,10 +1944,10 @@ async def api_list_styles():
 
 @app.get("/api/get_style/{style_id}")
 async def api_get_style(style_id: str):
-    folder_path = os.path.join(str(STYLES_EXTRACTED_DIR), style_id)
-    if not os.path.isdir(folder_path):
+    style_dir = _resolve_style_dir(style_id)
+    if not style_dir:
         raise HTTPException(status_code=404, detail="风格未找到")
-    npy_path = os.path.join(folder_path, "lut_global.npy")
+    npy_path = os.path.join(str(style_dir), "lut_global.npy")
     if not os.path.exists(npy_path):
         raise HTTPException(status_code=404, detail="LUT文件未找到")
     return JSONResponse({"npy_path": npy_path})
@@ -1903,9 +1958,10 @@ async def api_rename_style(
     style_id: str = Form(...),
     new_name: str = Form(...),
 ):
-    style_dir = os.path.join(str(STYLES_EXTRACTED_DIR), style_id)
-    if not os.path.isdir(style_dir):
+    resolved_style_dir = _resolve_style_dir(style_id)
+    if not resolved_style_dir:
         raise HTTPException(status_code=404, detail="风格不存在")
+    style_dir = str(resolved_style_dir)
     ccs_path = os.path.join(style_dir, "style.ccs")
     if not os.path.exists(ccs_path):
         raise HTTPException(status_code=404, detail="风格配置不存在")
@@ -1936,7 +1992,10 @@ async def api_apply_style(
     if request_user_id is not None:
         record_user_usage(request_user_id)
     record_model_call("neural_preset")
-    style_dir = os.path.join(str(STYLES_EXTRACTED_DIR), style_id)
+    resolved_style_dir = _resolve_style_dir(style_id)
+    if not resolved_style_dir:
+        raise HTTPException(status_code=404, detail="风格不存在")
+    style_dir = str(resolved_style_dir)
     style_lut_path = os.path.join(style_dir, "lut_global.npy")
     if not os.path.exists(style_lut_path):
         raise HTTPException(status_code=404, detail="风格 LUT 不存在")
@@ -2652,8 +2711,8 @@ async def api_transfer(
             missing = "、".join(weight_status["missing"])
             raise_task_http_error(
                 400,
-                f"DNCM / NeuralPreset LUT 权重不完整，缺少 {missing}。请放入 models/neural_preset 或 weights/neuralpreset。已查找：{searched}"
-            )
+                    f"DNCM / NeuralPreset LUT 权重不完整，缺少 {missing}。请放入 model_assets/neural_preset；旧目录 models/neural_preset 或 weights/neuralpreset 仍会兼容读取。已查找：{searched}"
+                )
         dncm_mode = "quality" if str(lut_mode or "").lower() in ("quality", "high", "hq") else "fast"
         lut_size = 33 if dncm_mode == "quality" else 17
         await prog("dncm_lut", 25, "DNCM LUT 生成中..." if dncm_mode == "fast" else "DNCM 高质量 LUT 生成中...")

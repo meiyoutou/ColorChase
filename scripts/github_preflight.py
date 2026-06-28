@@ -18,6 +18,8 @@ BLOCKED_PATTERNS = [
     re.compile(r"(^|/)user_assets/"),
     re.compile(r"(^|/)user_configs/"),
     re.compile(r"(^|/)videos/"),
+    re.compile(r"(^|/)model_assets/"),
+    re.compile(r"(^|/)artifacts/models/"),
     re.compile(r"(^|/)weights/"),
     re.compile(r"(^|/)models/"),
     re.compile(r"(^|/)swinb_celeba_512/"),

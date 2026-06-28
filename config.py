@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Optional
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "models"
+MODEL_ASSETS_DIR = BASE_DIR / "model_assets"
+MODEL_DIR = MODEL_ASSETS_DIR
+LEGACY_MODEL_DIR = BASE_DIR / "models"
+WEIGHTS_DIR = BASE_DIR / "weights"
 STATIC_DIR = BASE_DIR / "static"
 STORAGE_DIR = BASE_DIR / "storage"
 STORAGE_PROJECTS_DIR = STORAGE_DIR / "projects"
@@ -26,6 +29,8 @@ STORAGE_USER_PROFILES_DIR = STORAGE_USER_LOCAL_DIR / "profiles"
 STORAGE_TRAINING_DIR = STORAGE_DIR / "training"
 STORAGE_TRAINING_CORPUS_DIR = STORAGE_TRAINING_DIR / "corpus"
 STORAGE_CACHE_DIR = STORAGE_DIR / "cache"
+STORAGE_STYLES_DIR = STORAGE_DIR / "styles"
+STORAGE_STYLES_EXTRACTED_DIR = STORAGE_STYLES_DIR / "extracted"
 
 USER_CONFIG_PATH = BASE_DIR / "user_config.json"
 USER_CONFIG_DIR = BASE_DIR / "user_configs"
@@ -240,6 +245,8 @@ def ensure_runtime_dirs(user_id: Optional[int] = None):
         STORAGE_USER_LOCAL_DIR,
         STORAGE_TRAINING_CORPUS_DIR,
         STORAGE_CACHE_DIR,
+        STORAGE_STYLES_DIR,
+        STORAGE_STYLES_EXTRACTED_DIR,
     ):
         extra.mkdir(parents=True, exist_ok=True)
     return paths
@@ -354,8 +361,10 @@ NEURALPRESET_MODEL_DIR = MODEL_DIR / "neural_preset"
 NEURALPRESET_MODEL_DIR_ALIASES = (
     NEURALPRESET_MODEL_DIR,
     MODEL_DIR / "neuralpreset",
-    BASE_DIR / "weights" / "neural_preset",
-    BASE_DIR / "weights" / "neuralpreset",
+    LEGACY_MODEL_DIR / "neural_preset",
+    LEGACY_MODEL_DIR / "neuralpreset",
+    WEIGHTS_DIR / "neural_preset",
+    WEIGHTS_DIR / "neuralpreset",
 )
 
 MODFLOWS_B6_CHECKPOINT = MODFLOWS_MODEL_DIR / "modflows_color_encoder_B6_dim_8195_iter_700000.pt"

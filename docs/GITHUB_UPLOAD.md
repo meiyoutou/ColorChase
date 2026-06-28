@@ -28,7 +28,7 @@ git status
 确认没有敏感文件：
 
 ```bash
-git ls-files | grep -E '(^|/)(\.env$|colorchase\.db|生产环境密钥|\.venv312|storage/|uploads/|uploaded/|user_assets/|videos/|weights/|models/|swinb_celeba_512/)'
+git ls-files | grep -E '(^|/)(\.env$|colorchase\.db|生产环境密钥|\.venv312|storage/|uploads/|uploaded/|user_assets/|videos/|model_assets/|weights/|models/|swinb_celeba_512/)'
 ```
 
 如果没有输出，说明这些文件没有进入当前分支。

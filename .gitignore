@@ -36,6 +36,8 @@ temp_neuralpreset/
 styles/extracted/
 
 # Models and large local artifacts
+model_assets/
+artifacts/models/
 models/
 weights/
 swinb_celeba_512/

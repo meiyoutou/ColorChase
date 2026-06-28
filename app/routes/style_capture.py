@@ -9,10 +9,11 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
+from config import STORAGE_STYLES_EXTRACTED_DIR
 
 router = APIRouter()
 
-STYLES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "styles", "extracted")
+STYLES_DIR = str(STORAGE_STYLES_EXTRACTED_DIR)
 
 
 def _resize_long_edge(img, long_edge=1024):

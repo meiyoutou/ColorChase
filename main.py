@@ -1623,32 +1623,6 @@ app.include_router(
 app.include_router(create_task_router(_get_request_user_id, _get_request_user_role, _write_task_log), tags=["tasks"])
 
 
-@app.get("/__legacy/api/progress/{task_id}")
-async def api_progress(task_id: str):
-    queue = progress_manager.get_queue(task_id)
-    if queue is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    async def event_generator():
-        try:
-            while True:
-                if progress_manager.is_cancelled(task_id):
-                    yield f"data: {json.dumps({'stage': 'cancelled', 'progress': 0, 'message': '任务已取消'})}\n\n"
-                    break
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=30)
-                    yield f"data: {data}\n\n"
-                    parsed = json.loads(data)
-                    if parsed.get("stage") in ("done", "error", "cancelled"):
-                        break
-                except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'stage': 'heartbeat', 'progress': 0, 'message': ''})}\n\n"
-        finally:
-            progress_manager.remove_task(task_id)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
 @app.post("/api/upload_batch")
 async def api_upload_batch(
     files: List[UploadFile] = File(...),

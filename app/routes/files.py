@@ -7,45 +7,11 @@ from fastapi.responses import FileResponse
 
 from app.settings import IS_PRODUCTION
 from auth import ALGORITHM, SECRET_KEY
+from app.services.paths import _safe_project_asset_file, _safe_runtime_file
 from config import (
-    get_project_assets_dir,
-    iter_known_project_asset_dirs,
     iter_known_video_dirs,
 )
 from jose import JWTError, jwt
-
-
-def _safe_runtime_file(root: Path, file_path: str) -> Path:
-    relative = Path(file_path or "")
-    candidate = (root / relative).resolve()
-    if candidate != root and root not in candidate.parents:
-        raise HTTPException(status_code=404, detail="File not found")
-    return candidate
-
-
-def _safe_project_asset_file(project_id: int, file_path: str) -> Path:
-    if int(project_id or 0) <= 0:
-        raise HTTPException(status_code=404, detail="Project not found")
-    relative = Path(str(file_path or "").replace("\\", "/"))
-    if relative.is_absolute() or any(part in ("", ".", "..") for part in relative.parts):
-        raise HTTPException(status_code=404, detail="File not found")
-    candidate_roots = [get_project_assets_dir()] + list(iter_known_project_asset_dirs())
-    seen = set()
-    for root in candidate_roots:
-        try:
-            project_root = (root / str(int(project_id))).resolve()
-            target = (project_root / relative).resolve()
-        except Exception:
-            continue
-        key = str(project_root)
-        if key in seen:
-            continue
-        seen.add(key)
-        if target != project_root and project_root not in target.parents:
-            continue
-        if target.exists() and target.is_file():
-            return target
-    raise HTTPException(status_code=404, detail="File not found")
 
 
 def _get_request_user_id(authorization: Optional[str]) -> Optional[int]:

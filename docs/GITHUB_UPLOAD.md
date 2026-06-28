@@ -66,7 +66,7 @@ git push origin master
 
 ```bash
 git status
-git ls-files | grep -E '(^|/)(\.env$|colorchase\.db|生产环境密钥|\.venv312|storage/|uploads/|uploaded/|user_assets/|videos/|weights/|models/|swinb_celeba_512/)'
+python scripts/github_preflight.py
 ```
 
-第二条命令没有输出，才继续推送。
+体检脚本输出 `[OK] GitHub 上传前检查通过`，才继续推送。

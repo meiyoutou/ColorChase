@@ -8,6 +8,7 @@ MODEL_ASSETS_DIR = BASE_DIR / "model_assets"
 MODEL_DIR = MODEL_ASSETS_DIR
 LEGACY_MODEL_DIR = BASE_DIR / "models"
 WEIGHTS_DIR = BASE_DIR / "weights"
+ARTIFACTS_MODEL_DIR = BASE_DIR / "artifacts" / "models"
 STATIC_DIR = BASE_DIR / "static"
 STORAGE_DIR = BASE_DIR / "storage"
 STORAGE_PROJECTS_DIR = STORAGE_DIR / "projects"
@@ -365,6 +366,8 @@ NEURALPRESET_MODEL_DIR_ALIASES = (
     LEGACY_MODEL_DIR / "neuralpreset",
     WEIGHTS_DIR / "neural_preset",
     WEIGHTS_DIR / "neuralpreset",
+    ARTIFACTS_MODEL_DIR / "neural_preset",
+    ARTIFACTS_MODEL_DIR / "neuralpreset",
 )
 
 MODFLOWS_B6_CHECKPOINT = MODFLOWS_MODEL_DIR / "modflows_color_encoder_B6_dim_8195_iter_700000.pt"
@@ -382,6 +385,29 @@ def iter_neuralpreset_model_dirs():
             continue
         seen.add(resolved)
         yield path
+
+
+def iter_known_model_dirs():
+    seen = set()
+    for path in (
+        MODEL_ASSETS_DIR,
+        LEGACY_MODEL_DIR,
+        WEIGHTS_DIR,
+        ARTIFACTS_MODEL_DIR,
+    ):
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield path
+
+
+def resolve_model_asset_path(*parts: str) -> Optional[Path]:
+    for root in iter_known_model_dirs():
+        candidate = root.joinpath(*parts)
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def find_neuralpreset_weight(filename: str) -> Path:

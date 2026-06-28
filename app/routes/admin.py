@@ -18,6 +18,7 @@ from app.routes.projects import _derive_display_name, _user_profile_record
 from config import (
     BASE_DIR,
     MODEL_DIR,
+    iter_known_model_dirs,
     MODFLOWS_B0_CHECKPOINT,
     MODFLOWS_B6_CHECKPOINT,
     STORAGE_CACHE_DIR,
@@ -813,11 +814,11 @@ async def _collect_overview(db: AsyncSession):
     )
     asset_count = await db.scalar(select(func.count(Asset.id)))
 
-    model_stats = _scan_dir(MODEL_DIR)
-    weights_stats = _scan_dir(BASE_DIR / "weights")
+    model_dirs = list(iter_known_model_dirs())
+    model_stats = _scan_paths_unique(model_dirs)
     hf_model_cache_stats = _scan_paths_unique(_hf_model_cache_roots())
     model_total_stats = _scan_paths_unique(
-        [MODEL_DIR, BASE_DIR / "weights", *_hf_model_cache_roots()]
+        [*model_dirs, *_hf_model_cache_roots()]
     )
     train_stats = _scan_paths_unique([TRAINING_DATA_ROOT, BASE_DIR / "temp_train_data"])
     legacy_training_stats = _scan_dir(BASE_DIR / "temp_train_data")

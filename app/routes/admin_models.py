@@ -9,7 +9,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.routes.auth import require_admin
-from config import BASE_DIR, MODFLOWS_B0_CHECKPOINT, MODFLOWS_B6_CHECKPOINT, get_neuralpreset_weight_status, get_storage_cache_dir
+from config import (
+    BASE_DIR,
+    MODFLOWS_B0_CHECKPOINT,
+    MODFLOWS_B6_CHECKPOINT,
+    get_neuralpreset_weight_status,
+    get_storage_cache_dir,
+    resolve_model_asset_path,
+)
 from models import User
 
 router = APIRouter()
@@ -102,9 +109,18 @@ def _build_status_payload():
     neuralpreset_weight_status = get_neuralpreset_weight_status()
     norm_file = _file_info(neuralpreset_weight_status["norm_path"])
     style_file = _file_info(neuralpreset_weight_status["style_path"])
-    neuralpreset_best_file = _file_info(BASE_DIR / "weights" / "neuralpreset" / "best.ckpt")
-    neuralpreset_norm_file = _file_info(BASE_DIR / "weights" / "neuralpreset" / "norm_stage_best.pth")
-    segface_file = _file_info(BASE_DIR / "weights" / "segface" / "swinb_celeba_512_model_299.pt")
+    neuralpreset_best_file = _file_info(
+        resolve_model_asset_path("neuralpreset", "best.ckpt")
+        or (BASE_DIR / "weights" / "neuralpreset" / "best.ckpt")
+    )
+    neuralpreset_norm_file = _file_info(
+        resolve_model_asset_path("neuralpreset", "norm_stage_best.pth")
+        or (BASE_DIR / "weights" / "neuralpreset" / "norm_stage_best.pth")
+    )
+    segface_file = _file_info(
+        resolve_model_asset_path("segface", "swinb_celeba_512_model_299.pt")
+        or (BASE_DIR / "weights" / "segface" / "swinb_celeba_512_model_299.pt")
+    )
     modflows_b6_file = _file_info(MODFLOWS_B6_CHECKPOINT)
     modflows_b0_file = _file_info(MODFLOWS_B0_CHECKPOINT)
     subject_mask_status = get_subject_mask_status(BASE_DIR)

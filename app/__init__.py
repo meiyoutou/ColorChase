@@ -1,0 +1,1 @@
+"""ColorChase application helpers."""

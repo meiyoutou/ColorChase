@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理员任务日志预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f2ea;
+      --panel: rgba(255, 251, 246, 0.96);
+      --panel-strong: rgba(255, 255, 255, 0.92);
+      --border: rgba(229, 219, 205, 0.95);
+      --text: #241d17;
+      --sub: #7f7264;
+      --soft: #a89988;
+      --purple: #825fd7;
+      --peach: #f2aa84;
+      --rose: #d98cbc;
+      --danger: #df6d67;
+      --warn: #e0a543;
+      --ok: #69a37b;
+      --shadow: 0 18px 38px rgba(179, 156, 126, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top right, rgba(255, 214, 182, 0.25), transparent 22%),
+        linear-gradient(180deg, #fbf7f1 0%, var(--bg) 100%);
+      color: var(--text);
+      padding: 28px;
+    }
+
+    .page {
+      max-width: 1320px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      border: 1px solid var(--border);
+      border-radius: 32px;
+      padding: 26px 28px;
+      background:
+        radial-gradient(circle at 84% 18%, rgba(255, 201, 169, 0.4), transparent 18%),
+        linear-gradient(110deg, #6e57b3 0%, #946dca 34%, #d587ba 63%, #f0a387 100%);
+      color: #fff9f7;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      margin: 10px 0 8px;
+      font-size: 54px;
+      line-height: 1;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 760px;
+      color: rgba(255, 247, 244, 0.82);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .kicker {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: rgba(255, 246, 244, 0.78);
+      text-transform: uppercase;
+    }
+
+    .shell {
+      margin-top: 20px;
+      border: 1px solid var(--border);
+      border-radius: 34px;
+      background: linear-gradient(180deg, rgba(255, 252, 247, 0.98) 0%, rgba(249, 244, 238, 0.98) 100%);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .shell-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 22px 24px 18px;
+      border-bottom: 1px solid rgba(232, 224, 213, 0.88);
+    }
+
+    .shell-header h2 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+
+    .shell-header p {
+      margin: 8px 0 0;
+      color: var(--sub);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(236, 228, 216, 0.94);
+      background: rgba(255, 255, 255, 0.88);
+      color: #5e564b;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .shell-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+      gap: 16px;
+      padding: 16px;
+      min-height: 640px;
+    }
+
+    .panel {
+      border-radius: 28px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.15fr) repeat(4, minmax(0, 0.6fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field span {
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      min-height: 48px;
+      border-radius: 18px;
+      border: 1px solid rgba(228, 219, 208, 0.95);
+      background: rgba(255, 255, 255, 0.92);
+      padding: 0 16px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+    }
+
+    .alerts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .alert {
+      border-radius: 20px;
+      min-height: 82px;
+      padding: 14px 16px;
+      border: 1px solid rgba(233, 223, 212, 0.92);
+      background: rgba(255, 255, 255, 0.88);
+    }
+
+    .alert strong,
+    .stat strong,
+    .detail strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .alert span,
+    .stat span,
+    .detail span {
+      display: block;
+      margin-top: 6px;
+      color: var(--sub);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .alert.warn {
+      background: linear-gradient(135deg, rgba(255, 248, 234, 0.95) 0%, rgba(255, 240, 222, 0.95) 100%);
+      border-color: rgba(241, 202, 135, 0.5);
+    }
+
+    .alert.danger {
+      background: linear-gradient(135deg, rgba(255, 241, 238, 0.95) 0%, rgba(255, 233, 228, 0.95) 100%);
+      border-color: rgba(223, 109, 103, 0.34);
+    }
+
+    .alert.info {
+      background: linear-gradient(135deg, rgba(244, 236, 255, 0.95) 0%, rgba(255, 243, 235, 0.95) 100%);
+      border-color: rgba(180, 143, 214, 0.34);
+    }
+
+    .log-shell {
+      border-radius: 24px;
+      border: 1px solid rgba(230, 221, 210, 0.95);
+      background: rgba(255, 255, 255, 0.82);
+      overflow: hidden;
+    }
+
+    .log-head,
+    .log-row {
+      display: grid;
+      grid-template-columns: 126px 136px 110px 132px 86px minmax(220px, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 0 14px;
+    }
+
+    .log-head {
+      min-height: 52px;
+      border-bottom: 1px solid rgba(231, 223, 213, 0.92);
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      background: rgba(252, 248, 244, 0.92);
+    }
+
+    .log-list {
+      height: 276px;
+      overflow-y: auto;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .log-row {
+      min-height: 62px;
+      border-bottom: 1px solid rgba(240, 233, 225, 0.9);
+      font-size: 13px;
+      color: #2f281f;
+    }
+
+    .log-row:last-child {
+      border-bottom: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      width: fit-content;
+    }
+
+    .status.ok {
+      background: rgba(112, 175, 126, 0.12);
+      color: var(--ok);
+    }
+
+    .status.fail {
+      background: rgba(223, 109, 103, 0.12);
+      color: var(--danger);
+    }
+
+    .status.cancel {
+      background: rgba(224, 165, 67, 0.14);
+      color: #b67f1d;
+    }
+
+    .detail {
+      margin-top: 14px;
+      border-radius: 22px;
+      border: 1px solid rgba(228, 219, 208, 0.95);
+      background:
+        radial-gradient(circle at top right, rgba(241, 217, 253, 0.28), transparent 24%),
+        linear-gradient(135deg, rgba(255, 251, 248, 0.96) 0%, rgba(249, 242, 255, 0.96) 100%);
+      padding: 16px;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .stat {
+      border-radius: 22px;
+      border: 1px solid rgba(230, 220, 210, 0.94);
+      background: var(--panel-strong);
+      padding: 16px;
+    }
+
+    .stats-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .rank-list,
+    .todo-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .rank-item,
+    .todo-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 58px;
+      border-radius: 18px;
+      border: 1px solid rgba(230, 221, 209, 0.94);
+      background: rgba(255, 255, 255, 0.9);
+      padding: 12px 14px;
+    }
+
+    .rank-item em,
+    .todo-item em {
+      display: inline-grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #f1e5ff 0%, #e7d9ff 100%);
+      color: #7a5ce2;
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .rank-copy,
+    .todo-copy {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .rank-copy strong,
+    .todo-copy strong {
+      font-size: 13px;
+    }
+
+    .rank-copy span,
+    .todo-copy span {
+      margin-top: 4px;
+      color: var(--sub);
+      font-size: 11px;
+      line-height: 1.5;
+      display: block;
+    }
+
+    .count {
+      color: #412f53;
+      font-size: 18px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .side-stack {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+
+    @media (max-width: 1180px) {
+      .shell-body {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar,
+      .alerts,
+      .detail-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 860px) {
+      body {
+        padding: 16px;
+      }
+
+      .hero h1 {
+        font-size: 38px;
+      }
+
+      .toolbar,
+      .alerts,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .log-head,
+      .log-row {
+        grid-template-columns: 110px 120px 94px 116px 74px minmax(180px, 1fr);
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="kicker">ADMIN SPACE / TASK LOGS</div>
+      <h1>任务日志中心</h1>
+      <p>内嵌式中高度模块，支持按用户名搜索、失败原因查看、资源告警提示和逐条任务明细。整体不做全屏扩张，日志内容在模块内部滚动。</p>
+    </section>
+
+    <section class="shell">
+      <div class="shell-header">
+        <div>
+          <h2>管理员个人空间内嵌预览</h2>
+          <p>这是一版压缩后的工作台方案，重点看模块大小、内部滚动和信息密度，不是最终接入数据。</p>
+        </div>
+        <div class="pill">模块高度 640px</div>
+      </div>
+
+      <div class="shell-body">
+        <div class="panel">
+          <div class="toolbar">
+            <label class="field">
+              <span>搜索用户 / taskId / 错误关键词</span>
+              <input value="lin / 8d2f / 内存不足" />
+            </label>
+            <label class="field">
+              <span>状态</span>
+              <select>
+                <option>全部</option>
+                <option>仅成功</option>
+                <option selected>仅失败</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>任务类型</span>
+              <select>
+                <option>全部</option>
+                <option selected>模型训练</option>
+                <option>图片追色</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>模型</span>
+              <select>
+                <option>全部</option>
+                <option selected>NeuralPreset</option>
+                <option>ModFlows B6</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>时间范围</span>
+              <select>
+                <option>近 24 小时</option>
+                <option selected>近 7 天</option>
+                <option>近 30 天</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="alerts">
+            <div class="alert danger">
+              <strong>硬盘空间告警</strong>
+              <span>系统盘使用率 91.4%，训练输出与导出缓存建议尽快清理。</span>
+            </div>
+            <div class="alert warn">
+              <strong>内存压力偏高</strong>
+              <span>当前内存占用 82%，视频任务并发建议暂时限制在 1 个。</span>
+            </div>
+            <div class="alert info">
+              <strong>训练任务占用服务</strong>
+              <span>当前有 1 个模型训练在执行，建议避免管理员同时发起批量导出。</span>
+            </div>
+          </div>
+
+          <div class="log-shell">
+            <div class="log-head">
+              <div>时间</div>
+              <div>用户</div>
+              <div>任务类型</div>
+              <div>模型 / 目标</div>
+              <div>状态</div>
+              <div>失败原因 / 摘要</div>
+            </div>
+            <div class="log-list">
+              <div class="log-row">
+                <div>06-16 20:45</div>
+                <div>lin_admin</div>
+                <div>模型训练</div>
+                <div>NeuralPreset</div>
+                <div><span class="status fail">失败</span></div>
+                <div>训练目录中没有可用图片，任务在预检查阶段终止</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 20:11</div>
+                <div>han_user</div>
+                <div>图片追色</div>
+                <div>ModFlows B6</div>
+                <div><span class="status fail">失败</span></div>
+                <div>显存不足后回退失败，原始异常已保留到任务详情</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 19:53</div>
+                <div>lin_admin</div>
+                <div>模型训练</div>
+                <div>ModFlows B0</div>
+                <div><span class="status fail">失败</span></div>
+                <div>目标已分流到后端，但当前版本训练实现未开放</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 19:41</div>
+                <div>yuan_07</div>
+                <div>视频追色</div>
+                <div>Regional ModFlows</div>
+                <div><span class="status cancel">取消</span></div>
+                <div>用户主动取消，任务已停止并释放帧缓存目录</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 18:56</div>
+                <div>lin_admin</div>
+                <div>模型训练</div>
+                <div>NeuralPreset</div>
+                <div><span class="status ok">成功</span></div>
+                <div>训练完成，风格阶段权重已更新</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 17:32</div>
+                <div>kai_user</div>
+                <div>图片追色</div>
+                <div>NeuralPreset</div>
+                <div><span class="status fail">失败</span></div>
+                <div>参考图读取失败，输入格式不受支持</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 16:48</div>
+                <div>mei_studio</div>
+                <div>导出</div>
+                <div>MP4 H265</div>
+                <div><span class="status ok">成功</span></div>
+                <div>导出完成，文件已写入 videos 目录</div>
+              </div>
+              <div class="log-row">
+                <div>06-16 15:24</div>
+                <div>lin_admin</div>
+                <div>模型训练</div>
+                <div>NeuralPreset</div>
+                <div><span class="status fail">失败</span></div>
+                <div>系统磁盘剩余空间不足，训练中间权重写入失败</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail">
+            <strong>选中日志详情预览</strong>
+            <span>task_id: train_8d2f4c9a21 | 用户: lin_admin | 结果: 失败 | 原因摘要: 系统磁盘剩余空间不足，训练中间权重写入失败</span>
+            <div class="detail-grid">
+              <div class="stat">
+                <strong>耗时</strong>
+                <span>12m 24s</span>
+              </div>
+              <div class="stat">
+                <strong>训练数据</strong>
+                <span>50 张 / 3.7 MB</span>
+              </div>
+              <div class="stat">
+                <strong>资源快照</strong>
+                <span>磁盘 91.4% / 内存 78%</span>
+              </div>
+              <div class="stat">
+                <strong>原始错误</strong>
+                <span>OSError: no space left on device</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-stack">
+          <div class="panel">
+            <h3 class="side-title">失败原因排行</h3>
+            <div class="rank-list">
+              <div class="rank-item">
+                <div class="rank-copy">
+                  <em>01</em>
+                  <div>
+                    <strong>训练目录无可用图片</strong>
+                    <span>多发生在管理员修改目录但未上传样本后</span>
+                  </div>
+                </div>
+                <div class="count">12</div>
+              </div>
+              <div class="rank-item">
+                <div class="rank-copy">
+                  <em>02</em>
+                  <div>
+                    <strong>参考图读取失败</strong>
+                    <span>上传格式异常或图片损坏</span>
+                  </div>
+                </div>
+                <div class="count">8</div>
+              </div>
+              <div class="rank-item">
+                <div class="rank-copy">
+                  <em>03</em>
+                  <div>
+                    <strong>磁盘空间不足</strong>
+                    <span>导出和训练中间文件持续累积</span>
+                  </div>
+                </div>
+                <div class="count">5</div>
+              </div>
+              <div class="rank-item">
+                <div class="rank-copy">
+                  <em>04</em>
+                  <div>
+                    <strong>ModFlows 训练未开放</strong>
+                    <span>B0 / B6 目前只是后端分流入口</span>
+                  </div>
+                </div>
+                <div class="count">4</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3 class="side-title">建议动作</h3>
+            <div class="todo-list">
+              <div class="todo-item">
+                <div class="todo-copy">
+                  <em>A</em>
+                  <div>
+                    <strong>清理导出缓存</strong>
+                    <span>优先释放 videos 与 temp_lut 目录</span>
+                  </div>
+                </div>
+              </div>
+              <div class="todo-item">
+                <div class="todo-copy">
+                  <em>B</em>
+                  <div>
+                    <strong>训练前校验目录</strong>
+                    <span>空目录直接阻止启动并提示管理员</span>
+                  </div>
+                </div>
+              </div>
+              <div class="todo-item">
+                <div class="todo-copy">
+                  <em>C</em>
+                  <div>
+                    <strong>补充内存监控</strong>
+                    <span>记录失败时的系统资源快照</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

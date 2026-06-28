@@ -1,0 +1,25 @@
+# ColorChase production Caddy reverse proxy template.
+# Caddy obtains and renews HTTPS certificates automatically.
+
+colorchase.meiyoutou.top, ColorChase.meiyoutou.top {
+    encode zstd gzip
+
+    request_body {
+        max_size 300MB
+    }
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    reverse_proxy 127.0.0.1:8000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+        flush_interval -1
+    }
+}

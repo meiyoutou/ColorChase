@@ -1,0 +1,23 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.6-c148 79.163842, 2012/07/12-16:47:33        ">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/">
+   <crs:Version>14.0</crs:Version>
+   <crs:ProcessVersion>15.0</crs:ProcessVersion>
+   <crs:Exposure2012>0.50</crs:Exposure2012>
+   <crs:Contrast2012>25</crs:Contrast2012>
+   <crs:Highlights2012>-30</crs:Highlights2012>
+   <crs:Shadows2012>40</crs:Shadows2012>
+   <crs:Whites2012>10</crs:Whites2012>
+   <crs:Blacks2012>-15</crs:Blacks2012>
+   <crs:Temperature>6200</crs:Temperature>
+   <crs:Tint>12</crs:Tint>
+   <crs:Vibrance>30</crs:Vibrance>
+   <crs:Saturation>-10</crs:Saturation>
+   <crs:ToneCurvePV2012>0,0;64,58;128,128;192,202;255,255</crs:ToneCurvePV2012>
+   <crs:ToneCurvePV2012Red>0,0;128,128;255,255</crs:ToneCurvePV2012Red>
+   <crs:ToneCurvePV2012Green>0,0;64,60;192,196;255,255</crs:ToneCurvePV2012Green>
+   <crs:ToneCurvePV2012Blue>0,0;64,52;192,200;255,255</crs:ToneCurvePV2012Blue>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

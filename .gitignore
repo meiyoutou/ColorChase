@@ -1,0 +1,63 @@
+# Local launchers and machine-specific config
+start.bat
+user_config.json
+.env
+生产环境密钥.md
+
+# Databases and backups
+colorchase.db
+colorchase.db*
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv*/
+
+# Runtime storage
+storage/
+uploads/
+uploaded/
+user_assets/
+user_configs/
+videos/
+training_corpus/
+temp_train_data/
+temp_luts/
+temp_frames/
+temp_neuralpreset/
+styles/extracted/
+
+# Models and large local artifacts
+models/
+weights/
+swinb_celeba_512/
+_wheels/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs, cache and debug output
+*.log
+.cache/
+.pytest_cache/
+debug_output/

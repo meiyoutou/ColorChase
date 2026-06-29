@@ -1,14 +1,11 @@
 ﻿import os
 import json
-import hashlib
 import uuid
 import time
 import asyncio
 import tempfile
 import traceback
 import shutil
-import ctypes
-import sqlite3
 import re
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -17,13 +14,11 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Header
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse, Response
-from jose import JWTError, jwt
-from sqlalchemy import select
+from fastapi.responses import JSONResponse, FileResponse, Response
 
 from algorithms.color_transfer import transfer_color
 from algorithms.metrics import evaluate_transfer
@@ -60,13 +55,12 @@ from core.color.lut_ops import (
 from core.io.image_utils import _cv2_imread, _cv2_imread_full, _img_to_base64, _save_upload
 from core.io.lut_session import _load_lut_for_session, _save_lut_as_style_preset
 from admin_runtime_metrics import record_export, record_model_call, record_task_log, record_task_outcome, record_user_usage
-from auth import ALGORITHM, AUTH_COOKIE_NAME, SECRET_KEY
-from app.routes.projects import _derive_display_name, _read_project_snapshot, _user_profile_record, run_startup_legacy_asset_migration
+from app.routes.projects import _user_profile_record, run_startup_legacy_asset_migration
 from progress import progress_manager
 from database import async_session
 from models import User, Project
-from app.settings import ENVIRONMENT, IS_PRODUCTION, allowed_hosts, allowed_origins
-from app.security import begin_request_limits, require_local_admin_tools_enabled, ensure_upload_file_size
+from app.settings import IS_PRODUCTION, allowed_hosts, allowed_origins
+from app.security import begin_request_limits, ensure_upload_file_size
 from app.services.training_corpus import (
     TRAINING_IMAGE_EXTENSIONS,
     _archive_training_sample,
@@ -84,8 +78,6 @@ from app.routes.progress import create_progress_router
 from app.routes.styles import router as styles_router
 from app.routes.video_export import router as video_export_router
 from app.services.auth_utils import (
-    _decode_request_payload,
-    _extract_request_token,
     _get_request_user_id,
     _get_request_user_role,
     _resolve_runtime_user_id_from_request,
@@ -93,10 +85,7 @@ from app.services.auth_utils import (
 )
 from app.services.model_management import (
     _disabled_model_error,
-    _force_model_ready,
-    _load_model_management_runtime,
     _merge_public_model_management,
-    _model_key_to_algorithm,
     _resolve_depth_model_choice,
     _resolve_mask_model_choice,
     _resolve_semantic_model_choice,
@@ -111,12 +100,9 @@ from app.services.paths import (
     _runtime_temp_lut_dir,
     _runtime_upload_dir,
     _runtime_video_dir,
-    _safe_project_asset_file,
     _safe_project_bucket_dir,
-    _safe_runtime_file,
     _safe_user_asset_file,
     _save_project_image,
-    _user_asset_roots,
 )
 from app.services.task_logging import create_task_log_writer
 from app.routes.training import create_training_router
@@ -237,25 +223,15 @@ app.add_middleware(
 from config import (
     MODEL_DIR,
     BASE_DIR,
-    DEFAULT_PATHS,
     MODFLOWS_B0_CHECKPOINT,
     MODFLOWS_B6_CHECKPOINT,
     NEURALPRESET_MODEL_DIR,
     NEURALPRESET_NORM_WEIGHTS,
-    NEURALPRESET_STYLE_WEIGHTS,
     STORAGE_STYLES_EXTRACTED_DIR,
     STATIC_DIR,
     ensure_runtime_dirs,
     get_neuralpreset_weight_status,
-    get_current_runtime_path_strings,
-    iter_known_video_dirs,
-    get_upload_dir,
-    get_video_dir,
-    get_temp_lut_dir,
     get_project_assets_dir,
-    iter_known_project_asset_dirs,
-    iter_known_style_dirs,
-    iter_known_style_extracted_dirs,
     get_user_assets_dir,
     get_user_images_dir,
     get_user_profiles_dir,
@@ -294,73 +270,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if not IS_PRODUCTION:
     app.mount("/assets", StaticFiles(directory=str(USER_ASSETS_DIR)), name="assets")
 app.mount("/styles", StaticFiles(directory=str(STYLES_DIR)), name="styles")
-
-
-@app.get("/__legacy/videos/{file_path:path}")
-async def serve_video_file(file_path: str):
-    if IS_PRODUCTION and os.environ.get("COLORCHASE_ENABLE_PUBLIC_VIDEOS") != "1":
-        raise HTTPException(status_code=404, detail="File not found")
-    candidate_roots = [_runtime_video_dir(), *list(iter_known_video_dirs())]
-    tried = set()
-    for root in candidate_roots:
-        key = str(root)
-        if key in tried:
-            continue
-        tried.add(key)
-        target = _safe_runtime_file(root, file_path)
-        if target.exists() and target.is_file():
-            return FileResponse(target)
-    raise HTTPException(status_code=404, detail="File not found")
-
-
-@app.get("/__legacy/temp_luts/{file_path:path}")
-async def serve_temp_lut_preview(file_path: str):
-    target = _safe_runtime_file(_runtime_temp_lut_dir(), file_path)
-    is_preview = (
-        target.suffix.lower() in (".jpg", ".jpeg")
-        and target.name.endswith(("_result_preview.jpg", "_orig_preview.jpg"))
-    )
-    is_mask = (
-        target.suffix.lower() == ".png"
-        and target.parent.name == "masks"
-        and target.name.endswith("_mask.png")
-    )
-    is_depth = (
-        target.suffix.lower() == ".png"
-        and target.parent.name == "depth"
-        and target.name.endswith("_depth.png")
-    )
-    if (
-        not target.exists()
-        or not target.is_file()
-        or not (is_preview or is_mask or is_depth)
-    ):
-        raise HTTPException(status_code=404, detail="File not found")
-    media_type = "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
-    return FileResponse(target, media_type=media_type)
-
-
-@app.get("/__legacy/api/project_assets/{project_id}/{file_path:path}")
-async def serve_project_asset(
-    project_id: int,
-    file_path: str,
-    authorization: Optional[str] = Header(None),
-):
-    await _ensure_project_access(project_id, _get_request_user_id(authorization))
-    target = _safe_project_asset_file(project_id, file_path)
-    suffix = target.suffix.lower()
-    media_type = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-        ".gif": "image/gif",
-        ".mp4": "video/mp4",
-        ".mov": "video/quicktime",
-        ".avi": "video/x-msvideo",
-        ".json": "application/json",
-    }.get(suffix, "application/octet-stream")
-    return FileResponse(target, media_type=media_type)
 
 
 @app.get("/api/user_assets/{asset_group}/{file_path:path}")
@@ -529,152 +438,6 @@ def _apply_cached_subject_mask_if_any(target_img: np.ndarray, result_img: np.nda
     if subject_mask is None:
         return result_img
     return apply_subject_mask_blend(target_img, result_img, subject_mask, mode, strength)
-
-
-@app.post("/__legacy/api/depth/layers")
-async def api_depth_layers(
-    target_path: str = Form(...),
-    depth_model: str = Form("auto"),
-):
-    depth_choice = _resolve_depth_model_choice(depth_model)
-    resolved_target_path = _resolve_local_file_path(target_path)
-    if not resolved_target_path:
-        raise HTTPException(status_code=400, detail="目标图片不存在")
-    target_path = str(resolved_target_path)
-
-    cache_key = build_depth_cache_key(target_path, depth_choice["choice"])
-    depth_dir = _runtime_depth_dir()
-    depth_path = depth_dir / f"{cache_key}_depth.png"
-    meta_path = depth_dir / f"{cache_key}_depth.json"
-    cached = depth_path.exists()
-
-    if cached:
-        meta = {}
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    else:
-        target_img = await asyncio.to_thread(_cv2_imread, target_path, target_size=1536)
-        if target_img is None:
-            raise HTTPException(status_code=400, detail="无法读取目标图片")
-        depth, meta = await asyncio.to_thread(generate_depth_map, target_img, BASE_DIR, depth_choice["choice"])
-        await asyncio.to_thread(save_depth_png, depth, str(depth_path))
-        meta.update({
-            "cache_key": cache_key,
-            "width": int(target_img.shape[1]),
-            "height": int(target_img.shape[0]),
-        })
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    token = int(time.time() * 1000)
-    return JSONResponse({
-        "success": True,
-        "depth_id": cache_key,
-        "depth_path": str(depth_path),
-        "depth_url": f"/temp_luts/depth/{depth_path.name}?t={token}",
-        "cached": cached,
-        "model": depth_choice,
-        "meta": meta,
-    })
-
-
-@app.post("/__legacy/api/semantic/match")
-async def api_semantic_match(
-    target_path: str = Form(...),
-    reference_path: str = Form(None),
-    reference: UploadFile = File(None),
-    semantic_model: str = Form("auto"),
-):
-    semantic_choice = _resolve_semantic_model_choice(semantic_model)
-    resolved_target_path = _resolve_local_file_path(target_path)
-    if not resolved_target_path:
-        raise HTTPException(status_code=400, detail="目标图片不存在")
-    target_path = str(resolved_target_path)
-    if reference is not None and reference.filename:
-        reference_path = _save_upload(reference)
-    resolved_reference_path = _resolve_local_file_path(reference_path)
-    if not resolved_reference_path:
-        raise HTTPException(status_code=400, detail="参考图片不存在")
-    reference_path = str(resolved_reference_path)
-
-    cache_key = build_semantic_cache_key(target_path, reference_path, semantic_choice["choice"])
-    target_img = await asyncio.to_thread(_cv2_imread, target_path, target_size=1536)
-    reference_img = await asyncio.to_thread(_cv2_imread, reference_path, target_size=1536)
-    if target_img is None or reference_img is None:
-        raise HTTPException(status_code=400, detail="无法读取目标图或参考图")
-    meta = await asyncio.to_thread(summarize_semantic_matches, target_img, reference_img, semantic_choice["choice"])
-    return JSONResponse({
-        "success": True,
-        "semantic_id": cache_key,
-        "reference_path": reference_path,
-        "model": semantic_choice,
-        "meta": meta,
-    })
-
-
-@app.post("/__legacy/api/mask/subject")
-async def api_subject_mask(
-    target_path: str = Form(...),
-    mode: str = Form("subject"),
-    points_json: str = Form("[]"),
-    mask_model: str = Form("auto"),
-):
-    mask_choice = _resolve_mask_model_choice(mask_model)
-    prefer_birefnet = bool(mask_choice.get("prefer_birefnet"))
-    resolved_target_path = _resolve_local_file_path(target_path)
-    if not resolved_target_path:
-        raise HTTPException(status_code=400, detail="目标图片不存在")
-    target_path = str(resolved_target_path)
-    try:
-        points = json.loads(points_json or "[]")
-        if not isinstance(points, list):
-            points = []
-    except Exception:
-        points = []
-
-    cache_key = build_mask_cache_key(target_path, mode, points, mask_choice["choice"])
-    mask_dir = _runtime_mask_dir()
-    mask_path = mask_dir / f"{cache_key}_mask.png"
-    meta_path = mask_dir / f"{cache_key}_mask.json"
-    cached = mask_path.exists()
-
-    if cached:
-        meta = {}
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    else:
-        target_img = await asyncio.to_thread(_cv2_imread, target_path, target_size=1536)
-        if target_img is None:
-            raise HTTPException(status_code=400, detail="无法读取目标图片")
-        mask, meta = await asyncio.to_thread(
-            generate_subject_mask,
-            target_img,
-            mode,
-            points,
-            prefer_birefnet,
-            mask_choice["choice"],
-        )
-        await asyncio.to_thread(save_mask_png, mask, str(mask_path))
-        meta.update({
-            "cache_key": cache_key,
-            "width": int(target_img.shape[1]),
-            "height": int(target_img.shape[0]),
-        })
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    token = int(time.time() * 1000)
-    return JSONResponse({
-        "success": True,
-        "mask_id": cache_key,
-        "mask_path": str(mask_path),
-        "mask_url": f"/temp_luts/masks/{mask_path.name}?t={token}",
-        "cached": cached,
-        "model": mask_choice,
-        "meta": meta,
-    })
 
 
 def _make_thread_callback(task_id, progress_start, progress_end, loop):
@@ -2750,7 +2513,6 @@ async def _background_video_transfer(
             await asyncio.sleep(0.01)
 
         await asyncio.to_thread(assemble_video, frames_dir, output_path, fps=fps, audio_source=video_path)
-        import shutil
         shutil.rmtree(frames_dir, ignore_errors=True)
 
         done_msg = f"视频追色完成！平均像素差异: {avg_diff}" if avg_diff > 0 else "视频追色完成！"
@@ -2758,7 +2520,6 @@ async def _background_video_transfer(
         mark_video_task_success()
 
     except Exception as e:
-        import shutil
         try:
             if frames_dir:
                 shutil.rmtree(frames_dir, ignore_errors=True)
@@ -2786,8 +2547,6 @@ async def api_preview_upload(file: UploadFile = File(...)):
 
         try:
             import rawpy
-            import tempfile
-            import shutil
             try:
                 with rawpy.imread(filepath) as raw:
                     rgb = raw.postprocess(

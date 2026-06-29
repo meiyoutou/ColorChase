@@ -1,8 +1,10 @@
 import os
+from datetime import timedelta, timezone
 
 
 ENVIRONMENT = os.environ.get("COLORCHASE_ENV", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"prod", "production"}
+USER_SPACE_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 DEFAULT_ALLOWED_ORIGINS = (
     "https://colorchase.meiyoutou.top",

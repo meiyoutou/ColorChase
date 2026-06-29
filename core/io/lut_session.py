@@ -1,15 +1,15 @@
 import json
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import cv2
 import numpy as np
 
 from app.services.paths import _runtime_temp_lut_dir
+from app.settings import USER_SPACE_TZ
 from config import STORAGE_STYLES_EXTRACTED_DIR
 
-USER_SPACE_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
 
 

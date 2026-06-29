@@ -47,9 +47,6 @@ from config import (
     get_image_debug_dir,
     get_image_lut_dir,
     get_image_upload_dir,
-    get_temp_lut_dir,
-    get_upload_dir,
-    get_video_dir,
     get_video_frames_dir,
     get_video_result_dir,
     get_video_upload_dir,
@@ -60,6 +57,7 @@ from config import (
     iter_known_project_asset_dirs,
     iter_known_style_dirs,
 )
+from app.services.paths import _runtime_temp_lut_dir, _runtime_upload_dir, _runtime_video_dir
 from database import get_db
 from models import Asset, Project, User
 
@@ -148,18 +146,6 @@ def _runtime_video_result_dir() -> Path:
 
 def _runtime_video_frames_dir() -> Path:
     return get_video_frames_dir()
-
-
-def _runtime_temp_lut_dir() -> Path:
-    return get_temp_lut_dir()
-
-
-def _runtime_upload_dir() -> Path:
-    return get_upload_dir()
-
-
-def _runtime_video_dir() -> Path:
-    return get_video_dir()
 
 
 def _read_local_env(name: str, default: str = "") -> str:

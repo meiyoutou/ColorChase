@@ -15,6 +15,7 @@ from admin_runtime_metrics import get_monthly_user_usage, load_runtime_stats, re
 from database import async_session, get_db
 from models import User, Project, Asset
 from app.routes.auth import get_current_user
+from app.settings import USER_SPACE_TZ
 from app.security import ensure_upload_file_size
 from config import (
     BASE_DIR,
@@ -34,7 +35,6 @@ USER_LOCAL_IMAGE_DIR = get_user_images_dir()
 USER_LOCAL_REFERENCE_DIR = get_user_references_dir()
 USER_LOCAL_PROFILE_DIR = get_user_profiles_dir()
 USER_TRAINING_DIR = get_training_corpus_dir()
-USER_SPACE_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 USER_SPACE_AUTO_REFRESH_SECONDS = 60
 USER_SPACE_WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 USER_SPACE_CORE_TASK_TYPES = {"图片追色", "视频追色", "模型训练"}

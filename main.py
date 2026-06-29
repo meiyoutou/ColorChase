@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header
@@ -59,7 +59,7 @@ from app.routes.projects import _user_profile_record, run_startup_legacy_asset_m
 from progress import progress_manager
 from database import async_session
 from models import User, Project
-from app.settings import IS_PRODUCTION, allowed_hosts, allowed_origins
+from app.settings import IS_PRODUCTION, USER_SPACE_TZ, allowed_hosts, allowed_origins
 from app.security import begin_request_limits, ensure_upload_file_size
 from app.services.training_corpus import (
     TRAINING_IMAGE_EXTENSIONS,
@@ -107,9 +107,6 @@ from app.services.paths import (
 from app.services.task_logging import create_task_log_writer
 from app.routes.training import create_training_router
 from app.routes.task import create_task_router
-
-USER_SPACE_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
-
 
 @lru_cache(maxsize=1)
 def _load_neural_preset_transfer():
@@ -242,8 +239,7 @@ from config import (
 ensure_runtime_dirs()
 os.makedirs(str(MODEL_DIR), exist_ok=True)
 
-STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
-os.makedirs(str(STYLES_EXTRACTED_DIR), exist_ok=True)
+os.makedirs(str(STORAGE_STYLES_EXTRACTED_DIR), exist_ok=True)
 STYLES_DIR = BASE_DIR / "styles"
 os.makedirs(str(STYLES_DIR), exist_ok=True)
 
@@ -2263,7 +2259,7 @@ async def _background_video_transfer(
         avg_diff = 0
 
         if captured_style_id is not None:
-            style_lut_path = os.path.join(str(STYLES_EXTRACTED_DIR), captured_style_id, "lut_global.npy")
+            style_lut_path = os.path.join(str(STORAGE_STYLES_EXTRACTED_DIR), captured_style_id, "lut_global.npy")
             if not os.path.exists(style_lut_path):
                 await prog("error", 0, f"风格LUT文件不存在: {captured_style_id}")
                 mark_video_task_failure()

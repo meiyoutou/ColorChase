@@ -3,7 +3,7 @@ import hashlib
 import json
 import shutil
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -11,11 +11,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.routes.projects import _read_project_snapshot
+from app.settings import USER_SPACE_TZ
 from config import BASE_DIR, get_project_assets_dir, get_training_corpus_dir
 from database import async_session
 from models import Asset, Project, User
 
-USER_SPACE_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 TRAINING_CORPUS_DIR = get_training_corpus_dir()
 TRAINING_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 

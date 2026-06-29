@@ -1,11 +1,9 @@
 import asyncio
-import base64
 import io
 import os
 import struct
 import uuid
 import zipfile
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -15,40 +13,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.services.paths import _resolve_local_file_path, _runtime_temp_lut_dir
 from app.security import ensure_upload_file_size
 from core.color.lut_ops import _build_identity_lut, _generate_builtin_profile, _trilinear_lookup
-from core.io.loaders import load_image_bgr
+from core.io.image_utils import _cv2_imread, _img_to_base64
 from core.io.lut_session import _load_lut_for_session
 from core.render.full_render import apply_lut
 
 router = APIRouter()
-PREVIEW_MAX_SIZE = 1024
-
-
-def _cv2_imread(filepath: str, target_size: int = None, mode: str = "preview") -> np.ndarray:
-    if target_size is None and mode == "preview":
-        target_size = PREVIEW_MAX_SIZE
-    try:
-        bgr, meta = load_image_bgr(filepath, target_size=target_size, mode=mode)
-        return bgr
-    except Exception:
-        arr = np.fromfile(filepath, dtype=np.uint8)
-        if arr.size == 0:
-            return None
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is not None and target_size and max(img.shape[:2]) > target_size:
-            h, w = img.shape[:2]
-            scale = target_size / max(h, w)
-            new_w, new_h = int(w * scale), int(h * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        return img
-
-
-def _img_to_base64(img: np.ndarray, fmt=".png") -> str:
-    if fmt == ".jpg":
-        params = [cv2.IMWRITE_JPEG_QUALITY, 98]
-    else:
-        params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
-    _, buf = cv2.imencode(fmt, img, params)
-    return base64.b64encode(buf).decode("utf-8")
 
 
 def _create_minimal_dng(width=64, height=64):

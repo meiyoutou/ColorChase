@@ -3,7 +3,6 @@ import json
 import hashlib
 import uuid
 import time
-import base64
 import asyncio
 import tempfile
 import traceback
@@ -16,7 +15,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Header
@@ -59,12 +57,12 @@ from core.color.lut_ops import (
     _generate_orange_bw_lut,
     _trilinear_lookup,
 )
+from core.io.image_utils import _cv2_imread, _cv2_imread_full, _img_to_base64, _save_upload
 from core.io.lut_session import _load_lut_for_session, _save_lut_as_style_preset
 from admin_runtime_metrics import record_export, record_model_call, record_task_log, record_task_outcome, record_user_usage
 from auth import ALGORITHM, AUTH_COOKIE_NAME, SECRET_KEY
 from app.routes.projects import _derive_display_name, _read_project_snapshot, _user_profile_record, run_startup_legacy_asset_migration
 from progress import progress_manager
-from core.io.loaders import load_image_bgr
 from database import async_session
 from models import User, Project
 from app.settings import ENVIRONMENT, IS_PRODUCTION, allowed_hosts, allowed_origins
@@ -448,59 +446,6 @@ async def lifespan(_app: FastAPI):
 
 
 app.router.lifespan_context = lifespan
-
-
-def _save_upload(file: UploadFile, project_id: int = 0, bucket: str = "uploads") -> str:
-    ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
-    filename = f"{uuid.uuid4().hex}{ext}"
-    if _normalize_project_id(project_id) > 0:
-        filepath = _safe_project_bucket_dir(project_id, bucket) / filename
-    else:
-        filepath = os.path.join(str(_runtime_upload_dir()), filename)
-    content = file.file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail=f"上传文件为空: {file.filename or '未命名文件'}")
-    with open(filepath, "wb") as f:
-        f.write(content)
-    return str(filepath)
-
-
-PREVIEW_MAX_SIZE = 1024
-
-
-def _cv2_imread_full(filepath):
-    arr = np.fromfile(filepath, dtype=np.uint8)
-    if arr.size == 0:
-        return None
-    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
-
-
-def _cv2_imread(filepath: str, target_size: int = None, mode: str = "preview") -> np.ndarray:
-    if target_size is None and mode == "preview":
-        target_size = PREVIEW_MAX_SIZE
-    try:
-        bgr, meta = load_image_bgr(filepath, target_size=target_size, mode=mode)
-        return bgr
-    except Exception:
-        arr = np.fromfile(filepath, dtype=np.uint8)
-        if arr.size == 0:
-            return None
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is not None and target_size and max(img.shape[:2]) > target_size:
-            h, w = img.shape[:2]
-            scale = target_size / max(h, w)
-            new_w, new_h = int(w * scale), int(h * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        return img
-
-
-def _img_to_base64(img: np.ndarray, fmt=".png") -> str:
-    if fmt == ".jpg":
-        params = [cv2.IMWRITE_JPEG_QUALITY, 98]
-    else:
-        params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
-    _, buf = cv2.imencode(fmt, img, params)
-    return base64.b64encode(buf).decode("utf-8")
 
 
 def _runtime_mask_dir() -> Path:

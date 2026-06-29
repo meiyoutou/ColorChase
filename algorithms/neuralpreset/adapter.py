@@ -182,11 +182,8 @@ def neuralpreset_transfer(target_img, reference_img, device="cuda"):
     )
 
     if not os.path.exists(ckpt_path):
-        alt_path = r"D:\桌面\best.ckpt"
-        if os.path.exists(alt_path):
-            ckpt_path = alt_path
-        else:
-            raise FileNotFoundError(f"Checkpoint not found at {ckpt_path} or {alt_path}")
+        # Local developer-only checkpoint paths should come from config/runtime path constants in deployments.
+        raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
 
     model = _load_model(ckpt_path, device)
 

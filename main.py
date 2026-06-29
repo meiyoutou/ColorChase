@@ -862,8 +862,6 @@ async def api_apply_profile(
         tmp_path = os.path.join(str(_runtime_temp_lut_dir()), f"profile_{uuid.uuid4().hex}{lut_ext}")
         with open(tmp_path, "wb") as f:
             f.write(lut_bytes)
-        print(f"[PF3-DEBUG] file={profile_file.filename}, size={len(lut_bytes)} bytes, first 500 chars:")
-        print(lut_bytes[:500].decode('utf-8', errors='replace'))
         from core.io.lut_parser import parse_lut_file
         lut_3d = await asyncio.to_thread(parse_lut_file, tmp_path)
     else:
@@ -2304,7 +2302,8 @@ async def _background_video_transfer(
                 await prog("parse_lut", 26, "解析 LUT 文件...")
                 await asyncio.sleep(0.01)
                 from core.render.full_render import apply_lut
-                lut_bytes = open(profile_path, "rb").read()
+                with open(profile_path, "rb") as f:
+                    lut_bytes = f.read()
                 _tmp_lut_path = os.path.join(frames_dir, f"_imported_lut{os.path.splitext(profile_path)[1]}")
                 with open(_tmp_lut_path, "wb") as f:
                     f.write(lut_bytes)

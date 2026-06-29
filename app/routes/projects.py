@@ -979,7 +979,7 @@ def _task_center_items(logs, limit=6):
     items = []
     for entry in reversed(logs):
         task_type = str(entry.get("task_type") or "")
-        if task_type == "浠诲姟鎺у埗":
+        if task_type == "任务控制":
             continue
         status = str(entry.get("status") or "").lower()
         if status not in {"ok", "fail", "info", "cancel"}:

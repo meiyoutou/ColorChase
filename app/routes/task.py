@@ -115,22 +115,6 @@ def create_task_router(get_request_user_id, get_request_user_role, write_task_lo
 
     @router.post('/api/pick_folder')
     async def api_pick_folder():
-        require_local_admin_tools_enabled()
-
-        def _pick():
-            try:
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes('-topmost', True)
-                folder = filedialog.askdirectory(title='选择存储目录')
-                root.destroy()
-                return folder.replace('/', '\\') if folder else ''
-            except Exception:
-                return ''
-
-        folder = await asyncio.to_thread(_pick)
-        return JSONResponse({'path': folder})
+        return {"success": False, "message": "此功能仅支持客户端本地调用，请在本地工具中使用"}
 
     return router

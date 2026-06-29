@@ -11,10 +11,13 @@ from app.services.paths import _normalize_project_id, _runtime_upload_dir, _safe
 from core.io.loaders import load_image_bgr
 
 PREVIEW_MAX_SIZE = 1024
+ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".mp4", ".mov", ".avi"}
 
 
 def _save_upload(file: UploadFile, project_id: int = 0, bucket: str = "uploads") -> str:
     ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    if ext.lower() not in ALLOWED_EXTS:
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
     filename = f"{uuid.uuid4().hex}{ext}"
     if _normalize_project_id(project_id) > 0:
         filepath = _safe_project_bucket_dir(project_id, bucket) / filename

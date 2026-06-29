@@ -230,10 +230,13 @@ def _resolve_local_file_path(value: str) -> Optional[Path]:
                 return candidate if candidate.exists() else None
             return None
     candidate = Path(raw)
-    if not candidate.is_absolute():
-        candidate = BASE_DIR / raw
-    try:
-        resolved = candidate.resolve()
-    except Exception:
+    if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
         return None
-    return resolved if resolved.exists() else None
+    candidate = (BASE_DIR / candidate).resolve()
+    try:
+        base_resolved = BASE_DIR.resolve()
+    except Exception:
+        base_resolved = BASE_DIR
+    if candidate != base_resolved and base_resolved not in candidate.parents:
+        return None
+    return candidate if candidate.exists() else None

@@ -6,25 +6,11 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import FileResponse
 
 from app.settings import IS_PRODUCTION
-from auth import ALGORITHM, SECRET_KEY
+from app.services.auth_utils import _get_request_user_id
 from app.services.paths import _safe_project_asset_file, _safe_runtime_file
 from config import (
     iter_known_video_dirs,
 )
-from jose import JWTError, jwt
-
-
-def _get_request_user_id(authorization: Optional[str]) -> Optional[int]:
-    if not authorization:
-        return None
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        return None
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return int(payload.get("sub"))
-    except (JWTError, TypeError, ValueError):
-        return None
 
 
 def create_files_router(

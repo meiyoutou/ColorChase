@@ -74,6 +74,14 @@ from app.routes.analysis import create_analysis_router
 from app.routes.files import create_files_router
 from app.routes.model_status import create_model_status_router
 from app.routes.progress import create_progress_router
+from app.services.auth_utils import (
+    _decode_request_payload,
+    _extract_request_token,
+    _get_request_user_id,
+    _get_request_user_role,
+    _resolve_runtime_user_id_from_request,
+    _task_elapsed_ms,
+)
 from app.services.paths import (
     _ensure_project_access,
     _iter_style_extracted_roots,
@@ -325,30 +333,6 @@ def _resolve_local_file_path(value: str) -> Optional[Path]:
     except Exception:
         return None
     return resolved if resolved.exists() else None
-
-
-def _decode_request_payload(token: Optional[str]) -> Optional[dict]:
-    if not token:
-        return None
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except (JWTError, TypeError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _extract_request_token(
-    authorization: Optional[str],
-    access_token_cookie: Optional[str] = None,
-) -> Optional[str]:
-    if authorization:
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() == "bearer" and token:
-            return token
-        return None
-    if access_token_cookie:
-        return access_token_cookie
-    return None
 
 
 def _load_model_management_runtime():
@@ -613,20 +597,6 @@ async def serve_user_asset(
         ".json": "application/json",
     }.get(suffix, "application/octet-stream")
     return FileResponse(target, media_type=media_type)
-
-
-def _resolve_runtime_user_id_from_request(request: Request) -> Optional[int]:
-    token = _extract_request_token(
-        request.headers.get("authorization"),
-        request.cookies.get(AUTH_COOKIE_NAME),
-    )
-    payload = _decode_request_payload(token)
-    if not payload:
-        return None
-    try:
-        return int(payload.get("sub"))
-    except (TypeError, ValueError):
-        return None
 
 
 @app.middleware("http")
@@ -1137,32 +1107,6 @@ async def _run_training_task(task_id: str, stage: str, image_dir: str, epochs: i
                 duration_ms=int((time.time() - start_time) * 1000),
                 meta={"stage": stage, "epochs": epochs, "batch_size": batch_size, "lr": lr},
             )
-def _get_request_user_id(authorization: Optional[str]) -> Optional[int]:
-    payload = _decode_request_payload(_extract_request_token(authorization))
-    if not payload:
-        return None
-    try:
-        return int(payload.get("sub"))
-    except (TypeError, ValueError):
-        return None
-
-
-def _get_request_user_role(authorization: Optional[str]) -> str:
-    payload = _decode_request_payload(_extract_request_token(authorization))
-    if not payload:
-        return ""
-    return str(payload.get("role") or "")
-
-
-def _task_elapsed_ms(started_at: Optional[float]) -> Optional[int]:
-    if started_at is None:
-        return None
-    try:
-        return int(max(0, (time.time() - float(started_at)) * 1000))
-    except (TypeError, ValueError):
-        return None
-
-
 def apply_pro_adjust(original_bgr, stylized_bgr, alpha=1.0, exposure=0.0, contrast=0.0,
                      highlight=0.0, shadow=0.0, vibrance=0.0):
     blended = (original_bgr.astype(np.float32) * (1.0 - alpha) + stylized_bgr.astype(np.float32) * alpha).clip(0, 255)

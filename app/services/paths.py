@@ -2,6 +2,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -10,9 +11,11 @@ from sqlalchemy import select
 
 from app.settings import IS_PRODUCTION
 from config import (
+    BASE_DIR,
     get_project_assets_dir,
     get_temp_lut_dir,
     get_upload_dir,
+    get_user_assets_dir,
     get_user_images_dir,
     get_user_profiles_dir,
     get_user_references_dir,
@@ -179,3 +182,58 @@ def _safe_runtime_file(root: Path, file_path: str) -> Path:
     if candidate != root and root not in candidate.parents:
         raise HTTPException(status_code=404, detail="File not found")
     return candidate
+
+
+def _resolve_local_file_path(value: str) -> Optional[Path]:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw or raw.startswith(("data:", "blob:", "http://", "https://")):
+        return None
+    parsed = urlparse(raw)
+    route_path = (parsed.path or raw).split("?", 1)[0].replace("\\", "/")
+    for prefix in ("/api/project_assets/", "/assets/projects/"):
+        if route_path.startswith(prefix):
+            rest = route_path[len(prefix):].strip("/")
+            parts = rest.split("/", 1)
+            if len(parts) != 2 or not parts[0].isdigit():
+                return None
+            try:
+                return _safe_project_asset_file(int(parts[0]), parts[1])
+            except HTTPException:
+                return None
+    if route_path.startswith("/api/user_assets/"):
+        rest = route_path[len("/api/user_assets/"):].strip("/")
+        parts = rest.split("/", 1)
+        if len(parts) != 2:
+            return None
+        try:
+            return _safe_user_asset_file(parts[0], parts[1])
+        except HTTPException:
+            return None
+    route_roots = {
+        "/assets/": get_user_assets_dir(),
+        "/videos/": _runtime_video_dir(),
+        "/temp_luts/": _runtime_temp_lut_dir(),
+    }
+    for prefix, root in route_roots.items():
+        if route_path.startswith(prefix):
+            relative = route_path[len(prefix):].strip("/")
+            if not relative:
+                return None
+            candidate = (root / Path(relative)).resolve()
+            try:
+                root_resolved = root.resolve()
+            except Exception:
+                root_resolved = root
+            if candidate == root_resolved or root_resolved in candidate.parents:
+                return candidate if candidate.exists() else None
+            return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = BASE_DIR / raw
+    try:
+        resolved = candidate.resolve()
+    except Exception:
+        return None
+    return resolved if resolved.exists() else None

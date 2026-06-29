@@ -52,6 +52,14 @@ from algorithms.subject_mask import (
     load_mask_file,
     save_mask_png,
 )
+from core.color.lut_ops import (
+    apply_pro_adjust,
+    _build_identity_lut,
+    _generate_builtin_profile,
+    _generate_orange_bw_lut,
+    _trilinear_lookup,
+)
+from core.io.lut_session import _load_lut_for_session, _save_lut_as_style_preset
 from admin_runtime_metrics import record_export, record_model_call, record_task_log, record_task_outcome, record_user_usage
 from auth import ALGORITHM, AUTH_COOKIE_NAME, SECRET_KEY
 from app.routes.projects import _derive_display_name, _read_project_snapshot, _user_profile_record, run_startup_legacy_asset_migration
@@ -1107,183 +1115,6 @@ async def _run_training_task(task_id: str, stage: str, image_dir: str, epochs: i
                 duration_ms=int((time.time() - start_time) * 1000),
                 meta={"stage": stage, "epochs": epochs, "batch_size": batch_size, "lr": lr},
             )
-def apply_pro_adjust(original_bgr, stylized_bgr, alpha=1.0, exposure=0.0, contrast=0.0,
-                     highlight=0.0, shadow=0.0, vibrance=0.0):
-    blended = (original_bgr.astype(np.float32) * (1.0 - alpha) + stylized_bgr.astype(np.float32) * alpha).clip(0, 255)
-    lab = cv2.cvtColor(blended.astype(np.uint8), cv2.COLOR_BGR2LAB).astype(np.float32)
-
-    if exposure != 0.0:
-        l = lab[:, :, 0] + exposure * 100.0
-        lab[:, :, 0] = np.clip(l, 0, 255)
-
-    if contrast != 0.0 or highlight != 0.0 or shadow != 0.0:
-        l = lab[:, :, 0] / 255.0
-        l_out = l.copy()
-
-        if contrast != 0.0:
-            if contrast > 0:
-                l_out = l + contrast * 0.8 * (l - 0.5) * (1.0 - (l - 0.5) * (l - 0.5) * 4.0)
-            else:
-                l_mean = l.mean()
-                l_out = l * (1.0 + contrast) + l_mean * (-contrast)
-
-        if highlight != 0.0:
-            mask = np.clip((l - 0.5) * 2.0, 0, 1) ** 2
-            l_out = l_out + highlight * 0.15 * mask
-
-        if shadow != 0.0:
-            mask = np.clip((0.5 - l) * 2.0, 0, 1) ** 2
-            l_out = l_out + shadow * 0.15 * mask
-
-        lab[:, :, 0] = np.clip(l_out, 0.0, 1.0) * 255.0
-
-    if vibrance != 0.0:
-        scale = 1.0 + vibrance
-        a = lab[:, :, 1] - 128.0
-        b = lab[:, :, 2] - 128.0
-        sat = np.hypot(a, b) + 1e-8
-        saturation_ratio = np.clip(1.0 / (sat + 1.0), 0.0, 1.0)
-        vib_scale = scale * (1.0 - saturation_ratio) + saturation_ratio
-        lab[:, :, 1] = np.clip(a * vib_scale + 128.0, 0, 255)
-        lab[:, :, 2] = np.clip(b * vib_scale + 128.0, 0, 255)
-
-    lab = np.clip(lab, 0, 255).astype(np.uint8)
-    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-
-def _generate_orange_bw_lut(size=33):
-    presets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets")
-    os.makedirs(presets_dir, exist_ok=True)
-    cache_path = os.path.join(presets_dir, "orange_bw.npy")
-
-    if os.path.exists(cache_path):
-        return np.load(cache_path)
-
-    from core.color.bw_orange_filter import apply_orange_bw_filter
-
-    grid = np.linspace(0, 255, size).astype(np.uint8)
-    lut = np.zeros((size, size, size, 3), dtype=np.float32)
-    patch_size = 8
-
-    for i in range(size):
-        r_val = grid[i]
-        batch_h = size * size
-        img = np.zeros((batch_h * patch_size, patch_size, 3), dtype=np.uint8)
-        idx = 0
-        for j in range(size):
-            g_val = grid[j]
-            for k in range(size):
-                b_val = grid[k]
-                y0 = idx * patch_size
-                y1 = y0 + patch_size
-                img[y0:y1, :, 2] = r_val
-                img[y0:y1, :, 1] = g_val
-                img[y0:y1, :, 0] = b_val
-                idx += 1
-
-        result = apply_orange_bw_filter(img, strength=1.0).astype(np.float32) / 255.0
-
-        idx = 0
-        for j in range(size):
-            for k in range(size):
-                y0 = idx * patch_size
-                y1 = y0 + patch_size
-                patch_result = result[y0:y1, :, :]
-                mean_color = patch_result.mean(axis=(0, 1))
-                lut[i, j, k] = mean_color
-                idx += 1
-
-    np.save(cache_path, lut)
-    print(f"[Preset] orange_bw LUT cached to {cache_path}")
-    return lut
-
-
-def _generate_builtin_profile(name: str) -> np.ndarray:
-    size = 33
-    grid = np.linspace(0, 1, size)
-
-    if name == "bw":
-        lut = np.zeros((size, size, size, 3), dtype=np.float32)
-        for i in range(size):
-            for j in range(size):
-                for k in range(size):
-                    gray = 0.299 * grid[i] + 0.587 * grid[j] + 0.114 * grid[k]
-                    lut[i, j, k] = [gray, gray, gray]
-        return lut
-    elif name == "warm":
-        lut = np.zeros((size, size, size, 3), dtype=np.float32)
-        for i in range(size):
-            for j in range(size):
-                for k in range(size):
-                    r = min(1.0, grid[i] * 1.12)
-                    g = grid[j] * 0.92
-                    b = grid[k] * 0.78
-                    lut[i, j, k] = [r, g, b]
-        return lut
-    elif name == "cool":
-        lut = np.zeros((size, size, size, 3), dtype=np.float32)
-        for i in range(size):
-            for j in range(size):
-                for k in range(size):
-                    r = grid[i] * 0.82
-                    g = grid[j] * 0.96
-                    b = min(1.0, grid[k] * 1.10)
-                    lut[i, j, k] = [r, g, b]
-        return lut
-    elif name == "orange_bw":
-        return _generate_orange_bw_lut(size)
-    else:
-        return _build_identity_lut(size)
-
-
-def _build_identity_lut(size=33):
-    lut = np.zeros((size, size, size, 3), dtype=np.float32)
-    grid = np.linspace(0, 1, size)
-    for i in range(size):
-        lut[i, :, :, 0] = grid[i]
-        lut[:, i, :, 1] = grid[i]
-        lut[:, :, i, 2] = grid[i]
-    return lut
-
-
-def _save_lut_as_style_preset(lut_3d: np.ndarray, thumbnail_img, source_label: str = "DNCM LUT") -> dict:
-    style_id = "dncm_" + datetime.now(USER_SPACE_TZ).strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
-    style_dir = STYLES_EXTRACTED_DIR / style_id
-    style_dir.mkdir(parents=True, exist_ok=True)
-
-    lut_path = style_dir / "lut_global.npy"
-    np.save(lut_path, lut_3d.astype(np.float32))
-
-    thumb_path = style_dir / "thumbnail.jpg"
-    try:
-        preview = thumbnail_img
-        if preview is not None:
-            h, w = preview.shape[:2]
-            scale = min(1.0, 360.0 / max(h, w))
-            if scale < 1.0:
-                preview = cv2.resize(preview, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-            cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 88])[1].tofile(str(thumb_path))
-    except Exception as exc:
-        print(f"[Style Preset] thumbnail save failed: {exc}")
-
-    style_name = f"{source_label} {datetime.now(USER_SPACE_TZ).strftime('%m-%d %H:%M')}"
-    ccs_path = style_dir / "style.ccs"
-    ccs_path.write_text(json.dumps({
-        "name": style_name,
-        "camera": "ColorChase",
-        "source": source_label,
-        "created_at": datetime.now(USER_SPACE_TZ).isoformat(),
-        "lut_file": "lut_global.npy",
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    return {
-        "id": style_id,
-        "name": style_name,
-        "path": str(lut_path),
-        "thumbnail": f"/styles/extracted/{style_id}/thumbnail.jpg" if thumb_path.exists() else "",
-    }
-
-
 ALL_ALGORITHMS = {
     "reinhard": {
         "name": "经典追色-快速",
@@ -1829,55 +1660,6 @@ async def api_apply_style(
         "result_b64": f"data:image/png;base64,{result_b64}",
         "original_b64": f"data:image/png;base64,{original_b64}",
     })
-
-
-def _trilinear_lookup(lut: np.ndarray, values: np.ndarray) -> np.ndarray:
-    size = lut.shape[0]
-    coords = values * (size - 1)
-    coords = np.clip(coords, 0, size - 1)
-
-    x0 = np.floor(coords[:, 0]).astype(np.int32)
-    y0 = np.floor(coords[:, 1]).astype(np.int32)
-    z0 = np.floor(coords[:, 2]).astype(np.int32)
-    x1 = np.clip(x0 + 1, 0, size - 1)
-    y1 = np.clip(y0 + 1, 0, size - 1)
-    z1 = np.clip(z0 + 1, 0, size - 1)
-
-    dx = (coords[:, 0] - x0).reshape(-1, 1)
-    dy = (coords[:, 1] - y0).reshape(-1, 1)
-    dz = (coords[:, 2] - z0).reshape(-1, 1)
-
-    c000 = lut[x0, y0, z0]
-    c100 = lut[x1, y0, z0]
-    c010 = lut[x0, y1, z0]
-    c110 = lut[x1, y1, z0]
-    c001 = lut[x0, y0, z1]
-    c101 = lut[x1, y0, z1]
-    c011 = lut[x0, y1, z1]
-    c111 = lut[x1, y1, z1]
-
-    c00 = c000 * (1 - dx) + c100 * dx
-    c01 = c001 * (1 - dx) + c101 * dx
-    c10 = c010 * (1 - dx) + c110 * dx
-    c11 = c011 * (1 - dx) + c111 * dx
-
-    c0 = c00 * (1 - dy) + c10 * dy
-    c1 = c01 * (1 - dy) + c11 * dy
-
-    return c0 * (1 - dz) + c1 * dz
-
-
-def _load_lut_for_session(session_id: str) -> np.ndarray:
-    if os.path.exists(session_id) and session_id.endswith('.npy'):
-        return np.load(session_id)
-    session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
-    lut_global = os.path.join(session_dir, "lut_global.npy")
-    if os.path.exists(lut_global):
-        return np.load(lut_global)
-    lut_direct = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-    if os.path.exists(lut_direct):
-        return np.load(lut_direct)
-    raise FileNotFoundError(f"LUT not found for session {session_id}")
 
 
 @app.post("/api/merge_luts")

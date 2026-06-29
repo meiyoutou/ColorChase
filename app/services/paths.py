@@ -10,7 +10,6 @@ from sqlalchemy import select
 
 from app.settings import IS_PRODUCTION
 from config import (
-    BASE_DIR,
     get_project_assets_dir,
     get_temp_lut_dir,
     get_upload_dir,

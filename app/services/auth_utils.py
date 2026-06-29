@@ -1,7 +1,7 @@
 import time
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from jose import JWTError, jwt
 
 from auth import ALGORITHM, AUTH_COOKIE_NAME, SECRET_KEY

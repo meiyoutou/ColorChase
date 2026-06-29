@@ -1,4 +1,5 @@
 ﻿import asyncio
+from json import JSONDecodeError
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -102,7 +103,10 @@ def create_task_router(get_request_user_id, get_request_user_role, write_task_lo
     async def api_save_user_config(request: Request):
         from config import save_user_config
         require_local_admin_tools_enabled()
-        data = await request.json()
+        try:
+            data = await request.json()
+        except JSONDecodeError:
+            raise HTTPException(status_code=400, detail='Request body must be valid JSON')
         valid_keys = set(DEFAULT_PATHS.keys())
         filtered = {k: v for k, v in data.items() if k in valid_keys and v and isinstance(v, str)}
         save_user_config(filtered)

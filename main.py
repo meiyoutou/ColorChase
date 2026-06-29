@@ -60,7 +60,11 @@ from progress import progress_manager
 from database import async_session
 from models import User, Project
 from app.settings import IS_PRODUCTION, USER_SPACE_TZ, allowed_hosts, allowed_origins
-from app.security import begin_request_limits, ensure_upload_file_size
+from app.security import (
+    DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES as IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
+    begin_request_limits,
+    ensure_upload_file_size,
+)
 from app.services.training_corpus import (
     TRAINING_IMAGE_EXTENSIONS,
     _archive_training_sample,
@@ -1099,7 +1103,7 @@ async def api_transfer(
         reference_path = str(resolved_reference_path)
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
     elif reference is not None and reference.filename:
-        ensure_upload_file_size(reference, 10 * 1024 * 1024, label="参考图")
+        ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
         reference_path = _save_upload(reference, project_id=project_id, bucket="reference")
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
 
@@ -2082,7 +2086,7 @@ async def api_video_transfer(
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
     elif reference is not None and reference.filename:
-        ensure_upload_file_size(reference, 10 * 1024 * 1024, label="参考图")
+        ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
         reference_path = _save_upload(reference, project_id=project_id, bucket="video_reference")
     else:
         reference_path = None
@@ -2530,6 +2534,9 @@ async def _background_video_transfer(
 async def api_preview_upload(file: UploadFile = File(...)):
     ensure_upload_file_size(file, 10 * 1024 * 1024, label="预览文件")
     ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".jpg"
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".mp4", ".mov", ".avi"}
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
     filename = f"preview_{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(str(_runtime_upload_dir()), filename)
     content = await file.read()

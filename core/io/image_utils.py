@@ -1,6 +1,7 @@
 import base64
 import os
 import uuid
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -27,7 +28,7 @@ def _save_upload(file: UploadFile, project_id: int = 0, bucket: str = "uploads")
     return str(filepath)
 
 
-def _cv2_imread_full(filepath):
+def _cv2_imread_full(filepath) -> Optional[np.ndarray]:
     arr = np.fromfile(filepath, dtype=np.uint8)
     if arr.size == 0:
         return None

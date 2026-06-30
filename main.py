@@ -764,7 +764,7 @@ async def api_upload_batch(
             continue
         if getattr(file, "size", None) == 0:
             raise HTTPException(status_code=400, detail=f"上传文件为空: {file.filename}")
-        ensure_upload_file_size(file, 10 * 1024 * 1024, label="普通上传文件")
+        ensure_upload_file_size(file, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="原图上传文件")
         ext = os.path.splitext(file.filename)[1] or ".jpg"
         uid = uuid.uuid4().hex
         save_name = f"{uid}{ext}"

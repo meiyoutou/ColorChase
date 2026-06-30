@@ -54,6 +54,7 @@ AI_LIMIT_PATHS = {
 }
 UPLOAD_RATE_LIMIT_PATHS = UPLOAD_LIMIT_PATHS | VIDEO_UPLOAD_LIMIT_PATHS
 IMAGE_ORIGINAL_UPLOAD_LIMIT_PATHS = {
+    "/api/upload_batch",
     "/api/transfer",
     "/api/video_transfer",
     "/api/export_video",
@@ -220,13 +221,13 @@ async def begin_request_limits(request: Request, user_id: Optional[int]) -> Requ
     path = request.url.path
 
     if _is_upload_limited_path(path):
-        if _is_video_upload_limited_path(path) or path in IMAGE_ORIGINAL_UPLOAD_LIMIT_PATHS:
-            max_bytes = int_env("COLORCHASE_VIDEO_UPLOAD_MAX_BYTES", DEFAULT_VIDEO_UPLOAD_MAX_BYTES)
-        elif _is_image_original_upload_path(path):
+        if _is_image_original_upload_path(path):
             max_bytes = int_env(
                 "COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES",
                 DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
             )
+        elif _is_video_upload_limited_path(path):
+            max_bytes = int_env("COLORCHASE_VIDEO_UPLOAD_MAX_BYTES", DEFAULT_VIDEO_UPLOAD_MAX_BYTES)
         else:
             max_bytes = int_env("COLORCHASE_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
         try:

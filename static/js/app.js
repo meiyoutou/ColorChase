@@ -9,6 +9,10 @@ function getAuthHeaders(extraHeaders) {
     return headers;
 }
 
+// 安全注意：Token 存储在 localStorage 有 XSS 窃取风险
+// 生产环境建议改用 HttpOnly Cookie（后端已设置）
+// 前端通过 credentials:'include' 自动携带 Cookie
+
 const ALGO_NAMES = {
     reinhard: '经典追色-快速', histogram: '直方图追色-精确',
     luminance_partition: '亮度分区追色-自然', neural_preset: '神经预设追色-需训练',
@@ -1426,11 +1430,23 @@ function renderGallery() {
             if (isCurrentEdit) cls += ' current-edit';
             div.className = cls;
 
-            var markerHtml = isCurrentEdit ? '<div class="current-edit-marker"></div>' : '';
+            if (isCurrentEdit) {
+                var marker = document.createElement('div');
+                marker.className = 'current-edit-marker';
+                div.appendChild(marker);
+            }
 
-            div.innerHTML = markerHtml +
-                '<img src="' + (img.thumbnailUrl || img.sourcePath) + '" alt="' + img.name + '" class="gallery-thumb" draggable="false">' +
-                '<span class="gallery-status ' + (img.status || '') + '">' + (img.status === 'processing' ? '\u23F3' : img.status === 'done' ? '\u2713' : '') + '</span>';
+            var thumb = document.createElement('img');
+            thumb.src = img.thumbnailUrl || img.sourcePath || '';
+            thumb.alt = img.name || '';
+            thumb.className = 'gallery-thumb';
+            thumb.draggable = false;
+            div.appendChild(thumb);
+
+            var status = document.createElement('span');
+            status.className = 'gallery-status ' + (img.status || '');
+            status.textContent = (img.status === 'processing' ? '\u23F3' : img.status === 'done' ? '\u2713' : '');
+            div.appendChild(status);
 
             var clickTimer = null;
 

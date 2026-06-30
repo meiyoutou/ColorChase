@@ -100,6 +100,7 @@ from app.services.paths import (
     _normalize_project_id,
     _project_bucket_file,
     _resolve_local_file_path,
+    _safe_session_dir,
     _resolve_style_extracted_file,
     _runtime_temp_lut_dir,
     _runtime_upload_dir,
@@ -848,8 +849,7 @@ async def api_apply_profile(
 
     session_dir = None
     if session_id:
-        session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
-        os.makedirs(session_dir, exist_ok=True)
+        session_dir = str(_safe_session_dir(session_id))
 
     if profile_builtin:
         record_model_call("neural_preset")
@@ -874,8 +874,7 @@ async def api_apply_profile(
 
     if not session_dir:
         profile_session_id = uuid.uuid4().hex
-        session_dir = os.path.join(str(_runtime_temp_lut_dir()), profile_session_id)
-        os.makedirs(session_dir, exist_ok=True)
+        session_dir = str(_safe_session_dir(profile_session_id))
 
     lut_save_path = os.path.join(session_dir, "lut_global.npy")
     if os.path.exists(lut_save_path):
@@ -2708,7 +2707,7 @@ async def api_download_full(
     has_merged = bool(merged_session_id)
     merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
 
-    session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id) if session_id else None
+    session_dir = str(_safe_session_dir(session_id)) if session_id else None
     lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)
@@ -2933,7 +2932,7 @@ async def api_render_single(
 
     has_merged = bool(merged_session_id)
     merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
-    session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id) if session_id else None
+    session_dir = str(_safe_session_dir(session_id)) if session_id else None
     lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)

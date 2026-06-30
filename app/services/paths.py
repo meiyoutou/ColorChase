@@ -240,3 +240,15 @@ def _resolve_local_file_path(value: str) -> Optional[Path]:
     if candidate != base_resolved and base_resolved not in candidate.parents:
         return None
     return candidate if candidate.exists() else None
+
+
+def _safe_session_dir(session_id: str) -> Path:
+    r"""Validate session_id and return safe subdirectory under temp/luts.
+    Rejects path traversal attempts (.., /, \) and non-conforming IDs.
+    """
+    if not re.match(r"^[A-Za-z0-9_-]{8,64}$", session_id):
+        raise HTTPException(status_code=400, detail="无效的 session_id 格式")
+
+    safe_dir = _runtime_temp_lut_dir() / session_id
+    safe_dir.mkdir(parents=True, exist_ok=True)
+    return safe_dir

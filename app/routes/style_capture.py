@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import shutil
 import tempfile
@@ -128,6 +129,8 @@ async def api_capture_style(
 
     style_name = os.path.splitext(raw_file.filename)[0] if raw_file.filename else f"style_{uuid.uuid4().hex[:8]}"
     style_name = style_name.replace(" ", "_")
+    style_name = re.sub(r'[^\w\u4e00-\u9fa5.-]', '_', style_name)
+    style_name = style_name.strip('._-') or 'untitled'
 
     camera_info = "Unknown"
     with tempfile.TemporaryDirectory() as tmp_dir2:

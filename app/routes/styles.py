@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from admin_runtime_metrics import record_model_call, record_task_log, record_user_usage
 from app.routes.projects import _user_profile_record
 from app.services.auth_utils import _get_request_user_id, _get_request_user_role
-from app.services.paths import _iter_style_extracted_roots, _resolve_style_dir, _runtime_temp_lut_dir
+from app.services.paths import _iter_style_extracted_roots, _resolve_style_dir, _runtime_temp_lut_dir, _safe_session_dir
 from app.services.task_logging import create_task_log_writer
 from config import BASE_DIR
 from core.io.image_utils import _cv2_imread, _img_to_base64
@@ -122,9 +122,13 @@ async def api_apply_style(
 
     style_lut = await asyncio.to_thread(np.load, style_lut_path)
 
-    new_session_id = session_id or uuid.uuid4().hex
+    if session_id:
+        _safe_session_dir(session_id)
+        new_session_id = session_id
+    else:
+        new_session_id = uuid.uuid4().hex
+        _safe_session_dir(new_session_id)
     session_dir = os.path.join(str(_runtime_temp_lut_dir()), new_session_id)
-    os.makedirs(session_dir, exist_ok=True)
 
     if session_id:
         ai_lut_path = os.path.join(session_dir, "lut_global.npy")

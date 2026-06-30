@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -14,7 +15,9 @@ STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
 
 
 def _load_lut_for_session(session_id: str) -> np.ndarray:
-    if os.path.exists(session_id) and session_id.endswith('.npy'):
+    if not re.match(r'^[A-Za-z0-9_-]{8,64}$', session_id):
+        pass
+    elif os.path.exists(session_id) and session_id.endswith('.npy'):
         return np.load(session_id)
     session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
     lut_global = os.path.join(session_dir, "lut_global.npy")

@@ -586,7 +586,7 @@ function buildTrainingCorpusDataTypesPanel(modelData) {
 
 function buildTrainingCorpusStatsStrip(modelData) {
     var html = '<div class="admin-surface-card admin-training-corpus-stats-section">';
-    html += '<div class="admin-card-head"><div><div class="admin-card-title">训练样本副本数据量</div><div class="admin-card-subtitle">按邮箱隔离保存的训练语料统计</div></div></div>';
+    html += '<div class="admin-card-head"><div><div class="admin-card-title">训练样本副本数据量</div><div class="admin-card-subtitle">按邮箱隔离保存的训练语料统计</div></div><div class="admin-card-path">' + escapeHtml(modelData.training_corpus_path || '--') + '</div></div>';
     html += '<div class="admin-corpus-stat-strip">';
     getTrainingCorpusStatRows(modelData).forEach(function(row) {
         html += '<div class="admin-corpus-stat"><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>';
@@ -679,9 +679,19 @@ function renderAdminSpaceDashboard() {
     function formatCompactDelta(delta, unit) {
         if (delta === null || delta === undefined || delta === '') return '--';
         var num = Number(delta);
+        if (!isFinite(num)) return '--';
         var sign = num > 0 ? '+' : (num < 0 ? '-' : '');
         var value = Math.abs(num).toFixed(1).replace('.0', '');
+        if (value === '0') return '+0' + (unit || '');
         return sign + value + (unit || '');
+    }
+
+    function getCardDeltaText(item) {
+        if (!item) return '--';
+        if (item.delta_text !== undefined && item.delta_text !== null && item.delta_text !== '') {
+            return item.delta_text;
+        }
+        return formatCompactDelta(item.delta, item.unit || '');
     }
 
     function formatPercent(value) {
@@ -1082,7 +1092,7 @@ function runAdminTaskLogsBackfill() {
 
     var logLines = [
         '近 7 日活跃用户 ' + (users.active_7d || 0) + ' / ' + (users.total || 0) + '，活跃占比 ' + formatPercent(users.total ? users.active_7d / users.total * 100 : 0) + '。',
-        '任务完成率 ' + formatPercent(taskStats.task_completion_rate || 0) + '，任务成功率 ' + formatPercent(taskStats.task_success_rate || 0) + '，任务失败率 ' + formatPercent(taskStats.task_failure_rate || 0) + '。',
+        '图片任务完成率 ' + formatPercent(taskStats.image_task_completion_rate || 0) + '（成功 ' + (taskStats.image_task_success || 0) + ' / ' + (taskStats.image_task_total || 0) + '），视频任务完成率 ' + formatPercent(taskStats.video_task_completion_rate || 0) + '（成功 ' + (taskStats.video_task_success || 0) + ' / ' + (taskStats.video_task_total || 0) + '）。',
         '模型就绪 ' + (modelData.ready_models || 0) + ' / ' + (modelData.total_models || 0) + '，累计模型调用 ' + (taskStats.model_calls_total || 0) + ' 次。'
     ];
 
@@ -1106,13 +1116,13 @@ function runAdminTaskLogsBackfill() {
         html += '<div class="admin-task-card ' + cardClasses[index % cardClasses.length] + '">';
         html += '<div class="admin-task-index">' + String(index + 1).padStart(2, '0') + '</div>';
         html += '<div class="admin-task-title">' + escapeHtml(item.label || '--') + '</div>';
-        html += '<div class="admin-task-value-row"><div class="admin-task-value">' + escapeHtml(item.display_value || String(item.value || 0) + (item.unit || '')) + '</div><div class="admin-task-delta">' + escapeHtml(formatCompactDelta(item.delta, item.unit || '')) + '</div></div>';
+        html += '<div class="admin-task-value-row"><div class="admin-task-value">' + escapeHtml(item.display_value || String(item.value || 0) + (item.unit || '')) + '</div><div class="admin-task-delta">' + escapeHtml(getCardDeltaText(item)) + '</div></div>';
         html += '<div class="admin-task-sparkline">' + buildSparkline(item.sparkline || [], sparkColors[index % sparkColors.length]) + '</div>';
         html += '</div>';
     });
     html += '</div></div>';
     html += '<div class="admin-surface-card compact admin-health-card">';
-    html += '<div class="admin-card-head"><div><div class="admin-card-title">系统运行健康程度</div><div class="admin-card-subtitle">任务完成率、模型就绪率、任务成功率</div></div><span class="admin-chip">Today</span></div>';
+    html += '<div class="admin-card-head"><div><div class="admin-card-title">系统运行健康程度</div><div class="admin-card-subtitle">图片任务完成率、视频任务完成率、模型就绪率（聚合全用户）</div></div><span class="admin-chip">Today</span></div>';
     html += '<div class="admin-ring-wrap">';
     html += '<div class="admin-ring-canvas">' + buildRingSvg();
     html += '<div class="admin-ring-center-copy"><div class="admin-ring-total">' + escapeHtml(formatPercent(healthScore)) + '</div><div class="admin-ring-caption">' + escapeHtml(meta.health_score_label || '系统健康度') + '</div><div class="admin-ring-live">Live</div></div></div>';
@@ -1740,7 +1750,7 @@ function renderDashboardShell(dashboardData, options) {
         html += '<div class="admin-task-card ' + cardClasses[index % cardClasses.length] + '">';
         html += '<div class="admin-task-index">' + String(index + 1).padStart(2, '0') + '</div>';
         html += '<div class="admin-task-title">' + escapeHtml(item.label || '--') + '</div>';
-        html += '<div class="admin-task-value-row"><div class="admin-task-value">' + escapeHtml(item.display_value || String(item.value || 0) + (item.unit || '')) + '</div><div class="admin-task-delta">' + escapeHtml(formatCompactDelta(item.delta, item.unit || '')) + '</div></div>';
+        html += '<div class="admin-task-value-row"><div class="admin-task-value">' + escapeHtml(item.display_value || String(item.value || 0) + (item.unit || '')) + '</div><div class="admin-task-delta">' + escapeHtml(getCardDeltaText(item)) + '</div></div>';
         html += '<div class="admin-task-sparkline">' + buildSparkline(item.sparkline || [], sparkColors[index % sparkColors.length]) + '</div>';
         html += '</div>';
     });
@@ -2747,6 +2757,10 @@ function rNavigate(viewName) {
     }
     if (viewName === 'workspace') {
         clearAdminDashboardRefresh();
+        // 切换项目前清空工作区状态，避免上一个项目的帧缩略图/参考图/调整基准残留
+        if (typeof clearWorkspaceState === 'function') {
+            clearWorkspaceState();
+        }
         var isVideo = window._pendingProjectType === 'video';
         switchWorkspaceMode(isVideo);
         if (window.currentProjectId && typeof loadSnapshot === 'function') {

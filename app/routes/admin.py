@@ -26,6 +26,7 @@ from config import (
     STORAGE_IMAGE_DEBUG_DIR,
     STORAGE_IMAGE_UPLOADS_DIR,
     STORAGE_LOGS_DIR,
+    STORAGE_DIR,
     STORAGE_PROJECTS_DIR,
     iter_known_style_dirs,
     iter_known_training_dirs,
@@ -242,10 +243,17 @@ def _weekly_snapshot_context(snapshot):
     weekly = snapshot.get("weekly_metrics", {})
     if not isinstance(weekly, dict):
         weekly = {}
+    previous_key = _admin_week_key(previous_week_start)
+    previous = weekly.get(previous_key, {})
+    if not previous:
+        earlier_keys = [key for key in weekly.keys() if key < _admin_week_key(week_start)]
+        if earlier_keys:
+            previous_key = sorted(earlier_keys)[-1]
+            previous = weekly.get(previous_key, {})
     return {
         "week_key": _admin_week_key(week_start),
-        "previous_week_key": _admin_week_key(previous_week_start),
-        "previous": weekly.get(_admin_week_key(previous_week_start), {}),
+        "previous_week_key": previous_key,
+        "previous": previous,
         "weekly": weekly,
     }
 
@@ -314,11 +322,12 @@ def _current_model_summary():
     }
 
 
-def _health_score(task_completion_rate, model_ready_rate, task_success_rate):
+def _health_score(image_task_rate, video_task_rate, model_ready_rate):
+    # 健康度 = 图片任务完成率 + 视频任务完成率 + 模型就绪率（权重 0.35/0.30/0.35）
     score = (
-        float(task_completion_rate or 0) * 0.35
-        + float(model_ready_rate or 0) * 0.30
-        + float(task_success_rate or 0) * 0.35
+        float(image_task_rate or 0) * 0.35
+        + float(video_task_rate or 0) * 0.30
+        + float(model_ready_rate or 0) * 0.35
     )
     return round(score, 1)
 
@@ -337,13 +346,18 @@ def _format_delta_text(delta, unit="", precision=1):
 
 def _metric_card(key, label, value, unit, previous, spark_seed=None, series=None, display_value=None):
     prev = previous.get(key) if isinstance(previous, dict) else None
+    delta = _delta(value, prev)
+    delta_text = _format_delta_text(delta, unit)
+    if delta_text is None:
+        delta_text = f"+0{unit or ''}"
     return {
         "key": key,
         "label": label,
         "value": value,
         "unit": unit,
         "display_value": display_value,
-        "delta": _delta(value, prev),
+        "delta": delta,
+        "delta_text": delta_text,
         "sparkline": series or [],
         "spark_seed": spark_seed,
     }
@@ -353,6 +367,31 @@ def _runtime_task_stats(runtime_stats):
     tasks = runtime_stats.get("tasks", {})
     exports = runtime_stats.get("exports", {})
     model_calls = runtime_stats.get("model_calls", {})
+    # 从 task_logs 按任务类型统计图片/视频任务的完成情况。
+    # task_logs 记录的是所有用户的任务结果日志（admin 视角天然聚合全用户），
+    # status=success/failed 标识任务成败。
+    task_logs = runtime_stats.get("task_logs", []) or []
+    image_success = 0
+    image_failed = 0
+    video_success = 0
+    video_failed = 0
+    for entry in task_logs:
+        if not isinstance(entry, dict):
+            continue
+        ttype = str(entry.get("task_type") or "")
+        status = str(entry.get("status") or "").lower()
+        if ttype == "图片追色":
+            if status == "success":
+                image_success += 1
+            elif status == "failed":
+                image_failed += 1
+        elif ttype == "视频追色":
+            if status == "success":
+                video_success += 1
+            elif status == "failed":
+                video_failed += 1
+    image_total = image_success + image_failed
+    video_total = video_success + video_failed
     return {
         "completed_tasks": int(tasks.get("success", 0)),
         "failed_tasks": int(tasks.get("failed", 0)),
@@ -364,6 +403,12 @@ def _runtime_task_stats(runtime_stats):
             "modflows_b0": int(model_calls.get("modflows_b0", 0)),
             "modflows_b6": int(model_calls.get("modflows_b6", 0)),
         },
+        "image_task_success": image_success,
+        "image_task_failed": image_failed,
+        "image_task_total": image_total,
+        "video_task_success": video_success,
+        "video_task_failed": video_failed,
+        "video_task_total": video_total,
     }
 
 
@@ -799,6 +844,12 @@ def _overview_to_metrics(data):
         "task_success_rate": data["task_stats"]["task_success_rate"],
         "task_export_rate": data["task_stats"]["task_export_rate"],
         "task_failure_rate": data["task_stats"]["task_failure_rate"],
+        "image_task_success": data["task_stats"]["image_task_success"],
+        "image_task_total": data["task_stats"]["image_task_total"],
+        "image_task_completion_rate": data["task_stats"]["image_task_completion_rate"],
+        "video_task_success": data["task_stats"]["video_task_success"],
+        "video_task_total": data["task_stats"]["video_task_total"],
+        "video_task_completion_rate": data["task_stats"]["video_task_completion_rate"],
     }
 
 
@@ -823,7 +874,7 @@ async def _collect_overview(db: AsyncSession):
     weights_stats = _scan_paths_unique([WEIGHTS_DIR])
     hf_model_cache_stats = _scan_paths_unique(_hf_model_cache_roots())
     model_total_stats = _scan_paths_unique(
-        [*model_dirs, *_hf_model_cache_roots()]
+        [*model_dirs, WEIGHTS_DIR, *_hf_model_cache_roots()]
     )
     training_dirs = list(iter_known_training_dirs())
     train_stats = _scan_paths_unique(training_dirs)
@@ -847,19 +898,7 @@ async def _collect_overview(db: AsyncSession):
     upload_stats = _scan_dir(STORAGE_IMAGE_UPLOADS_DIR)
     style_stats = _scan_paths_unique(list(iter_known_style_dirs()))
     asset_storage_stats = _scan_dir(STORAGE_USERS_DIR)
-    storage_stats = _scan_paths_unique(
-        [
-            STORAGE_PROJECTS_DIR,
-            STORAGE_USERS_DIR,
-            STORAGE_IMAGE_UPLOADS_DIR,
-            STORAGE_VIDEO_UPLOADS_DIR,
-            STORAGE_VIDEOS_DIR,
-            STORAGE_IMAGE_DEBUG_DIR,
-            STORAGE_VIDEO_FRAMES_DIR,
-            STORAGE_LOGS_DIR,
-            STORAGE_TRAINING_CORPUS_DIR,
-        ]
-    )
+    storage_stats = _scan_paths_unique([STORAGE_DIR])
     runtime_stats = load_runtime_stats()
     monthly_usage = get_monthly_user_usage(runtime_stats)
     monthly_power_users = sum(1 for count in monthly_usage.values() if count > 100)
@@ -904,6 +943,19 @@ async def _collect_overview(db: AsyncSession):
         if task_total <= 0
         else round(runtime_task_stats["failed_tasks"] / task_total * 100, 1)
     )
+    # 图片/视频任务完成率（基于 task_logs，跨所有用户聚合）
+    image_total = runtime_task_stats["image_task_total"]
+    image_task_completion_rate = (
+        0
+        if image_total <= 0
+        else round(runtime_task_stats["image_task_success"] / image_total * 100, 1)
+    )
+    video_total = runtime_task_stats["video_task_total"]
+    video_task_completion_rate = (
+        0
+        if video_total <= 0
+        else round(runtime_task_stats["video_task_success"] / video_total * 100, 1)
+    )
 
     disk_stats = _disk_usage_stats(BASE_DIR)
 
@@ -943,13 +995,14 @@ async def _collect_overview(db: AsyncSession):
             "training_size_mb": _mb(train_stats["size_bytes"]),
             "legacy_training_file_count": legacy_training_stats["file_count"],
             "legacy_training_size_mb": _mb(legacy_training_stats["size_bytes"]),
-            "training_corpus_user_count": training_corpus_stats["user_count"],
-            "training_corpus_sample_count": training_corpus_stats["sample_count"],
-            "training_corpus_file_count": training_corpus_stats["file_count"],
-            "training_corpus_size_mb": _mb(training_corpus_stats["size_bytes"]),
-            "training_corpus_target_count": training_corpus_stats["target_count"],
-            "training_corpus_reference_count": training_corpus_stats["reference_count"],
-            "training_corpus_result_count": training_corpus_stats["result_count"],
+        "training_corpus_user_count": training_corpus_stats["user_count"],
+        "training_corpus_sample_count": training_corpus_stats["sample_count"],
+        "training_corpus_file_count": training_corpus_stats["file_count"],
+        "training_corpus_size_mb": _mb(training_corpus_stats["size_bytes"]),
+        "training_corpus_path": str(TRAINING_CORPUS_ROOT),
+        "training_corpus_target_count": training_corpus_stats["target_count"],
+        "training_corpus_reference_count": training_corpus_stats["reference_count"],
+        "training_corpus_result_count": training_corpus_stats["result_count"],
             "training_corpus_meta_count": training_corpus_stats["meta_count"],
             "training_corpus_rating_count": training_corpus_stats["rating_count"],
             "training_corpus_data_types": training_corpus_stats["data_types"],
@@ -964,6 +1017,14 @@ async def _collect_overview(db: AsyncSession):
             "task_success_rate": task_success_rate,
             "task_export_rate": task_export_rate,
             "task_failure_rate": task_failure_rate,
+            "image_task_success": runtime_task_stats["image_task_success"],
+            "image_task_failed": runtime_task_stats["image_task_failed"],
+            "image_task_total": runtime_task_stats["image_task_total"],
+            "image_task_completion_rate": image_task_completion_rate,
+            "video_task_success": runtime_task_stats["video_task_success"],
+            "video_task_failed": runtime_task_stats["video_task_failed"],
+            "video_task_total": runtime_task_stats["video_task_total"],
+            "video_task_completion_rate": video_task_completion_rate,
             "total_export_files": export_stats["file_count"],
             "total_export_events": runtime_task_stats["total_export_events"],
             "export_size_mb": _mb(export_stats["size_bytes"]),
@@ -1027,23 +1088,37 @@ async def admin_dashboard(
 
     model_ready_rate = _model_ready_rate(current["ready_models"], current["total_models"])
     health_score = _health_score(
-        current["task_completion_rate"],
+        current["image_task_completion_rate"],
+        current["video_task_completion_rate"],
         model_ready_rate,
-        current["task_success_rate"],
     )
 
+    # 三环：图片任务完成率 / 视频任务完成率 / 模型就绪率
+    # 数据基于 task_logs（聚合所有用户的图片追色/视频追色任务结果）
     rings = [
         {
-            "label": "任务完成率",
-            "value": current["completed_tasks"],
-            "percent": current["task_completion_rate"],
+            "label": "图片任务完成率",
+            "value": current["image_task_success"],
+            "percent": current["image_task_completion_rate"],
             "delta": _delta(
-                current["task_completion_rate"],
-                previous.get("task_completion_rate")
-                if "task_completion_rate" in previous
+                current["image_task_completion_rate"],
+                previous.get("image_task_completion_rate")
+                if "image_task_completion_rate" in previous
                 else None,
             ),
             "color": "#3557f2",
+        },
+        {
+            "label": "视频任务完成率",
+            "value": current["video_task_success"],
+            "percent": current["video_task_completion_rate"],
+            "delta": _delta(
+                current["video_task_completion_rate"],
+                previous.get("video_task_completion_rate")
+                if "video_task_completion_rate" in previous
+                else None,
+            ),
+            "color": "#4866ff",
         },
         {
             "label": "模型就绪率",
@@ -1053,18 +1128,6 @@ async def admin_dashboard(
                 model_ready_rate,
                 _model_ready_rate(previous.get("ready_models", 0), current["total_models"])
                 if "ready_models" in previous
-                else None,
-            ),
-            "color": "#4866ff",
-        },
-        {
-            "label": "任务成功率",
-            "value": current["task_success"],
-            "percent": current["task_success_rate"],
-            "delta": _delta(
-                current["task_success_rate"],
-                previous.get("task_success_rate")
-                if "task_success_rate" in previous
                 else None,
             ),
             "color": "#ff4a4a",
@@ -1293,6 +1356,8 @@ async def admin_dashboard(
         "assets": current["assets"],
         "model_calls_total": current["model_calls_total"],
         "ready_models": current["ready_models"],
+        "image_task_completion_rate": current["image_task_completion_rate"],
+        "video_task_completion_rate": current["video_task_completion_rate"],
     }
     _write_admin_snapshot(snapshot_metrics, weekly_context)
 

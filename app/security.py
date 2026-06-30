@@ -259,7 +259,7 @@ async def begin_request_limits(request: Request, user_id: Optional[int]) -> Requ
 
         lease.ai_semaphore = _global_ai_semaphore()
         try:
-            await asyncio.wait_for(lease.ai_semaphore.acquire(), timeout=0.05)
+            await asyncio.wait_for(lease.ai_semaphore.acquire(), timeout=2.0)
             lease.ai_global_acquired = True
         except asyncio.TimeoutError:
             await lease.release()

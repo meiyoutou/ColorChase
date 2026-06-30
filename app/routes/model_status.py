@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from app.routes.auth import require_admin
 
 
 def create_model_status_router(
@@ -20,7 +22,7 @@ def create_model_status_router(
     router = APIRouter()
 
     @router.get("/api/model_status")
-    async def api_model_status():
+    async def api_model_status(admin=Depends(require_admin)):
         def file_info(path):
             path_str = str(path)
             exists = os.path.exists(path_str)

@@ -1,11 +1,13 @@
 import asyncio
 import json
 import time
+from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
+from app.services.auth_utils import _get_request_user_id
 
 
 def create_analysis_router(
@@ -33,7 +35,11 @@ def create_analysis_router(
     async def api_depth_layers(
         target_path: str = Form(...),
         depth_model: str = Form("auto"),
+        authorization: Optional[str] = Header(None),
     ):
+        user_id = _get_request_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="请先登录")
         depth_choice = resolve_depth_model_choice(depth_model)
         resolved_target_path = resolve_local_file_path(target_path)
         if not resolved_target_path:
@@ -56,25 +62,34 @@ def create_analysis_router(
             target_img = await asyncio.to_thread(cv2_imread, target_path, target_size=1536)
             if target_img is None:
                 raise HTTPException(status_code=400, detail="无法读取目标图片")
-            depth, meta = await asyncio.to_thread(generate_depth_map, target_img, base_dir, depth_choice["choice"])
+            depth, meta = await asyncio.to_thread(
+                generate_depth_map,
+                target_img,
+                base_dir,
+                depth_choice["choice"],
+            )
             await asyncio.to_thread(save_depth_png, depth, str(depth_path))
-            meta.update({
-                "cache_key": cache_key,
-                "width": int(target_img.shape[1]),
-                "height": int(target_img.shape[0]),
-            })
+            meta.update(
+                {
+                    "cache_key": cache_key,
+                    "width": int(target_img.shape[1]),
+                    "height": int(target_img.shape[0]),
+                }
+            )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
         token = int(time.time() * 1000)
-        return JSONResponse({
-            "success": True,
-            "depth_id": cache_key,
-            "depth_path": str(depth_path),
-            "depth_url": f"/temp_luts/depth/{depth_path.name}?t={token}",
-            "cached": cached,
-            "model": depth_choice,
-            "meta": meta,
-        })
+        return JSONResponse(
+            {
+                "success": True,
+                "depth_id": cache_key,
+                "depth_path": str(depth_path),
+                "depth_url": f"/temp_luts/depth/{depth_path.name}?t={token}",
+                "cached": cached,
+                "model": depth_choice,
+                "meta": meta,
+            }
+        )
 
     @router.post("/api/semantic/match")
     async def api_semantic_match(
@@ -82,7 +97,11 @@ def create_analysis_router(
         reference_path: str = Form(None),
         reference: UploadFile = File(None),
         semantic_model: str = Form("auto"),
+        authorization: Optional[str] = Header(None),
     ):
+        user_id = _get_request_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="请先登录")
         semantic_choice = resolve_semantic_model_choice(semantic_model)
         resolved_target_path = resolve_local_file_path(target_path)
         if not resolved_target_path:
@@ -101,14 +120,21 @@ def create_analysis_router(
         reference_img = await asyncio.to_thread(cv2_imread, reference_path, target_size=1536)
         if target_img is None or reference_img is None:
             raise HTTPException(status_code=400, detail="无法读取目标图或参考图")
-        meta = await asyncio.to_thread(summarize_semantic_matches, target_img, reference_img, semantic_choice["choice"])
-        return JSONResponse({
-            "success": True,
-            "semantic_id": cache_key,
-            "reference_path": reference_path,
-            "model": semantic_choice,
-            "meta": meta,
-        })
+        meta = await asyncio.to_thread(
+            summarize_semantic_matches,
+            target_img,
+            reference_img,
+            semantic_choice["choice"],
+        )
+        return JSONResponse(
+            {
+                "success": True,
+                "semantic_id": cache_key,
+                "reference_path": reference_path,
+                "model": semantic_choice,
+                "meta": meta,
+            }
+        )
 
     @router.post("/api/mask/subject")
     async def api_subject_mask(
@@ -116,7 +142,11 @@ def create_analysis_router(
         mode: str = Form("subject"),
         points_json: str = Form("[]"),
         mask_model: str = Form("auto"),
+        authorization: Optional[str] = Header(None),
     ):
+        user_id = _get_request_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="请先登录")
         mask_choice = resolve_mask_model_choice(mask_model)
         prefer_birefnet = bool(mask_choice.get("prefer_birefnet"))
         resolved_target_path = resolve_local_file_path(target_path)
@@ -155,22 +185,26 @@ def create_analysis_router(
                 mask_choice["choice"],
             )
             await asyncio.to_thread(save_mask_png, mask, str(mask_path))
-            meta.update({
-                "cache_key": cache_key,
-                "width": int(target_img.shape[1]),
-                "height": int(target_img.shape[0]),
-            })
+            meta.update(
+                {
+                    "cache_key": cache_key,
+                    "width": int(target_img.shape[1]),
+                    "height": int(target_img.shape[0]),
+                }
+            )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
         token = int(time.time() * 1000)
-        return JSONResponse({
-            "success": True,
-            "mask_id": cache_key,
-            "mask_path": str(mask_path),
-            "mask_url": f"/temp_luts/masks/{mask_path.name}?t={token}",
-            "cached": cached,
-            "model": mask_choice,
-            "meta": meta,
-        })
+        return JSONResponse(
+            {
+                "success": True,
+                "mask_id": cache_key,
+                "mask_path": str(mask_path),
+                "mask_url": f"/temp_luts/masks/{mask_path.name}?t={token}",
+                "cached": cached,
+                "model": mask_choice,
+                "meta": meta,
+            }
+        )
 
     return router

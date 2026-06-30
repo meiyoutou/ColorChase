@@ -4,7 +4,7 @@ from pathlib import Path
 import bcrypt
 from jose import jwt
 
-DEFAULT_SECRET_KEY = "colorchase-local-fixed-secret-key-2026"
+DEFAULT_SECRET_KEY = ""
 AUTH_COOKIE_NAME = "cc_access_token"
 
 
@@ -50,11 +50,9 @@ _load_local_env_defaults()
 ENVIRONMENT = _read_env_value("COLORCHASE_ENV") or "development"
 ENVIRONMENT = ENVIRONMENT.strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"prod", "production"}
-SECRET_KEY = _read_env_value("COLORCHASE_SECRET_KEY")
-if IS_PRODUCTION and not SECRET_KEY:
-    raise RuntimeError("COLORCHASE_SECRET_KEY must be set in production")
+SECRET_KEY = os.getenv("COLORCHASE_SECRET_KEY", DEFAULT_SECRET_KEY)
 if not SECRET_KEY:
-    SECRET_KEY = DEFAULT_SECRET_KEY
+    raise RuntimeError("必须设置 COLORCHASE_SECRET_KEY 环境变量！")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 

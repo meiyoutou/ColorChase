@@ -9,12 +9,14 @@ if str(BASE_DIR) not in sys.path:
 
 from sqlalchemy import select
 
+from config import LEGACY_CACHE_DIR, STORAGE_CACHE_DIR
 from database import async_session
 from models import User
 from app.routes.projects import _derive_display_name, _user_profile_record
 
 
-RUNTIME_STATS_PATH = BASE_DIR / ".cache" / "admin_runtime_metrics.json"
+RUNTIME_STATS_PATH = STORAGE_CACHE_DIR / "admin_runtime_metrics.json"
+LEGACY_RUNTIME_STATS_PATH = LEGACY_CACHE_DIR / "admin_runtime_metrics.json"
 TASK_LOG_USER_KEY_PATTERN = re.compile(r"user_(\d+)_(?:admin|user)$", re.IGNORECASE)
 
 
@@ -112,10 +114,13 @@ def _build_display(summary: str, detail: str, meta: dict):
 
 
 def _load_runtime_stats():
-    if not RUNTIME_STATS_PATH.exists():
-        raise FileNotFoundError(f"未找到运行时日志文件: {RUNTIME_STATS_PATH}")
-    with open(RUNTIME_STATS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    if RUNTIME_STATS_PATH.exists():
+        with open(RUNTIME_STATS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    if LEGACY_RUNTIME_STATS_PATH.exists():
+        with open(LEGACY_RUNTIME_STATS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    raise FileNotFoundError(f"未找到运行时日志文件: {RUNTIME_STATS_PATH}")
 
 
 def _save_runtime_stats(payload):

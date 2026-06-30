@@ -762,6 +762,8 @@ async def api_upload_batch(
     for file in files:
         if not file.filename:
             continue
+        if getattr(file, "size", None) == 0:
+            raise HTTPException(status_code=400, detail=f"上传文件为空: {file.filename}")
         ensure_upload_file_size(file, 10 * 1024 * 1024, label="普通上传文件")
         ext = os.path.splitext(file.filename)[1] or ".jpg"
         uid = uuid.uuid4().hex
@@ -782,6 +784,7 @@ async def api_upload_batch(
         with open(save_path, "wb") as f:
             f.write(content)
         await _ensure_training_target_sample(
+            _resolve_local_file_path,
             user_id=request_user_id,
             target_path=str(save_path),
             project_id=project_id,
@@ -1081,9 +1084,12 @@ async def api_transfer(
         if target_img is None:
             raise_task_http_error(400, "无法读取目标图片路径")
     elif target is not None and target.filename:
+        if getattr(target, "size", None) == 0:
+            raise_task_http_error(400, "目标文件为空")
         ensure_upload_file_size(target, 300 * 1024 * 1024, label="追色原图")
         target_path = _save_upload(target, project_id=project_id, bucket="source")
         await _ensure_training_target_sample(
+            _resolve_local_file_path,
             user_id=request_user_id,
             target_path=target_path,
             project_id=project_id,
@@ -1100,6 +1106,8 @@ async def api_transfer(
         reference_path = str(resolved_reference_path)
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
     elif reference is not None and reference.filename:
+        if getattr(reference, "size", None) == 0:
+            raise_task_http_error(400, "参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
         reference_path = _save_upload(reference, project_id=project_id, bucket="reference")
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
@@ -2036,6 +2044,7 @@ async def api_video_transfer(
     video: UploadFile = File(None),
     video_path: str = Form(None),
     reference: UploadFile = File(None),
+    reference_path: str = Form(None),
     algorithm: str = Form("luminance_partition"),
     blend_strength: float = Form(0.85),
     enable_postprocess: bool = Form(True),
@@ -2074,6 +2083,8 @@ async def api_video_transfer(
     if resolved_video_path and resolved_video_path.exists():
         video_path = str(resolved_video_path)
     elif video is not None and video.filename:
+        if getattr(video, "size", None) == 0:
+            raise HTTPException(status_code=400, detail="视频文件为空")
         ensure_upload_file_size(video, 300 * 1024 * 1024, label="视频文件")
         video_path = _save_upload(video, project_id=project_id, bucket="video_source")
     else:
@@ -2083,6 +2094,8 @@ async def api_video_transfer(
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
     elif reference is not None and reference.filename:
+        if getattr(reference, "size", None) == 0:
+            raise HTTPException(status_code=400, detail="参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
         reference_path = _save_upload(reference, project_id=project_id, bucket="video_reference")
     else:
@@ -2090,6 +2103,8 @@ async def api_video_transfer(
 
     profile_path = None
     if profile_file is not None and profile_file.filename:
+        if getattr(profile_file, "size", None) == 0:
+            raise HTTPException(status_code=400, detail="风格文件为空")
         ensure_upload_file_size(profile_file, 10 * 1024 * 1024, label="风格文件")
         profile_ext = os.path.splitext(profile_file.filename)[1].lower()
         profile_name = f"profile_{uuid.uuid4().hex}{profile_ext}"

@@ -29,6 +29,7 @@ from config import (
     STORAGE_PROJECTS_DIR,
     iter_known_style_dirs,
     iter_known_training_dirs,
+    WEIGHTS_DIR,
     STORAGE_TRAINING_CORPUS_DIR,
     STORAGE_USERS_DIR,
     STORAGE_VIDEO_FRAMES_DIR,
@@ -819,6 +820,7 @@ async def _collect_overview(db: AsyncSession):
 
     model_dirs = list(iter_known_model_dirs())
     model_stats = _scan_paths_unique(model_dirs)
+    weights_stats = _scan_paths_unique([WEIGHTS_DIR])
     hf_model_cache_stats = _scan_paths_unique(_hf_model_cache_roots())
     model_total_stats = _scan_paths_unique(
         [*model_dirs, *_hf_model_cache_roots()]

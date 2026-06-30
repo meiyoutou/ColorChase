@@ -287,15 +287,17 @@ presets/
 
 **建议**：先确认 `neuralpreset/` 是否被动态加载（grep `importlib` / 字符串拼接路径），如无引用则删除整个目录。
 
-### 5.4 顶层散乱文件（未清理）
+### 5.4 顶层散乱文件（已清理）
 
-| 文件 | 类型 | 建议位置 |
-|---|---|---|
-| `_dl_depth.py` | 一次性下载脚本 | `scripts/` 或删除 |
-| `_download_sam.py` | 一次性下载脚本 | `scripts/` 或删除 |
-| `check_ckpt.py` | 调试脚本（硬编码 `D:\桌面\best.ckpt`） | `scripts/` 或删除 |
-| `auto_commit.py` | git 辅助工具 | `scripts/` |
-| `test_warm_cinema.xmp` | 测试 fixture | `tests/fixtures/` |
+| 原文件 | 类型 | 当前位置 | 状态 |
+|---|---|---|---|
+| `_dl_depth.py` | 一次性下载脚本 | `scripts/dl_depth.py` | ✅ 已迁移 |
+| `_download_sam.py` | 一次性下载脚本 | `scripts/download_sam.py` | ✅ 已迁移 |
+| `auto_commit.py` | git 辅助工具 | `scripts/auto_commit.py` | ✅ 已迁移 |
+| `test_warm_cinema.xmp` | 测试 fixture | `tests/fixtures/test_warm_cinema.xmp` | ✅ 已迁移 |
+| `check_ckpt.py` | 调试脚本（硬编码 `D:\桌面\best.ckpt`） | — | ✅ 已删除 |
+
+> 旧数据目录（`uploads/`、`uploaded/`、`user_assets/`、`training_corpus/`、`temp_luts/`）已全部迁移到 `storage/` 并删除根目录下的旧目录。
 
 ### 5.5 `_save_upload` 分层位置不纯
 

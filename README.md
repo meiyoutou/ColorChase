@@ -1,6 +1,10 @@
 # ColorChase
 
-**在线静态预览：** [https://meiyoutou.github.io/ColorChase/](https://meiyoutou.github.io/ColorChase/)
+**正式在线服务：** [https://colorchase.meiyoutou.top/](https://colorchase.meiyoutou.top/)
+
+**静态前端预览：** [https://meiyoutou.github.io/ColorChase/](https://meiyoutou.github.io/ColorChase/)
+
+该预览页只展示前端界面与交互 mock 数据，不连接生产后端。
 
 ColorChase 是一个基于 FastAPI 的图像/视频追色与风格管理工具，集成经典颜色迁移、LUT、ModFlows、DNCM、NeuralPreset、Depth Anything V2、SAM2、BiRefNet、DINOv2 等能力，用于图片追色、视频追色、风格预设、训练样本管理和项目资产管理。
 

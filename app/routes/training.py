@@ -8,7 +8,8 @@ from typing import List, Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from app.security import ensure_upload_file_size
+from app.security import DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, ensure_upload_file_size, get_upload_file_size
+from app.settings import int_env
 from config import get_training_corpus_dir
 
 
@@ -125,15 +126,30 @@ def create_training_router(
             rel_paths_list = []
 
         saved = []
+        skipped = 0
+        skipped_unsupported = 0
+        skipped_too_large = 0
         index_records = []
         now_iso = datetime.now(timezone.utc).isoformat()
+        max_training_image_bytes = int_env(
+            "COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES",
+            DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
+        )
         for idx, file in enumerate(files):
             if not file or not file.filename:
+                skipped += 1
                 continue
             ext = Path(file.filename).suffix.lower() or ".jpg"
             if ext not in training_image_extensions:
+                skipped += 1
+                skipped_unsupported += 1
                 continue
-            ensure_upload_file_size(file, 10 * 1024 * 1024, label="训练图片")
+            size = get_upload_file_size(file)
+            if size is not None and size > max_training_image_bytes:
+                skipped += 1
+                skipped_too_large += 1
+                continue
+            ensure_upload_file_size(file, max_training_image_bytes, label="训练图片")
             save_name = f"{uuid.uuid4().hex}{ext}"
             save_path = training_path / save_name
             content = await file.read()
@@ -169,6 +185,9 @@ def create_training_router(
         return JSONResponse({
             "success": True,
             "saved_count": len(saved),
+            "skipped_count": skipped,
+            "skipped_unsupported_count": skipped_unsupported,
+            "skipped_too_large_count": skipped_too_large,
             "training_file_count": stats["training_file_count"],
             "training_size_mb": stats["training_size_mb"],
             "image_dir": stats["image_dir"],
@@ -179,6 +198,29 @@ def create_training_router(
         return JSONResponse({
             "success": True,
             **get_training_data_stats_payload(image_dir),
+        })
+
+    @router.post("/api/train/clear_uploads")
+    @router.post("/api/train/data_clear", include_in_schema=False)
+    async def api_train_clear_uploads(image_dir: str = Form(str(get_training_corpus_dir()))):
+        training_path = resolve_training_dir(image_dir)
+        deleted = 0
+        if training_path.exists() and training_path.is_dir():
+            for path in training_path.rglob("*"):
+                if path.is_file() and path.suffix.lower() in training_image_extensions:
+                    path.unlink()
+                    deleted += 1
+            index_path = training_path / "upload_index.json"
+            if index_path.exists() and index_path.is_file():
+                index_path.unlink()
+
+        stats = get_training_data_stats_payload(str(training_path))
+        return JSONResponse({
+            "success": True,
+            "deleted_count": deleted,
+            "training_file_count": stats["training_file_count"],
+            "training_size_mb": stats["training_size_mb"],
+            "image_dir": stats["image_dir"],
         })
 
     return router

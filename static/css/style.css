@@ -5851,6 +5851,14 @@ html[data-theme="light"] .training-stage-card select {
   cursor: pointer;
 }
 
+.training-data-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .training-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6078,19 +6086,30 @@ html[data-theme="light"] .training-stage-card select {
   grid-row: 1;
 }
 
-.training-column-right {
+.training-column-right,
+.training-column-right-top {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
+}
+
+.training-data-card {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.training-column-right-bottom {
+  grid-column: 2;
+  grid-row: 3;
 }
 
 .training-model-status-card {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 .model-manager-card {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 .model-manager-title {
@@ -6157,6 +6176,9 @@ html[data-theme="light"] .training-stage-card select {
 }
 
 .training-status-shell {
+  grid-column: 1;
+  grid-row: 3;
+  align-self: end;
   border-radius: 34px;
   border: 1px solid rgba(48, 42, 33, 0.86);
   background:
@@ -6199,11 +6221,11 @@ html[data-theme="light"] .training-stage-card select {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 .training-status-progress strong {
-  font-size: 80px;
+  font-size: 76px;
   line-height: 0.9;
   font-weight: 800;
 }
@@ -6225,13 +6247,13 @@ html[data-theme="light"] .training-stage-card select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .training-status-mini {
   min-height: 92px;
-  padding: 14px 16px;
-  border-radius: 20px;
+  padding: 13px 15px;
+  border-radius: 19px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.07);
 }
@@ -6244,7 +6266,7 @@ html[data-theme="light"] .training-stage-card select {
 
 .training-status-mini strong {
   display: block;
-  margin-top: 14px;
+  margin-top: 10px;
   color: #fffdf7;
   font-size: 17px;
   font-weight: 800;
@@ -6254,12 +6276,12 @@ html[data-theme="light"] .training-stage-card select {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
   gap: 7px;
-  margin-top: 14px;
+  margin-top: 13px;
 }
 
 .training-dot {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: rgba(255,255,255,0.14);
 }
@@ -6270,11 +6292,11 @@ html[data-theme="light"] .training-stage-card select {
 }
 
 .training-status-shell .training-log-box {
-  min-height: 178px;
-  max-height: 220px;
-  margin-top: 16px;
-  padding: 18px;
-  border-radius: 22px;
+  min-height: 180px;
+  max-height: 214px;
+  margin-top: 15px;
+  padding: 16px;
+  border-radius: 21px;
   border: 1px solid rgba(231, 187, 152, 0.26);
   background:
     radial-gradient(circle at 14% 20%, rgba(247, 202, 96, 0.28), transparent 34%),
@@ -6660,6 +6682,7 @@ html[data-theme="light"] .training-stage-card select {
 
   .training-plan-card,
   .training-status-shell,
+  .training-data-card,
   .training-column-right,
   .training-model-status-card,
   .model-manager-card {
@@ -6681,7 +6704,8 @@ html[data-theme="light"] .training-stage-card select {
   }
 
   .training-config-grid,
-  .training-data-layout,
+  .training-data-path-panel,
+  .training-upload-grid,
   .training-params-grid,
   .training-control-actions,
   .training-summary-grid,
@@ -6692,6 +6716,25 @@ html[data-theme="light"] .training-stage-card select {
 
   .training-workbench-hero-copy h2 {
     font-size: 38px;
+  }
+
+  .training-data-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .training-data-actions {
+    justify-content: flex-start;
+  }
+
+  .training-data-path-label {
+    border-right: none;
+    border-bottom: 1px solid rgba(224, 214, 200, 0.82);
+    width: 100%;
+  }
+
+  .training-upload-card {
+    min-height: 88px;
   }
 }
 
@@ -6738,73 +6781,303 @@ html[data-theme="dark"] #training-stage {
   grid-column: span 2;
 }
 
-/* 训练数据卡片内部：上传按钮区（左）+ 表单区（右）水平排列，减少高度 */
-.training-data-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  margin-top: 12px;
+/* Training dataset panel: dark glass / neon hover style inspired by the reference mockup */
+.training-data-card {
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 50% -26%, rgba(129, 140, 248, 0.17), transparent 34%),
+    linear-gradient(180deg, rgba(22, 22, 27, 0.98), rgba(13, 14, 20, 0.98));
+  color: #f4f4f5;
+  box-shadow:
+    0 24px 50px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* 两个上传按钮垂直堆叠在左侧列 */
-.training-upload-buttons {
+.training-data-card-glow {
+  position: absolute;
+  top: -160px;
+  left: 50%;
+  width: 360px;
+  height: 260px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.22) 0%, transparent 68%);
+}
+
+.training-data-header,
+.training-data-path-panel,
+.training-upload-grid {
+  position: relative;
+  z-index: 1;
+}
+
+.training-data-header {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
 }
 
-/* 上传按钮基础样式：紧凑、虚线边框、hover 高亮 */
-.training-upload-card {
-  min-height: 110px;
-  padding: 0;
-  border: 1px dashed rgba(53, 87, 242, 0.4);
-  border-radius: 18px;
-  background: rgba(53, 87, 242, 0.04);
-  cursor: pointer;
-  display: block;
-  text-align: left;
-  transition: border-color 0.2s, background 0.2s;
-  width: 100%;
-}
-
-.training-upload-card:hover {
-  border-color: rgba(53, 87, 242, 0.7);
-  background: rgba(53, 87, 242, 0.08);
-}
-
-.training-upload-card div {
+.training-data-title-area {
   display: grid;
-  gap: 6px;
-  place-items: center;
-  height: 100%;
-  padding: 18px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.training-upload-card strong {
-  font-size: 16px;
-  color: #2b261d;
+.training-data-card .training-card-title {
+  color: #f4f4f5;
+  font-size: 24px;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.training-data-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #a1a1aa;
+  font-size: 12px;
   font-weight: 800;
 }
 
-.training-upload-card span {
-  color: #8a8175;
+.training-data-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #818cf8;
+  box-shadow: 0 0 12px rgba(129, 140, 248, 0.72);
+  animation: trainingDataPulse 2s ease-in-out infinite;
+}
+
+.training-data-summary-label {
+  letter-spacing: 0.04em;
+  color: #71717a;
+}
+
+.training-data-summary-value {
+  color: #d4d4d8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+@keyframes trainingDataPulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.62; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+.training-data-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #a1a1aa;
   font-size: 12px;
-  line-height: 1.5;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.training-data-action-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.training-data-action-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(129, 140, 248, 0.42);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+}
+
+.training-data-action-btn--danger:hover {
+  border-color: rgba(248, 113, 113, 0.34);
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.training-data-action-btn.refreshing svg {
+  animation: trainingRefreshSpin 0.8s ease-in-out;
+}
+
+@keyframes trainingRefreshSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.training-data-path-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  margin-top: 18px;
+  min-height: 52px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.training-data-path-panel:focus-within {
+  border-color: rgba(129, 140, 248, 0.42);
+  box-shadow: 0 0 22px rgba(129, 140, 248, 0.10);
+}
+
+.training-data-path-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.training-data-path-panel input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #f4f4f5;
+  padding: 0 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.training-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.training-upload-card {
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.10), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+  color: #f4f4f5;
+  cursor: pointer;
   text-align: center;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.training-upload-card:hover {
+  transform: translateY(-4px);
+  border-style: solid;
+  border-color: #818cf8;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.17), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.34),
+    0 0 30px rgba(129, 140, 248, 0.12);
 }
 
 .training-upload-card--folder {
-  min-height: 90px;
+  border-color: rgba(52, 211, 153, 0.24);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.09), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
 }
 
-.training-upload-card--folder div {
-  padding: 14px;
-  gap: 4px;
+.training-upload-card--folder:hover {
+  border-color: #34d399;
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.34),
+    0 0 30px rgba(52, 211, 153, 0.15);
 }
 
-.training-upload-card--folder strong {
-  font-size: 15px;
+.training-upload-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: #818cf8;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+  transition: transform 0.22s ease, background 0.22s ease, color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.training-upload-card:hover .training-upload-icon {
+  transform: scale(1.05);
+  background: #818cf8;
+  color: #09090b;
+  box-shadow: 0 0 22px rgba(129, 140, 248, 0.42);
+}
+
+.training-upload-card--folder .training-upload-icon {
+  color: #34d399;
+}
+
+.training-upload-card--folder:hover .training-upload-icon {
+  background: #34d399;
+  color: #09090b;
+  box-shadow: 0 0 22px rgba(52, 211, 153, 0.42);
+}
+
+.training-upload-icon svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.training-upload-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  justify-items: center;
+}
+
+.training-upload-copy strong {
+  color: #f4f4f5;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+.training-upload-copy small {
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 700;
 }
 
 .training-form-stack {
@@ -6814,19 +7087,216 @@ html[data-theme="dark"] #training-stage {
 }
 
 html[data-theme="dark"] .training-upload-card {
-  border-color: rgba(120, 140, 255, 0.4);
-  background: rgba(120, 140, 255, 0.06);
+  border-color: rgba(129, 140, 248, 0.3);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(129, 140, 248, 0.12), transparent 48%),
+    rgba(22, 28, 42, 0.8);
 }
 
 html[data-theme="dark"] .training-upload-card:hover {
-  border-color: rgba(120, 140, 255, 0.7);
-  background: rgba(120, 140, 255, 0.12);
+  border-color: rgba(129, 140, 248, 0.72);
+  background: rgba(25, 32, 48, 0.92);
 }
 
-html[data-theme="dark"] .training-upload-card strong {
+html[data-theme="dark"] .training-upload-copy strong {
   color: #f7f3ff;
 }
 
-html[data-theme="dark"] .training-upload-card span {
+html[data-theme="dark"] .training-upload-copy small {
   color: #a89ec9;
+}
+
+html[data-theme="dark"] .training-data-card {
+  border-color: rgba(120, 133, 162, 0.16);
+  background:
+    radial-gradient(circle at 50% -22%, rgba(129, 140, 248, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(20, 26, 38, 0.98), rgba(15, 20, 31, 0.98));
+}
+
+html[data-theme="dark"] .training-data-summary,
+html[data-theme="dark"] .training-data-summary-label {
+  color: #9fb0cf;
+}
+
+html[data-theme="dark"] .training-data-summary-value,
+html[data-theme="dark"] .training-data-path-panel input {
+  color: #f7f3ff;
+}
+
+html[data-theme="dark"] .training-data-action-btn,
+html[data-theme="dark"] .training-data-path-panel,
+html[data-theme="dark"] .training-upload-icon {
+  border-color: rgba(120, 133, 162, 0.16);
+  background: rgba(17, 23, 35, 0.72);
+  color: #dce5f7;
+}
+
+html[data-theme="dark"] .training-data-path-label {
+  border-right-color: rgba(120, 133, 162, 0.16);
+  color: #8a9abc;
+}
+
+html[data-theme="dark"] .training-upload-card--folder {
+  border-color: rgba(52, 211, 153, 0.28);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(52, 211, 153, 0.10), transparent 48%),
+    rgba(22, 28, 42, 0.8);
+}
+
+.training-data-card .training-upload-card,
+html[data-theme="dark"] .training-data-card .training-upload-card {
+  border: 1px dashed rgba(255, 255, 255, 0.16) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.10), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)) !important;
+}
+
+.training-data-card .training-upload-card:hover,
+html[data-theme="dark"] .training-data-card .training-upload-card:hover {
+  border-color: #818cf8 !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.17), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)) !important;
+}
+
+.training-data-card .training-upload-card--folder,
+html[data-theme="dark"] .training-data-card .training-upload-card--folder {
+  border-color: rgba(52, 211, 153, 0.24) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.09), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)) !important;
+}
+
+.training-data-card .training-upload-card--folder:hover,
+html[data-theme="dark"] .training-data-card .training-upload-card--folder:hover {
+  border-color: #34d399 !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.16), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)) !important;
+}
+
+html[data-theme="light"] .training-data-card {
+  border-color: rgba(205, 196, 222, 0.82);
+  background:
+    radial-gradient(circle at 50% -28%, rgba(129, 140, 248, 0.20), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 247, 252, 0.94));
+  color: #15131d;
+  box-shadow:
+    0 24px 46px rgba(93, 83, 130, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html[data-theme="light"] .training-data-card-glow {
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.28) 0%, transparent 68%);
+}
+
+html[data-theme="light"] .training-data-card .training-card-title {
+  color: #17131f;
+}
+
+html[data-theme="light"] .training-data-summary {
+  color: #736b7c;
+}
+
+html[data-theme="light"] .training-data-summary-label {
+  color: #8b8295;
+}
+
+html[data-theme="light"] .training-data-summary-value {
+  color: #211b2c;
+}
+
+html[data-theme="light"] .training-data-action-btn {
+  border-color: rgba(208, 199, 220, 0.82);
+  background: rgba(255, 255, 255, 0.70);
+  color: #635a6f;
+  box-shadow: 0 8px 18px rgba(93, 83, 130, 0.06);
+}
+
+html[data-theme="light"] .training-data-action-btn:hover {
+  border-color: rgba(129, 140, 248, 0.46);
+  background: rgba(255, 255, 255, 0.98);
+  color: #5b48c8;
+  box-shadow: 0 12px 24px rgba(129, 140, 248, 0.12);
+}
+
+html[data-theme="light"] .training-data-action-btn--danger:hover {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: rgba(255, 245, 245, 0.98);
+  color: #d45151;
+  box-shadow: 0 12px 24px rgba(248, 113, 113, 0.10);
+}
+
+html[data-theme="light"] .training-data-path-panel {
+  border-color: rgba(208, 199, 220, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 22px rgba(93, 83, 130, 0.07);
+}
+
+html[data-theme="light"] .training-data-path-panel:focus-within {
+  border-color: rgba(129, 140, 248, 0.54);
+  box-shadow:
+    0 0 0 3px rgba(129, 140, 248, 0.10),
+    0 14px 28px rgba(93, 83, 130, 0.10);
+}
+
+html[data-theme="light"] .training-data-path-label {
+  border-right-color: rgba(208, 199, 220, 0.72);
+  color: #8a8195;
+}
+
+html[data-theme="light"] .training-data-path-panel input {
+  color: #17131f;
+}
+
+html[data-theme="light"] .training-data-card .training-upload-card {
+  border-color: rgba(129, 140, 248, 0.30) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.13), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(251, 250, 255, 0.66)) !important;
+  color: #17131f;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
+html[data-theme="light"] .training-data-card .training-upload-card:hover {
+  border-color: #818cf8 !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(129, 140, 248, 0.22), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 248, 255, 0.86)) !important;
+  box-shadow:
+    0 20px 38px rgba(129, 140, 248, 0.16),
+    0 0 28px rgba(129, 140, 248, 0.14);
+}
+
+html[data-theme="light"] .training-data-card .training-upload-card--folder {
+  border-color: rgba(52, 211, 153, 0.30) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.12), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 255, 252, 0.66)) !important;
+}
+
+html[data-theme="light"] .training-data-card .training-upload-card--folder:hover {
+  border-color: #34d399 !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.22), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 255, 251, 0.86)) !important;
+  box-shadow:
+    0 20px 38px rgba(52, 211, 153, 0.15),
+    0 0 28px rgba(52, 211, 153, 0.14);
+}
+
+html[data-theme="light"] .training-upload-icon {
+  border-color: rgba(208, 199, 220, 0.82);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 22px rgba(93, 83, 130, 0.10);
+}
+
+html[data-theme="light"] .training-upload-copy strong {
+  color: #17131f;
+}
+
+html[data-theme="light"] .training-upload-copy small {
+  color: #777083;
 }

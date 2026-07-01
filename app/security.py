@@ -55,6 +55,7 @@ AI_LIMIT_PATHS = {
 UPLOAD_RATE_LIMIT_PATHS = UPLOAD_LIMIT_PATHS | VIDEO_UPLOAD_LIMIT_PATHS
 IMAGE_ORIGINAL_UPLOAD_LIMIT_PATHS = {
     "/api/upload_batch",
+    "/api/train/upload",
     "/api/transfer",
     "/api/video_transfer",
     "/api/export_video",

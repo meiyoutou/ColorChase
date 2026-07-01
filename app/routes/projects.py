@@ -226,6 +226,44 @@ def _safe_file_size(path):
         return 0
 
 
+def _scan_project_footprint():
+    stats = {"file_count": 0, "size_bytes": 0}
+    seen = set()
+    ignored_dirs = {
+        ".git",
+        ".venv",
+        ".venv312",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".trae",
+        ".reasonux",
+    }
+
+    def walk(path: Path):
+        try:
+            for item in path.iterdir():
+                if item.is_dir():
+                    if item.name in ignored_dirs:
+                        continue
+                    walk(item)
+                    continue
+                if not item.is_file():
+                    continue
+                resolved = item.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                stats["file_count"] += 1
+                stats["size_bytes"] += resolved.stat().st_size
+        except OSError:
+            return
+
+    walk(BASE_DIR)
+    return stats
+
+
 def _looks_like_thumb(name: str) -> bool:
     lower = str(name or "").lower()
     return lower.endswith(("_thumb.jpg", "_thumb.jpeg", "_thumb.png"))
@@ -1433,6 +1471,8 @@ async def user_space_dashboard_v2(
         export_storage_bytes = int(inventory["export_size"] or 0)
     else:
         export_storage_bytes = max(export_storage_bytes, int(inventory["export_size"] or 0))
+    total_storage_stats = _scan_project_footprint()
+    total_storage_bytes = int(total_storage_stats["size_bytes"] or 0)
 
     rated_asset_count = 0
     rateable_asset_count = 0
@@ -1516,7 +1556,7 @@ async def user_space_dashboard_v2(
             {"label": "已上传原图数量", "value": f"{inventory['original_count']} 张", "size": f"{_mb(inventory['original_size']):.1f} MB"},
             {"label": "参考图数量", "value": f"{inventory['reference_count']} 张", "size": f"占用 {_mb(inventory['reference_size']):.1f} MB"},
             {"label": "导出占用空间", "value": f"{_mb(export_storage_bytes):.1f} MB", "size": f"{max(export_events, inventory['export_count'])} 个文件"},
-            {"label": "项目资产数量", "value": f"{inventory['project_asset_count']} 个", "size": f"{_mb(inventory['project_storage_size']):.1f} MB"},
+            {"label": "存储使用", "value": f"{_mb(total_storage_bytes):.1f} MB", "size": f"{total_storage_stats['file_count']} 个文件"},
         ],
         "task_center": {
             "items": recent_tasks,
@@ -1567,6 +1607,8 @@ async def user_space_dashboard_v2(
                 "reference_images": inventory["reference_count"],
                 "export_storage_mb": _mb(export_storage_bytes),
                 "project_storage_mb": _mb(inventory["project_storage_size"]),
+                "storage_used_mb": _mb(total_storage_bytes),
+                "storage_file_count": total_storage_stats["file_count"],
             },
             "task_stats": {
                 "completed_tasks": completed_tasks,

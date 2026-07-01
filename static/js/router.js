@@ -96,6 +96,7 @@ function loadSettingsProfile(force) {
     }
     if (!force && settingsProfileRequest) return settingsProfileRequest;
     settingsProfileRequest = fetch('/api/projects/space_dashboard_v2', {
+        cache: 'no-store',
         headers: getAuthHeaders()
     })
     .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
@@ -612,6 +613,7 @@ function fetchUserSpaceDashboard(force) {
     }
     return fetch('/api/projects/space_dashboard_v2', {
         method: 'GET',
+        cache: 'no-store',
         headers: getAuthHeaders()
     })
     .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
@@ -1188,7 +1190,7 @@ function runAdminTaskLogsBackfill() {
     container.innerHTML = html;
     var trainingCount = $r('#training-data-count');
     if (trainingCount) {
-        trainingCount.textContent = (modelData.training_file_count || 0) + ' 张 / ' + (modelData.training_size_mb || 0).toFixed(1) + ' MB';
+        trainingCount.textContent = (modelData.training_file_count || 0) + ' images / ' + (modelData.training_size_mb || 0).toFixed(1) + ' MB';
     }
     var refreshBtn = $r('#admin-refresh-btn');
     if (refreshBtn) {
@@ -1407,7 +1409,7 @@ function renderUserSpaceShell(dashboardData) {
     } else {
         html += '<div class="admin-empty-state user-space-inline-empty">暂无模型/算法使用记录</div>';
     }
-    html += '</div></section><section class="admin-surface-card user-space-resource-card"><div class="admin-card-head"><div><div class="admin-card-title">我的资源与资产</div><div class="admin-card-subtitle">原图、参考图、导出占用和项目资产概览</div></div></div><div class="user-space-resource-grid">';
+    html += '</div></section><section class="admin-surface-card user-space-resource-card"><div class="admin-card-head"><div><div class="admin-card-title">我的资源与资产</div><div class="admin-card-subtitle">原图、参考图、导出占用和项目总存储</div></div></div><div class="user-space-resource-grid">';
     resources.forEach(function(item) {
         html += '<div class="user-space-resource-item"><span class="user-space-resource-label">' + escapeHtml(item.label || '--') + '</span><strong>' + escapeHtml(item.value || '--') + '</strong><em>' + escapeHtml(item.size || '') + '</em></div>';
     });
@@ -2226,7 +2228,7 @@ function updateTrainingDataCountFromDashboard() {
     var modelData = overview.model_data || {};
     var count = Number(modelData.training_file_count || 0);
     var size = Number(modelData.training_size_mb || 0);
-    var text = count + ' 张 / ' + size.toFixed(1) + ' MB';
+    var text = count + ' images / ' + size.toFixed(1) + ' MB';
     setTextIfExists('#training-data-count', text);
     setTextIfExists('#training-summary-data', text);
 }
@@ -2337,10 +2339,22 @@ function initTrainingWorkbench() {
     if (refreshBtn && !refreshBtn.dataset.bound) {
         refreshBtn.dataset.bound = '1';
         refreshBtn.addEventListener('click', function() {
+            if (window.refreshTrainingDataStatsFromButton) {
+                window.refreshTrainingDataStatsFromButton(refreshBtn);
+                return;
+            }
             fetchAdminDashboard(true).then(function() {
                 updateTrainingDataCountFromDashboard();
-                appendTrainingLog('训练数据统计已刷新');
+                appendTrainingLog('Dataset stats refreshed');
             });
+        });
+    }
+
+    var dataClearBtn = $r('#training-data-clear');
+    if (dataClearBtn && !dataClearBtn.dataset.bound) {
+        dataClearBtn.dataset.bound = '1';
+        dataClearBtn.addEventListener('click', function() {
+            if (window.clearTrainingUploads) window.clearTrainingUploads();
         });
     }
 
@@ -2418,7 +2432,7 @@ function initTrainingWorkbench() {
 var trainingProgressTimer = null;
 
 function updateTrainingDataCountDirect(fileCount, sizeMb) {
-    var text = Number(fileCount || 0) + ' 张 / ' + Number(sizeMb || 0).toFixed(1) + ' MB';
+    var text = Number(fileCount || 0) + ' images / ' + Number(sizeMb || 0).toFixed(1) + ' MB';
     setTextIfExists('#training-data-count', text);
     setTextIfExists('#training-summary-data', text);
 }
@@ -2555,10 +2569,22 @@ function initTrainingWorkbench() {
     if (refreshBtn && !refreshBtn.dataset.bound) {
         refreshBtn.dataset.bound = '1';
         refreshBtn.addEventListener('click', function() {
+            if (window.refreshTrainingDataStatsFromButton) {
+                window.refreshTrainingDataStatsFromButton(refreshBtn);
+                return;
+            }
             fetchAdminDashboard(true).then(function() {
                 updateTrainingDataCountFromDashboard();
-                appendTrainingLog('训练数据统计已刷新');
+                appendTrainingLog('Dataset stats refreshed');
             });
+        });
+    }
+
+    var dataClearBtn = $r('#training-data-clear');
+    if (dataClearBtn && !dataClearBtn.dataset.bound) {
+        dataClearBtn.dataset.bound = '1';
+        dataClearBtn.addEventListener('click', function() {
+            if (window.clearTrainingUploads) window.clearTrainingUploads();
         });
     }
 
@@ -2587,6 +2613,7 @@ function initTrainingWorkbench() {
         uploadBtn.addEventListener('click', function() { uploadInput.click(); });
         uploadInput.addEventListener('change', function() {
             if (!uploadInput.files || !uploadInput.files.length) return;
+            var selectedCount = uploadInput.files.length;
             var form = new FormData();
             Array.prototype.forEach.call(uploadInput.files, function(file) {
                 form.append('files', file);
@@ -2600,7 +2627,9 @@ function initTrainingWorkbench() {
             .then(function(result) {
                 if (!result.ok) throw new Error((result.data && result.data.detail) || '训练图片上传失败');
                 updateTrainingDataCountDirect(result.data.training_file_count, result.data.training_size_mb);
-                appendTrainingLog('已上传训练图片 ' + (result.data.saved_count || 0) + ' 张');
+                var saved = result.data.saved_count || 0;
+                var skipped = result.data.skipped_count || Math.max(selectedCount - saved, 0);
+                appendTrainingLog('已上传训练图片 ' + saved + ' 张' + (skipped > 0 ? '，跳过 ' + skipped + ' 张（非图片或超过大小限制）' : ''));
                 uploadInput.value = '';
             })
             .catch(function(err) {
@@ -2643,6 +2672,8 @@ function initTrainingWorkbench() {
             var batchSize = 50;
             var uploaded = 0;
             var failed = 0;
+            var skippedUnsupported = 0;
+            var skippedTooLarge = 0;
             var idx = 0;
             appendTrainingLog('文件夹上传开始：已扫描 ' + totalScanned + ' 个文件，发现图片 ' + imgFiles.length + ' 张');
             function uploadNextBatch() {
@@ -2651,7 +2682,7 @@ function initTrainingWorkbench() {
                     if (typeof showToast === 'function') {
                         showToast('文件夹上传完成：已上传 ' + uploaded + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张' : ''));
                     }
-                    appendTrainingLog('文件夹上传完成：已上传 ' + uploaded + ' / 已失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
+                    appendTrainingLog('文件夹上传完成：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张' + (skippedUnsupported > 0 ? '，非图片 ' + skippedUnsupported + ' 张' : '') + (skippedTooLarge > 0 ? '，超限 ' + skippedTooLarge + ' 张' : ''));
                     uploadFolderInput.value = '';
                     return;
                 }
@@ -2673,12 +2704,15 @@ function initTrainingWorkbench() {
                     if (!result.ok) throw new Error((result.data && result.data.detail) || '训练图片上传失败');
                     var saved = (result.data.saved_count || 0);
                     uploaded += saved;
-                    // 后端按扩展名/大小过滤，本批次中没保存的算失败
-                    failed += (batch.length - saved);
+                    var skipped = result.data.skipped_count || Math.max(batch.length - saved, 0);
+                    skippedUnsupported += result.data.skipped_unsupported_count || 0;
+                    skippedTooLarge += result.data.skipped_too_large_count || 0;
+                    // 后端按扩展名/大小过滤，本批次中没保存的算跳过
+                    failed += skipped;
                     if (result.data.training_file_count !== undefined) {
                         updateTrainingDataCountDirect(result.data.training_file_count, result.data.training_size_mb);
                     }
-                    appendTrainingLog('文件夹上传进度：已上传 ' + uploaded + ' / 已失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
+                    appendTrainingLog('文件夹上传进度：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
                     idx += batchSize;
                     uploadNextBatch();
                 })
@@ -4687,7 +4721,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         var countEl = $r('#training-data-count');
         if (countEl) {
-            countEl.textContent = String(fileCount || 0) + ' 张 / ' + Number(sizeMb || 0).toFixed(1) + ' MB';
+            countEl.textContent = String(fileCount || 0) + ' images / ' + Number(sizeMb || 0).toFixed(1) + ' MB';
         }
         var dirEl = $r('#training-image-dir');
         if (dirEl && imageDir) {
@@ -4721,6 +4755,69 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function refreshTrainingDataStatsFromButton(button) {
+        if (button) button.classList.add('refreshing');
+        return fetchTrainingDataStats()
+            .then(function(data) {
+                appendTrainingLog('Dataset stats refreshed');
+                return data;
+            })
+            .finally(function() {
+                if (button) {
+                    setTimeout(function() {
+                        button.classList.remove('refreshing');
+                    }, 180);
+                }
+            });
+    }
+    window.refreshTrainingDataStatsFromButton = refreshTrainingDataStatsFromButton;
+
+    function clearTrainingUploads() {
+        var imageDir = getTrainingImageDirValue();
+        if (!window.confirm('确定清除当前训练数据目录中的上传图片吗？此操作不会删除目录本身。')) {
+            return Promise.resolve(null);
+        }
+        function postClearTrainingUploads(url) {
+            var payload = new FormData();
+            payload.append('image_dir', imageDir);
+            return fetch(url, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: payload
+            })
+            .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, status: resp.status, data: data }; }); });
+        }
+        return postClearTrainingUploads('/api/train/clear_uploads')
+        .then(function(result) {
+            if (result.status === 404) {
+                return postClearTrainingUploads('/api/train/data_clear');
+            }
+            return result;
+        })
+        .then(function(result) {
+            if (!result.ok) {
+                throw new Error((result.data && result.data.detail) || '训练数据清除失败');
+            }
+            syncTrainingDataStatsToView(
+                result.data.training_file_count || 0,
+                result.data.training_size_mb || 0,
+                result.data.image_dir || imageDir
+            );
+            appendTrainingLog('已清除上传训练数据 ' + (result.data.deleted_count || 0) + ' 张');
+            if (typeof showToast === 'function') {
+                showToast('训练上传数据已清除');
+            }
+            return result.data;
+        })
+        .catch(function(err) {
+            if (typeof showToast === 'function') {
+                showToast(err.message || '训练数据清除失败');
+            }
+            throw err;
+        });
+    }
+    window.clearTrainingUploads = clearTrainingUploads;
+
     var originalUpdateTrainingDataCountFromDashboard =
         typeof updateTrainingDataCountFromDashboard === 'function'
             ? updateTrainingDataCountFromDashboard
@@ -4742,8 +4839,16 @@ document.addEventListener('DOMContentLoaded', function() {
             refreshBtn.parentNode.replaceChild(refreshClone, refreshBtn);
             refreshClone.dataset.statsBound = '1';
             refreshClone.addEventListener('click', function() {
-                fetchTrainingDataStats();
+                refreshTrainingDataStatsFromButton(refreshClone);
             });
+        }
+
+        var dataClearBtn = $r('#training-data-clear');
+        if (dataClearBtn && !dataClearBtn.dataset.statsBound) {
+            var clearClone = dataClearBtn.cloneNode(true);
+            dataClearBtn.parentNode.replaceChild(clearClone, dataClearBtn);
+            clearClone.dataset.statsBound = '1';
+            clearClone.addEventListener('click', clearTrainingUploads);
         }
 
         var dirInput = $r('#training-image-dir');
@@ -4782,6 +4887,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 requestUrl.indexOf('/api/train') !== -1 &&
                 requestUrl.indexOf('/api/train/upload') === -1 &&
                 requestUrl.indexOf('/api/train/data_stats') === -1 &&
+                requestUrl.indexOf('/api/train/clear_uploads') === -1 &&
+                requestUrl.indexOf('/api/train/data_clear') === -1 &&
                 init &&
                 init.body instanceof FormData &&
                 !init.body.get('target')

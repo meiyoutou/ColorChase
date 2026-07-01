@@ -312,7 +312,7 @@
                                 </article>
                             </div>
 
-                            <div class="training-column training-column-right">
+                            <div class="training-column training-column-right training-column-right-top">
                                 <div class="training-config-head">
                                     <div>
                                         <div class="training-workbench-kicker training-config-kicker">训练编排</div>
@@ -372,38 +372,78 @@
                                         </div>
                                     </section>
 
-                                    <section class="training-card training-data-card training-span-2">
-                                        <div class="training-card-head-inline">
-                                            <div class="training-card-title">训练数据</div>
-                                            <button id="training-data-refresh" class="training-chip-btn" type="button">刷新数据量</button>
-                                        </div>
-                                        <div class="training-data-layout">
-                                            <div class="training-upload-buttons">
-                                                <button id="training-upload-btn" class="training-upload-card" type="button">
-                                                    <div>
-                                                        <strong>上传训练图片</strong>
-                                                        <span>选择新的训练样本，用来补充或替换当前数据。</span>
-                                                    </div>
-                                                </button>
-                                                <button id="training-upload-folder-btn" class="training-upload-card training-upload-card--folder" type="button">
-                                                    <div>
-                                                        <strong>上传文件夹</strong>
-                                                        <span>选择整个文件夹，自动包含所有子文件夹下的图片。</span>
-                                                    </div>
-                                                </button>
-                                                <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
-                                                <input id="training-upload-folder-input" type="file" webkitdirectory directory multiple hidden>
-                                            </div>
-                                            <div class="training-form-stack">
-                                                <label class="training-form-field">
-                                                    <span>训练数据目录</span>
-                                                    <input id="training-image-dir" type="text" value="temp_train_data">
-                                                </label>
-                                                <div class="training-data-size-bar">当前训练数据量：<strong id="training-data-count">50 张 / 3.7 MB</strong></div>
-                                            </div>
-                                        </div>
-                                    </section>
+                                </div>
+                            </div>
 
+                            <section class="training-card training-data-card">
+                                <div class="training-data-card-glow" aria-hidden="true"></div>
+                                <div class="training-data-header">
+                                    <div class="training-data-title-area">
+                                        <div class="training-card-title">Training Dataset</div>
+                                        <div class="training-data-summary">
+                                            <span class="training-data-pulse" aria-hidden="true"></span>
+                                            <span class="training-data-summary-label">DATASET STATUS</span>
+                                            <strong id="training-data-count" class="training-data-summary-value">50 张 / 3.7 MB</strong>
+                                        </div>
+                                    </div>
+                                    <div class="training-data-actions">
+                                        <button id="training-data-refresh" class="training-data-action-btn" type="button" title="刷新数据量">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M21 12a9 9 0 0 1-15.1 6.6M3 12A9 9 0 0 1 18.1 5.4"></path>
+                                                <path d="M21 4v6h-6M3 20v-6h6"></path>
+                                            </svg>
+                                            <span>Refresh</span>
+                                        </button>
+                                        <button id="training-data-clear" class="training-data-action-btn training-data-action-btn--danger" type="button" title="清除上传数据">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M4 7h16"></path>
+                                                <path d="M10 11v6M14 11v6"></path>
+                                                <path d="M6 7l1 13h10l1-13"></path>
+                                                <path d="M9 7V4h6v3"></path>
+                                            </svg>
+                                            <span>Clear Data</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="training-data-path-panel">
+                                    <span class="training-data-path-label">DIRECTORY</span>
+                                    <input id="training-image-dir" type="text" value="temp_train_data" aria-label="训练数据目录">
+                                </div>
+
+                                <div class="training-upload-grid">
+                                    <button id="training-upload-btn" class="training-upload-card" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M12 3v12"></path>
+                                                <path d="M7 8l5-5 5 5"></path>
+                                                <path d="M4 15v4h16v-4"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>Upload Images</strong>
+                                            <small>Single or multi-image import</small>
+                                        </span>
+                                    </button>
+                                    <button id="training-upload-folder-btn" class="training-upload-card training-upload-card--folder" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M3 6h6l2 3h10v10H3z"></path>
+                                                <path d="M12 12v5M9.5 14.5h5"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>Upload Folder</strong>
+                                            <small>Recursive subfolder import</small>
+                                        </span>
+                                    </button>
+                                    <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
+                                    <input id="training-upload-folder-input" type="file" webkitdirectory directory multiple hidden>
+                                </div>
+                            </section>
+
+                            <div class="training-column training-column-right training-column-right-bottom">
+                                <div class="training-config-grid">
                                     <section class="training-card training-param-card training-span-2">
                                         <div class="training-card-title">训练参数</div>
                                         <div class="training-params-grid">

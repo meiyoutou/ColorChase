@@ -6078,11 +6078,6 @@ html[data-theme="light"] .training-stage-card select {
   grid-row: 1;
 }
 
-.training-status-shell {
-  grid-column: 1;
-  grid-row: 2;
-}
-
 .training-column-right {
   grid-column: 2;
   grid-row: 1 / span 2;

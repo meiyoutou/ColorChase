@@ -129,13 +129,27 @@ function normalizeProjectAssetUrl(value, projectId) {
             return '/api/project_assets/' + parts[0] + '/' + parts.slice(1).map(encodeURIComponent).join('/');
         }
     }
+    // 识别迁移后的 storage/projects/assets/{pid}/... 本地绝对路径，转成 HTTP URL
+    var marker2 = '/storage/projects/assets/';
+    var marker2Index = normalized.toLowerCase().indexOf(marker2);
+    if (marker2Index >= 0) {
+        var rest2 = normalized.slice(marker2Index + marker2.length).replace(/^\/+/, '');
+        var parts2 = rest2.split('/');
+        if (parts2.length >= 2) {
+            var pathPid = Number(parts2[0]);
+            if (!pid || pathPid === pid) {
+                return '/api/project_assets/' + parts2[0] + '/' + parts2.slice(1).map(encodeURIComponent).join('/');
+            }
+        }
+    }
     return '';
 }
 
 function getImageReferenceSrc(img) {
     if (!img) return '';
+    // localReferencePath 在旧快照里可能存本地路径，过 normalize 转 HTTP URL
     return img.refDataUrl ||
-        img.localReferencePath ||
+        normalizeProjectAssetUrl(img.localReferencePath, window.currentProjectId) ||
         normalizeProjectAssetUrl(img.refSavedPath, window.currentProjectId) ||
         normalizeProjectAssetUrl(window._refSavedPath, window.currentProjectId) ||
         '';
@@ -143,7 +157,8 @@ function getImageReferenceSrc(img) {
 
 function getImageResultSrc(img, fallbackSrc) {
     if (!img) return fallbackSrc || '';
-    return img.localResultPath ||
+    // localResultPath 在旧快照里可能存本地绝对路径，统一过 normalize 转 HTTP URL
+    return normalizeProjectAssetUrl(img.localResultPath, window.currentProjectId) ||
         img.resultDataUrl ||
         normalizeProjectAssetUrl(img.resultSavedPath, window.currentProjectId) ||
         fallbackSrc ||
@@ -518,7 +533,10 @@ function restoreCurrentState() {
 
 /* ---------- Switch Target ---------- */
 function loadSwitchImageData() {
-    const resultSrc = $('#canvas-result').src;
+    const img = getCurrentImage();
+    // 优先用持久化的原始追色结果(img.resultDataUrl)，避免用当前画布(可能已是调整后)作为基准导致叠加
+    // localResultPath 在旧快照里可能是本地路径，过 normalize 转 HTTP URL
+    const resultSrc = (img && (img.resultDataUrl || normalizeProjectAssetUrl(img.localResultPath || '', window.currentProjectId))) || $('#canvas-result').src;
     if (!resultSrc) return;
 
     const loadImg = new Image();
@@ -1620,11 +1638,12 @@ async function importBatchFiles(files) {
 
         for (const item of data.images) {
             let projectSavedPath = item.path || '';
-            let projectSourcePath = item.path;
-            let projectThumbnailUrl = item.thumbnail || item.asset_url || item.path;
+            // 优先用 HTTP URL（asset_url/thumbnail），避免用本地路径(item.path)作为 <img src> 触发 file:// 错误
+            let projectSourcePath = item.asset_url || item.thumbnail || item.path;
+            let projectThumbnailUrl = item.thumbnail || item.asset_url || '';
             if (window.currentProjectId && !item.project_saved) {
                 try {
-            const projectAssetPath = await saveFileToProject(item.asset_url || item.path, 'source', item.name);
+            const projectAssetPath = await saveFileToProject(item.asset_url || '', 'source', item.name);
             if (projectAssetPath) {
                 projectSavedPath = projectAssetPath;
                 projectSourcePath = projectAssetPath;
@@ -1656,7 +1675,10 @@ async function importBatchFiles(files) {
                 rating: 0,
                 resultSavedPath: '',
                 savedPath: projectSavedPath,
-                localSourcePath: projectSourcePath,
+                // localSourcePath 用于 <img src> 显示，必须是浏览器可解码的 URL（JPG/PNG/HTTP）。
+                // RAW 文件（.CR2/.NEF 等）浏览器原生不能渲染，必须用后端生成的 JPG 缩略图 URL。
+                // sourcePath 字段保留原 asset_url（可能是 .CR2 URL）供追色接口解析回本地 RAW 文件。
+                localSourcePath: projectThumbnailUrl || projectSourcePath,
                 localReferencePath: '',
                 localResultPath: '',
             };
@@ -5724,6 +5746,15 @@ function clearWorkspaceState() {
     videoFps = 25;
     refFile = null;
     if (videoFileUrl) { URL.revokeObjectURL(videoFileUrl); videoFileUrl = null; }
+    // 清空帧缩略图状态，避免跨项目残留
+    _frameThumbnails = [];
+    _frameThumbActiveIdx = -1;
+    _frameThumbsGenerating = false;
+    var _frameList = document.getElementById('frame-thumbnails-list');
+    if (_frameList) _frameList.innerHTML = '';
+    // 清空调整基准数据，避免叠加
+    _originalImageData = null;
+    _stylizedImageData = null;
     resetAdjustSliders();
     renderGallery();
     var canvasPlaceholder = document.getElementById('canvas-placeholder');
@@ -5818,12 +5849,52 @@ function loadSnapshotData(snap, pid) {
 
     if (snap.targetImages && snap.targetImages.length > 0) {
         var defParams = { intensity: 100, exposure: 100, contrast: 100, highlight: 100, shadow: 100, vibrance: 100 };
+        // 快照里可能存的是本地绝对路径(D:\...\storage\projects\assets\{pid}\source\xxx)，
+        // 直接赋给 <img src> 会触发 file:// 拒绝加载；这里用 normalizeProjectAssetUrl 转成 /api/project_assets/ HTTP URL
+        var _norm = function(v) { return normalizeProjectAssetUrl(v, pid); };
+        // 浏览器原生不能解码 RAW 格式（.CR2/.NEF/.ARW 等），显示用 URL 必须过滤掉这些扩展名，
+        // 改用后端生成的 JPG 缩略图 URL（thumbs/{uid}_thumb.jpg）。
+        // 注意：sourcePath 字段不过滤（保留 .CR2 URL 供追色接口解析回本地原 RAW 文件）。
+        var RAW_EXTS = ['.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.rw2', '.raw', '.rwl', '.orf', '.pef', '.ptx', '.3fr', '.fff', '.iiq', '.cap', '.eip', '.mef', '.mos', '.mfw', '.x3f', '.dcr', '.kdc', '.k25', '.dcs', '.srw', '.erf', '.cs1', '.cs4', '.cs16', '.sti', '.bay', '.pxn', '.braw', '.r3d', '.ari', '.cine', '.lfp', '.rwz', '.dng'];
+        var _isDisplayable = function(u) {
+            var s = String(u || '').toLowerCase().split('?')[0];
+            if (!s) return false;
+            if (/^(data:|blob:)/.test(s)) return true;
+            for (var i = 0; i < RAW_EXTS.length; i++) {
+                if (s.endsWith(RAW_EXTS[i])) return false;
+            }
+            return true;
+        };
+        // 把 RAW source URL 转成后端生成的 thumbs JPG URL。
+        // 规则：/api/project_assets/{pid}/source/{uid}.{ext}  →  /api/project_assets/{pid}/thumbs/{uid}_thumb.jpg
+        // 后端 upload_batch 在生成原图同时会用 rawpy 解码 RAW 并写入 thumbs/{uid}_thumb.jpg（main.py 行 802-810）
+        var _toThumbUrl = function(normalizedUrl) {
+            if (!normalizedUrl) return '';
+            var m = normalizedUrl.match(/^\/api\/project_assets\/(\d+)\/source\/([^\/]+)$/);
+            if (!m) return '';
+            var pid2 = m[1];
+            var name = m[2];
+            var dotIdx = name.lastIndexOf('.');
+            var stem = dotIdx > 0 ? name.slice(0, dotIdx) : name;
+            return '/api/project_assets/' + pid2 + '/thumbs/' + stem + '_thumb.jpg';
+        };
+        var _dispUrl = function(v) {
+            var u = _norm(v);
+            if (!u) return '';
+            if (_isDisplayable(u)) return u;
+            // RAW 扩展名被过滤，尝试转成后端生成的 thumbs JPG URL
+            return _toThumbUrl(u);
+        };
         targetImages = snap.targetImages.map(function(img, idx) {
+            // sourcePath 用于追色 target_path，后端能解析 .CR2 URL 回本地 RAW 文件，所以保留原值不过滤
+            var _src = _norm(img.localSourcePath) || _norm(img.savedPath) || _norm(img.sourcePath) || '';
+            // 显示用 _thumb 必须是浏览器可解码的 URL（JPG/PNG/HTTP/data:），过滤 RAW 扩展名
+            var _thumb = _dispUrl(img.thumbnailUrl) || _dispUrl(img.localSourcePath) || _dispUrl(img.savedPath) || _dispUrl(img.sourcePath) || _src;
             return {
                 id: 'img_' + Date.now() + '_' + idx,
                 name: img.name || '',
-                sourcePath: img.localSourcePath || img.savedPath || img.sourcePath,
-                thumbnailUrl: img.localSourcePath || img.thumbnailUrl || img.savedPath || img.sourcePath,
+                sourcePath: _src,
+                thumbnailUrl: _thumb,
                 meta: img.meta || '',
                 resultDataUrl: img.resultDataUrl || null,
                 refDataUrl: img.refDataUrl || null,
@@ -5865,11 +5936,12 @@ function loadSnapshotData(snap, pid) {
             $('#canvas-resolution').textContent = img.meta || '';
             $('#canvas-placeholder').hidden = true;
             $('#canvas-stack').hidden = false;
-            var thumbSrc = img.localSourcePath || img.thumbnailUrl || img.sourcePath;
+            // 显示用 thumbSrc 必须过滤 RAW 扩展名（浏览器不能直接解码 .CR2 等）
+            var thumbSrc = _dispUrl(img.thumbnailUrl) || _dispUrl(img.localSourcePath) || _dispUrl(img.sourcePath) || '';
             $('#canvas-original').src = thumbSrc;
-            $('#canvas-result').src = img.localResultPath || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
+            $('#canvas-result').src = normalizeProjectAssetUrl(img.localResultPath, pid) || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
             _origCanvasDataUrl = thumbSrc;
-            _resultCanvasDataUrl = img.localResultPath || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
+            _resultCanvasDataUrl = normalizeProjectAssetUrl(img.localResultPath, pid) || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
             setViewMode('single');
             restoreCurrentState();
             if (img.localResultPath || img.resultDataUrl || img.resultSavedPath) {

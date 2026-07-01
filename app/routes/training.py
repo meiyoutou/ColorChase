@@ -1,5 +1,7 @@
 import asyncio
+import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -8,6 +10,26 @@ from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
 from config import get_training_corpus_dir
+
+
+def _append_upload_index(training_path: Path, records: list):
+    """把上传记录追加到 training_path/upload_index.json
+    结构: {"samples": [{file, original_name, relative_path, group, uploaded_at}, ...]}
+    用于训练样本页按子文件夹分组展示。图片仍按 UUID 平铺保存，不强依赖真实目录结构。
+    """
+    index_path = training_path / "upload_index.json"
+    data = {"samples": []}
+    if index_path.exists():
+        try:
+            with open(index_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and isinstance(loaded.get("samples"), list):
+                    data = loaded
+        except (ValueError, OSError):
+            pass
+    data["samples"].extend(records)
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def create_training_router(
@@ -89,11 +111,23 @@ def create_training_router(
     async def api_train_upload(
         files: List[UploadFile] = File(...),
         image_dir: str = Form(str(get_training_corpus_dir())),
+        relative_paths: str = Form(""),
     ):
         training_path = resolve_training_dir(image_dir)
         training_path.mkdir(parents=True, exist_ok=True)
+        # 解析前端传来的相对路径数组（来自 webkitRelativePath）
+        # 选文件按钮上传时这个字段为空，group 统一为 ""（根目录）
+        try:
+            rel_paths_list = json.loads(relative_paths) if relative_paths else []
+        except (ValueError, TypeError):
+            rel_paths_list = []
+        if not isinstance(rel_paths_list, list):
+            rel_paths_list = []
+
         saved = []
-        for file in files:
+        index_records = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for idx, file in enumerate(files):
             if not file or not file.filename:
                 continue
             ext = Path(file.filename).suffix.lower() or ".jpg"
@@ -106,6 +140,30 @@ def create_training_router(
             with open(save_path, "wb") as f:
                 f.write(content)
             saved.append(save_name)
+
+            # 提取相对路径和分组（用于训练样本页按子文件夹展示）
+            rel_path = ""
+            if idx < len(rel_paths_list) and rel_paths_list[idx]:
+                rel_path = str(rel_paths_list[idx])
+            if not rel_path:
+                rel_path = file.filename or ""
+            # group = webkitRelativePath 中第一级子目录名（跳过根文件夹名）
+            # 例: "MyDataset/sunsets/a.jpg" -> "sunsets"
+            #     "MyDataset/a.jpg" -> ""（根目录）
+            parts = [p for p in rel_path.replace("\\", "/").split("/") if p]
+            group = parts[1] if len(parts) >= 2 else ""
+
+            index_records.append({
+                "file": save_name,
+                "original_name": file.filename or "",
+                "relative_path": rel_path,
+                "group": group,
+                "uploaded_at": now_iso,
+            })
+
+        # 保存分组信息到 upload_index.json（追加模式），图片仍平铺在 training_path 根目录
+        if index_records:
+            _append_upload_index(training_path, index_records)
 
         stats = get_training_data_stats_payload(str(training_path))
         return JSONResponse({

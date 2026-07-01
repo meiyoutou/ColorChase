@@ -2610,6 +2610,91 @@ function initTrainingWorkbench() {
         });
     }
 
+    // ===== 文件夹上传：webkitdirectory 递归选中所有子文件夹下的图片 =====
+    // 与"选文件"按钮并存，互不影响。后端 /api/train/upload 不变，仍按扩展名+大小校验。
+    var uploadFolderBtn = $r('#training-upload-folder-btn');
+    var uploadFolderInput = $r('#training-upload-folder-input');
+    if (uploadFolderBtn && uploadFolderInput && !uploadFolderBtn.dataset.bound) {
+        uploadFolderBtn.dataset.bound = '1';
+        uploadFolderBtn.addEventListener('click', function() { uploadFolderInput.click(); });
+        uploadFolderInput.addEventListener('change', function() {
+            if (!uploadFolderInput.files || !uploadFolderInput.files.length) return;
+            // 1. 按扩展名过滤出图片（与后端 TRAINING_IMAGE_EXTENSIONS 对齐，双重校验）
+            var imgExts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
+            var imgFiles = [];
+            Array.prototype.forEach.call(uploadFolderInput.files, function(file) {
+                var name = (file.name || '').toLowerCase();
+                var ok = false;
+                for (var i = 0; i < imgExts.length; i++) {
+                    if (name.endsWith(imgExts[i])) { ok = true; break; }
+                }
+                if (ok) imgFiles.push(file);
+            });
+            var totalScanned = uploadFolderInput.files.length;
+            if (imgFiles.length === 0) {
+                if (typeof showToast === 'function') {
+                    showToast('未在所选文件夹中找到图片文件（共扫描 ' + totalScanned + ' 个文件）');
+                }
+                uploadFolderInput.value = '';
+                return;
+            }
+            // 2. 分批上传，每批 50 张，避免单请求过大
+            var imageDir = (($r('#training-image-dir') || {}).value || 'temp_train_data');
+            var batchSize = 50;
+            var uploaded = 0;
+            var failed = 0;
+            var idx = 0;
+            appendTrainingLog('文件夹上传开始：已扫描 ' + totalScanned + ' 个文件，发现图片 ' + imgFiles.length + ' 张');
+            function uploadNextBatch() {
+                if (idx >= imgFiles.length) {
+                    // 全部完成：进度文案汇总 已上传 / 已失败
+                    if (typeof showToast === 'function') {
+                        showToast('文件夹上传完成：已上传 ' + uploaded + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张' : ''));
+                    }
+                    appendTrainingLog('文件夹上传完成：已上传 ' + uploaded + ' / 已失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
+                    uploadFolderInput.value = '';
+                    return;
+                }
+                var batch = imgFiles.slice(idx, idx + batchSize);
+                var form = new FormData();
+                batch.forEach(function(file) { form.append('files', file); });
+                // 同时上传每个文件的 webkitRelativePath（后端按子文件夹分组保存到 upload_index.json）
+                var relPaths = batch.map(function(file) {
+                    return file.webkitRelativePath || file.name || '';
+                });
+                form.append('relative_paths', JSON.stringify(relPaths));
+                form.append('image_dir', imageDir);
+                fetch('/api/train/upload', {
+                    method: 'POST',
+                    body: form
+                })
+                .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+                .then(function(result) {
+                    if (!result.ok) throw new Error((result.data && result.data.detail) || '训练图片上传失败');
+                    var saved = (result.data.saved_count || 0);
+                    uploaded += saved;
+                    // 后端按扩展名/大小过滤，本批次中没保存的算失败
+                    failed += (batch.length - saved);
+                    if (result.data.training_file_count !== undefined) {
+                        updateTrainingDataCountDirect(result.data.training_file_count, result.data.training_size_mb);
+                    }
+                    appendTrainingLog('文件夹上传进度：已上传 ' + uploaded + ' / 已失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
+                    idx += batchSize;
+                    uploadNextBatch();
+                })
+                .catch(function(err) {
+                    // 整批失败：本批全部计入 failed，继续下一批
+                    failed += batch.length;
+                    if (typeof showToast === 'function') showToast(err.message || '训练图片上传失败');
+                    appendTrainingLog('文件夹上传批次失败：' + (err.message || '未知错误') + '（本批 ' + batch.length + ' 张）');
+                    idx += batchSize;
+                    uploadNextBatch();
+                });
+            }
+            uploadNextBatch();
+        });
+    }
+
     var startBtn = $r('#training-start-btn');
     if (startBtn && !startBtn.dataset.bound) {
         startBtn.dataset.bound = '1';

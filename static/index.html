@@ -161,42 +161,6 @@
 
                         <div class="training-workbench-body">
                             <div class="training-column training-column-left">
-                                <section class="training-card training-plan-card">
-                                    <div class="training-card-header">
-                                        <div>
-                                            <h3>当前训练计划</h3>
-                                            <p>把关键摘要提到前面，启动前一眼确认目标、阶段、数据和执行模式。</p>
-                                        </div>
-                                        <span class="training-pill training-pill-primary" id="training-mode-pill">同步训练</span>
-                                    </div>
-                                    <div class="training-summary-grid">
-                                        <div class="training-summary-item">
-                                            <span>目标模型</span>
-                                            <strong id="training-summary-target">NeuralPreset</strong>
-                                        </div>
-                                        <div class="training-summary-item">
-                                            <span>训练阶段</span>
-                                            <strong id="training-summary-stage">完整训练</strong>
-                                        </div>
-                                        <div class="training-summary-item">
-                                            <span>数据目录</span>
-                                            <strong id="training-summary-dir">temp_train_data</strong>
-                                        </div>
-                                        <div class="training-summary-item">
-                                            <span>验证集</span>
-                                            <strong id="training-summary-validation">启用</strong>
-                                        </div>
-                                        <div class="training-summary-item">
-                                            <span>数据规模</span>
-                                            <strong id="training-summary-data">50 张 / 3.7 MB</strong>
-                                        </div>
-                                        <div class="training-summary-item">
-                                            <span>执行模式</span>
-                                            <strong id="training-summary-mode">同步执行</strong>
-                                        </div>
-                                    </div>
-                                </section>
-
                                 <article class="training-card training-model-status-card">
                                     <div class="training-card-header">
                                         <div>
@@ -404,7 +368,43 @@
                                         </div>
                                     </article>
 
-                                    <section class="training-card training-param-card training-span-2">
+                                    <section class="training-card training-plan-card">
+                                        <div class="training-card-header">
+                                            <div>
+                                                <h3>当前训练计划</h3>
+                                                <p>把关键摘要提到前面，启动前一眼确认目标、阶段、数据和执行模式。</p>
+                                            </div>
+                                            <span class="training-pill training-pill-primary" id="training-mode-pill">同步训练</span>
+                                        </div>
+                                        <div class="training-summary-grid">
+                                            <div class="training-summary-item">
+                                                <span>目标模型</span>
+                                                <strong id="training-summary-target">NeuralPreset</strong>
+                                            </div>
+                                            <div class="training-summary-item">
+                                                <span>训练阶段</span>
+                                                <strong id="training-summary-stage">完整训练</strong>
+                                            </div>
+                                            <div class="training-summary-item">
+                                                <span>数据目录</span>
+                                                <strong id="training-summary-dir">temp_train_data</strong>
+                                            </div>
+                                            <div class="training-summary-item">
+                                                <span>验证集</span>
+                                                <strong id="training-summary-validation">启用</strong>
+                                            </div>
+                                            <div class="training-summary-item">
+                                                <span>数据规模</span>
+                                                <strong id="training-summary-data">50 张 / 3.7 MB</strong>
+                                            </div>
+                                            <div class="training-summary-item">
+                                                <span>执行模式</span>
+                                                <strong id="training-summary-mode">同步执行</strong>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section class="training-card training-param-card">
                                         <div class="training-card-title">训练参数</div>
                                         <div class="training-params-grid">
                                             <label class="training-form-field">
@@ -449,7 +449,7 @@
                                         </div>
                                     </section>
 
-                                    <section class="training-control-card training-span-2">
+                                    <section class="training-control-card">
                                         <div class="training-card-title">训练控制</div>
                                         <div class="training-control-actions">
                                             <button id="training-start-btn" class="training-control-btn primary" type="button">开始训练</button>

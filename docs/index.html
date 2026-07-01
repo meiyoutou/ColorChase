@@ -1,647 +1,1759 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ColorChase Static Preview</title>
-  <meta name="description" content="ColorChase static UI preview for GitHub Pages">
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #09090b;
-      --panel: rgba(17, 24, 39, .88);
-      --panel-2: rgba(15, 23, 42, .94);
-      --line: rgba(255,255,255,.12);
-      --text: #f8fafc;
-      --muted: #a1a1aa;
-      --cyan: #22d3ee;
-      --violet: #818cf8;
-      --green: #34d399;
-      --pink: #fb7185;
-      --amber: #f59e0b;
-      --shadow: 0 28px 84px rgba(0,0,0,.34);
-      font-synthesis-weight: none;
-      text-rendering: geometricPrecision;
-    }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Inter, "Segoe UI", Arial, sans-serif;
-      background:
-        radial-gradient(circle at 82% 0%, rgba(129,140,248,.24), transparent 34rem),
-        radial-gradient(circle at 10% 82%, rgba(34,211,238,.14), transparent 30rem),
-        linear-gradient(180deg, #09090b 0%, #0b1120 100%);
-      color: var(--text);
-    }
-    a { color: inherit; }
-    .shell {
-      width: min(1500px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 28px 0 56px;
-    }
-    .hero {
-      border: 1px solid var(--line);
-      border-radius: 34px;
-      background: linear-gradient(145deg, rgba(17,24,39,.96), rgba(35,22,58,.90));
-      box-shadow: var(--shadow);
-      padding: 34px;
-      display: grid;
-      grid-template-columns: 1.1fr .9fr;
-      gap: 28px;
-      overflow: hidden;
-    }
-    .hero h1 {
-      margin: 0 0 14px;
-      font-size: clamp(42px, 4vw, 74px);
-      line-height: .95;
-      letter-spacing: 0;
-    }
-    .hero p {
-      margin: 0;
-      max-width: 860px;
-      color: var(--muted);
-      font-size: 18px;
-      line-height: 1.8;
-    }
-    .hero-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 22px;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 40px;
-      padding: 10px 16px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.06);
-      text-decoration: none;
-      font-weight: 800;
-      font-size: 14px;
-      letter-spacing: 0;
-    }
-    .pill.primary {
-      background: linear-gradient(90deg, var(--cyan), var(--violet));
-      color: #0b1020;
-      border-color: transparent;
-    }
-    .hero-preview {
-      display: grid;
-      gap: 14px;
-      align-content: start;
-    }
-    .mini-screen {
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      background: var(--panel-2);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-      overflow: hidden;
-    }
-    .mini-screen .bar {
-      height: 42px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 0 16px;
-      background: rgba(255,255,255,.03);
-      border-bottom: 1px solid rgba(255,255,255,.06);
-    }
-    .dots { display: flex; gap: 6px; }
-    .dots span {
-      width: 11px;
-      height: 11px;
-      border-radius: 50%;
-      background: rgba(255,255,255,.18);
-    }
-    .preview-grid {
-      display: grid;
-      grid-template-columns: 1.25fr .75fr;
-      gap: 14px;
-      padding: 14px;
-    }
-    .photo {
-      min-height: 220px;
-      border-radius: 20px;
-      position: relative;
-      overflow: hidden;
-      background: linear-gradient(145deg, #1f2937, #4c1d95);
-    }
-    .photo::after {
-      content: "";
-      position: absolute;
-      inset: 30px;
-      border-radius: 999px;
-      border: 10px solid rgba(255,255,255,.16);
-      transform: rotate(-18deg);
-    }
-    .stack { display: grid; gap: 14px; }
-    .card-line {
-      height: 70px;
-      border-radius: 18px;
-      background: rgba(255,255,255,.07);
-      border: 1px solid rgba(255,255,255,.08);
-    }
-    .metric-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-top: 16px;
-    }
-    .metric {
-      min-height: 110px;
-      padding: 18px 20px;
-      border-radius: 22px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.06);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-    }
-    .metric .k { color: var(--muted); font-size: 14px; font-weight: 700; }
-    .metric .v { margin-top: 12px; font-size: 28px; font-weight: 900; }
-    .metric .s { margin-top: 8px; color: var(--muted); font-size: 13px; }
-    .gallery {
-      display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
-      gap: 18px;
-      margin-top: 22px;
-      align-items: start;
-    }
-    .nav {
-      position: sticky;
-      top: 16px;
-      display: grid;
-      gap: 12px;
-      padding: 16px;
-      border-radius: 26px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      box-shadow: var(--shadow);
-    }
-    .nav button {
-      width: 100%;
-      border: 0;
-      border-radius: 18px;
-      padding: 14px 16px;
-      background: transparent;
-      color: var(--text);
-      text-align: left;
-      font: inherit;
-      font-weight: 800;
-      cursor: pointer;
-      transition: .18s ease;
-    }
-    .nav button:hover,
-    .nav button.is-active {
-      background: linear-gradient(90deg, rgba(34,211,238,.18), rgba(129,140,248,.20));
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
-    }
-    .stage {
-      min-height: 900px;
-      border-radius: 30px;
-      border: 1px solid var(--line);
-      background: rgba(17,24,39,.76);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-      padding: 22px;
-    }
-    .stage-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-    .stage-head h2 {
-      margin: 0;
-      font-size: 30px;
-      letter-spacing: 0;
-    }
-    .stage-head span {
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 700;
-    }
-    .screen {
-      display: none;
-      gap: 18px;
-      animation: fade .2s ease;
-    }
-    .screen.is-active { display: grid; }
-    @keyframes fade {
-      from { opacity: .65; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .screen-grid {
-      display: grid;
-      grid-template-columns: 1.2fr .8fr;
-      gap: 18px;
-    }
-    .panel {
-      border-radius: 24px;
-      border: 1px solid rgba(255,255,255,.08);
-      background:
-        radial-gradient(circle at 50% -26%, rgba(129,140,248,.10), transparent 34%),
-        rgba(15, 23, 42, .96);
-      overflow: hidden;
-    }
-    .panel-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 18px 20px;
-      border-bottom: 1px solid rgba(255,255,255,.07);
-      background: rgba(255,255,255,.02);
-    }
-    .panel-head strong {
-      font-size: 18px;
-      letter-spacing: 0;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.07);
-      color: #e2e8f0;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .panel-body { padding: 18px 20px 20px; }
-    .workspace-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-    }
-    .placeholder {
-      min-height: 180px;
-      border-radius: 20px;
-      background: linear-gradient(145deg, rgba(59,130,246,.15), rgba(168,85,247,.16));
-      border: 1px solid rgba(255,255,255,.08);
-      position: relative;
-      overflow: hidden;
-    }
-    .placeholder::before,
-    .placeholder::after {
-      content: "";
-      position: absolute;
-      inset: 18px;
-      border-radius: 16px;
-      border: 2px dashed rgba(255,255,255,.15);
-    }
-    .placeholder::after {
-      inset: 42px 36px;
-      border-style: solid;
-      border-radius: 999px;
-      opacity: .55;
-    }
-    .control-list {
-      display: grid;
-      gap: 12px;
-    }
-    .control {
-      height: 56px;
-      border-radius: 16px;
-      background: rgba(255,255,255,.07);
-      border: 1px solid rgba(255,255,255,.09);
-    }
-    .flow {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .step {
-      padding: 18px;
-      border-radius: 22px;
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.08);
-      min-height: 152px;
-      position: relative;
-    }
-    .step .no {
-      width: 40px;
-      height: 40px;
-      border-radius: 12px;
-      display: grid;
-      place-items: center;
-      font-weight: 900;
-      color: #0b1020;
-      background: linear-gradient(90deg, var(--cyan), var(--violet));
-      margin-bottom: 14px;
-    }
-    .step b {
-      display: block;
-      margin-bottom: 10px;
-      font-size: 18px;
-    }
-    .step span {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.65;
-    }
-    .flowline {
-      height: 8px;
-      border-radius: 999px;
-      margin: 12px 0 18px;
-      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink));
-    }
-    .shot {
-      width: 100%;
-      border-radius: 20px;
-      border: 1px solid rgba(255,255,255,.08);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
-      display: block;
-      background: #0f172a;
-    }
-    .footer {
-      margin-top: 20px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.8;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      justify-content: space-between;
-    }
-    .footer a { color: #dbeafe; text-decoration: none; }
-    @media (max-width: 1120px) {
-      .hero, .gallery, .screen-grid { grid-template-columns: 1fr; }
-      .nav { position: static; grid-auto-flow: column; grid-template-columns: repeat(4, 1fr); overflow-x: auto; }
-      .nav button { white-space: nowrap; }
-      .metric-row, .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 720px) {
-      .shell { width: min(100vw - 18px, 1500px); padding: 10px 0 32px; }
-      .hero, .stage { padding: 18px; }
-      .metric-row, .flow, .workspace-grid { grid-template-columns: 1fr; }
-      .preview-grid { grid-template-columns: 1fr; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ColorChase - AI智能追色</title>
+    <link rel="stylesheet" href="./static/css/style.css?v=20260630-bugfix9">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bgDark: '#111827',
+              cardBg: '#1F2937',
+              accentPurple: '#8B5CF6',
+              accentBlue: '#3B82F6',
+              progressBar: '#6B7280',
+              highlight: '#2D3748',
+            }
+          }
+        }
+      }
+    </script>
 </head>
 <body>
-  <main class="shell">
-    <section class="hero">
-      <div>
-        <h1>ColorChase</h1>
-        <p>一个可在 GitHub Pages 上直接浏览的静态 UI 预览。这里把图片追色、视频追色、风格 / LUT、训练、个人空间和管理后台，做成可以翻看的界面样张。</p>
-        <div class="hero-links">
-          <a class="pill primary" href="#gallery">Open Preview</a>
-          <a class="pill" href="assets/colorchase-showcase.html">Open HTML Showcase</a>
-          <a class="pill" href="../README.md">Project README</a>
+
+<div id="app-router">
+
+<div id="view-home" class="view-container" style="display:none;">
+    <header class="top-bar">
+        <div class="logo-area">
+            <img src="./static/assets/logo.png" class="logo-icon" alt="ColorChase">
         </div>
-        <div class="metric-row">
-          <div class="metric"><div class="k">Screens</div><div class="v">7</div><div class="s">覆盖主要页面</div></div>
-          <div class="metric"><div class="k">Modes</div><div class="v">2</div><div class="s">Dark / Light</div></div>
-          <div class="metric"><div class="k">Assets</div><div class="v">SVG</div><div class="s">可直接渲染</div></div>
-          <div class="metric"><div class="k">Deploy</div><div class="v">Pages</div><div class="s">静态托管</div></div>
+        <div class="top-actions">
+            <span id="nav-login-btn" style="cursor:pointer;color:var(--text-primary);font-size:14px;display:flex;align-items:center;gap:6px;">👤 登录</span>
+            <button id="nav-notice-btn" class="top-icon-btn" type="button" title="更新日志" style="display:none;">
+                <span id="nav-notice-badge" class="top-icon-badge" style="display:none;"></span>
+                <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
+                    <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
+                </svg>
+            </button>
+            <button id="nav-contact-btn" class="top-icon-btn" type="button" title="联系方式" style="display:none;">
+                <span id="nav-contact-badge" class="top-icon-badge" style="display:none;"></span>
+                <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H10l-3.5 3v-3H7.5A2.5 2.5 0 0 1 5 13.5Z"></path>
+                    <path d="M9 10.5h6"></path>
+                </svg>
+            </button>
+            <span id="nav-settings-btn" style="cursor:pointer;font-size:18px;display:none;">⚙️</span>
         </div>
-      </div>
-      <div class="hero-preview">
-        <div class="mini-screen">
-          <div class="bar">
-            <div class="dots"><span></span><span></span><span></span></div>
-            <span style="color:var(--muted);font-weight:800;font-size:13px;">workspace preview</span>
-          </div>
-          <div class="preview-grid">
-            <div class="photo" aria-hidden="true"></div>
-            <div class="stack">
-              <div class="card-line"></div>
-              <div class="card-line"></div>
-              <div class="card-line"></div>
+    </header>
+    <div style="display:flex;height:calc(100vh - var(--topbar-h));">
+        <div class="home-sidebar">
+            <div class="home-nav-item active" data-nav="home"><span class="nav-icon nav-icon-home"></span>我的主页</div>
+            <div class="home-nav-item" data-nav="local"><span class="nav-icon nav-icon-folder"></span>本地项目</div>
+            <div class="home-nav-item" data-nav="space"><span class="nav-icon nav-icon-user"></span>个人空间</div>
+            <div class="home-nav-item" data-nav="trash"><span class="nav-icon nav-icon-trash"></span>回收站</div>
+            <div class="home-nav-item admin-only-nav" data-nav="train" style="display:none;"><span class="nav-icon nav-icon-folder"></span>模型训练</div>
+            <div class="home-theme-slot">
+                <button class="theme-switch theme-switch-home" id="home-theme-toggle" type="button" title="切换主题">浅色模式</button>
             </div>
-          </div>
         </div>
-        <img class="shot" src="assets/colorchase-overview.svg" alt="ColorChase workspace overview">
-      </div>
-    </section>
+        <div class="home-content">
+            <div class="home-content-header">
+                <span class="home-content-title" id="home-content-title">我的主页</span>
+                <input type="text" class="home-search-input" name="project-search" placeholder="搜索" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-form-type="other">
+            </div>
+            <div class="admin-welcome-banner" id="admin-welcome-banner" style="display:none;">
+                <div class="admin-welcome-copy">
+                    <div class="admin-welcome-eyebrow">ADMIN MODE</div>
+                    <div class="admin-welcome-title">欢迎回来，管理员</div>
+                    <div class="admin-welcome-text">ColorChase 已准备好继续学习新的色彩风格。</div>
+                </div>
+                <button class="admin-welcome-action" id="admin-welcome-train-btn" type="button">进入模型训练</button>
+            </div>
+            <div class="card-row" id="home-func-cards">
+                <div class="card card-pic" data-type="image">
+                    <div class="card-header">
+                        <div class="icon-circle">
+                            <svg class="card-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-8.5c0-.83-.67-1.5-1.5-1.5S7 10.67 7 11.5 7.67 13 8.5 13s1.5-.67 1.5-1.5zm7 0c-.83 0-1.5.67-1.5 1.5S16.17 13 17 13s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm-4-7c-.83 0-1.5.67-1.5 1.5S12.17 7 13 7s1.5-.67 1.5-1.5S13.83 4 13 4z"/></svg>
+                        </div>
+                        <div class="card-title">图片追色</div>
+                        <div class="card-subtitle">从图片中捕捉色彩灵感</div>
+                    </div>
+                    <div class="card-media">
+                        <div class="media-overlay">
+                            <div class="crosshair-icon"><div class="crosshair-dot"></div></div>
+                        </div>
+                    </div>
+                    <div class="color-strip">
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                    </div>
+                </div>
+                <div class="card card-vid" data-type="video">
+                    <div class="card-header">
+                        <div class="icon-circle">
+                            <svg class="card-svg" viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4z"/><path d="M10 9l5 3-5 3V9z"/></svg>
+                        </div>
+                        <div class="card-title">视频追色</div>
+                        <div class="card-subtitle">从视频中捕捉动态色彩</div>
+                    </div>
+                    <div class="card-media">
+                        <div class="media-overlay">
+                            <div class="play-icon-wrapper"><div class="play-arrow"></div></div>
+                        </div>
+                    </div>
+                    <div class="color-strip">
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                        <div class="color-item"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="home-section-sep"></div>
+            <div class="home-section-subtitle">我的项目</div>
+            <div class="home-filter-bar">
+                <span class="home-filter-tag active">最近浏览过 <span id="home-project-count">0</span></span>
+                <span class="home-filter-tag">创建的项目</span>
+                <span class="home-filter-tag">相册</span>
+            </div>
+            <div id="trash-toolbar" style="display:none; margin-bottom:14px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; background:#2a1a1e; border:1px solid #4a2a2e; border-radius:8px; padding:10px 16px; margin-bottom:10px;">
+                    <span style="color:#f87171; font-size:13px;">⚠️ 回收站中的项目将在 30 天后自动清除</span>
+                    <button id="empty-trash-btn" style="background:transparent; border:1px solid #d32f2f; color:#d32f2f; padding:4px 14px; border-radius:4px; cursor:pointer; font-size:12px;">清空回收站</button>
+                </div>
+            </div>
+            <div id="space-panel" class="admin-panel-shell" style="display:none;">
+                <div id="space-panel-content" class="admin-empty-state">正在准备你的空间概览...</div>
+            </div>
+            <div id="train-panel" class="admin-panel-shell" style="display:none;">
+                <section class="admin-training-page">
+                    <div class="admin-welcome-banner training-welcome-banner">
+                        <div class="admin-welcome-copy">
+                            <div class="admin-welcome-title">欢迎回来，管理员</div>
+                            <div class="admin-welcome-text">ColorChase 已准备好继续学习新的色彩风格。</div>
+                        </div>
+                        <button id="admin-training-enter" class="admin-welcome-action" type="button">进入模型训练</button>
+                    </div>
 
-    <section class="gallery" id="gallery">
-      <aside class="nav" aria-label="preview navigation">
-        <button class="is-active" data-screen="overview">Overview</button>
-        <button data-screen="image">Image Transfer</button>
-        <button data-screen="video">Video Transfer</button>
-        <button data-screen="styles">Styles / LUT</button>
-        <button data-screen="training">Training</button>
-        <button data-screen="space">User Space</button>
-        <button data-screen="admin">Admin Center</button>
-      </aside>
+                    <div class="training-workbench">
+                        <header class="training-workbench-hero">
+                            <div class="training-workbench-hero-copy">
+                                <div class="training-workbench-kicker">TRAINING DASHBOARD</div>
+                                <h2>模型训练</h2>
+                                <p>仅管理员可用。训练会占用当前服务，请确认训练数据与服务状态后再启动。</p>
+                            </div>
+                            <div class="training-workbench-hero-actions">
+                                <span class="admin-chip">Admin Only</span>
+                                <button id="training-workbench-close" class="training-workbench-close" type="button" aria-label="关闭">×</button>
+                            </div>
+                        </header>
 
-      <section class="stage">
-        <div class="stage-head">
-          <h2>Static UI Preview</h2>
-          <span>Click tabs to browse each screen</span>
+                        <div class="training-workbench-body">
+                            <div class="training-column training-column-left">
+                                <section class="training-card training-plan-card">
+                                    <div class="training-card-header">
+                                        <div>
+                                            <h3>当前训练计划</h3>
+                                            <p>把关键摘要提到前面，启动前一眼确认目标、阶段、数据和执行模式。</p>
+                                        </div>
+                                        <span class="training-pill training-pill-primary" id="training-mode-pill">同步训练</span>
+                                    </div>
+                                    <div class="training-summary-grid">
+                                        <div class="training-summary-item">
+                                            <span>目标模型</span>
+                                            <strong id="training-summary-target">NeuralPreset</strong>
+                                        </div>
+                                        <div class="training-summary-item">
+                                            <span>训练阶段</span>
+                                            <strong id="training-summary-stage">完整训练</strong>
+                                        </div>
+                                        <div class="training-summary-item">
+                                            <span>数据目录</span>
+                                            <strong id="training-summary-dir">temp_train_data</strong>
+                                        </div>
+                                        <div class="training-summary-item">
+                                            <span>验证集</span>
+                                            <strong id="training-summary-validation">启用</strong>
+                                        </div>
+                                        <div class="training-summary-item">
+                                            <span>数据规模</span>
+                                            <strong id="training-summary-data">50 张 / 3.7 MB</strong>
+                                        </div>
+                                        <div class="training-summary-item">
+                                            <span>执行模式</span>
+                                            <strong id="training-summary-mode">同步执行</strong>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <article class="training-card training-model-status-card">
+                                    <div class="training-card-header">
+                                        <div>
+                                            <h3>当前模型状态</h3>
+                                            <p id="training-model-status-summary">正在读取模型权重、设备和可用入口。</p>
+                                        </div>
+                                        <button id="admin-model-refresh" class="training-chip-btn" type="button">刷新状态</button>
+                                    </div>
+                                    <div class="training-model-list" id="training-model-list">
+                                        <div class="training-model-item training-model-ready">
+                                            <div class="training-model-copy">
+                                                <em>N</em>
+                                                <div>
+                                                    <span>归一化阶段</span>
+                                                    <small>基础映射</small>
+                                                </div>
+                                            </div>
+                                            <strong id="training-model-norm">未就绪</strong>
+                                        </div>
+                                        <div class="training-model-item training-model-pending">
+                                            <div class="training-model-copy">
+                                                <em>S</em>
+                                                <div>
+                                                    <span>风格阶段</span>
+                                                    <small>风格拟合</small>
+                                                </div>
+                                            </div>
+                                            <strong id="training-model-style">未就绪</strong>
+                                        </div>
+                                        <div class="training-model-item training-model-ready">
+                                            <div class="training-model-copy">
+                                                <em>NP</em>
+                                                <div>
+                                                    <span>NeuralPreset</span>
+                                                    <small>主训练链路</small>
+                                                </div>
+                                            </div>
+                                            <strong id="training-model-neural">未就绪</strong>
+                                        </div>
+                                        <div class="training-model-item">
+                                            <div class="training-model-copy">
+                                                <em>MF</em>
+                                                <div>
+                                                    <span>ModFlows</span>
+                                                    <small>扩展目标</small>
+                                                </div>
+                                            </div>
+                                            <strong id="training-model-modflows">预留</strong>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <article class="training-card model-manager-card">
+                                    <div class="training-card-header">
+                                        <div>
+                                            <h3>模型管理</h3>
+                                            <p id="model-manager-summary">正在读取模型安装状态、默认模型和最近一次 benchmark。</p>
+                                        </div>
+                                        <button id="model-manager-refresh" class="training-chip-btn" type="button">刷新管理</button>
+                                    </div>
+                                    <div class="model-manager-toolbar">
+                                        <div class="model-manager-device">
+                                            <span>运行设备</span>
+                                            <strong id="model-manager-device">unknown</strong>
+                                        </div>
+                                        <label class="model-manager-default">
+                                            <span>默认模型</span>
+                                            <select id="model-manager-default-select"></select>
+                                        </label>
+                                    </div>
+                                    <div class="model-manager-list" id="model-manager-list">
+                                        <div class="model-manager-empty">正在准备模型管理数据...</div>
+                                    </div>
+                                </article>
+
+                                <article class="training-status-shell">
+                                    <div class="training-status-head">
+                                        <div>
+                                            <h3>训练状态</h3>
+                                            <p>这一块对应你现有的进度、损失、耗时、状态和日志核心区域。</p>
+                                        </div>
+                                        <button id="training-log-clear" class="training-status-clear" type="button">清空日志</button>
+                                    </div>
+                                    <div class="training-status-progress">
+                                        <strong id="training-status-progress">0</strong>
+                                        <span>%</span>
+                                    </div>
+                                    <div id="training-status-message" class="training-status-note">等待启动</div>
+                                    <div class="training-status-mini-grid">
+                                        <div class="training-status-mini">
+                                            <span>当前损失</span>
+                                            <strong id="training-status-loss">--</strong>
+                                        </div>
+                                        <div class="training-status-mini">
+                                            <span>已用时间</span>
+                                            <strong id="training-status-time">--</strong>
+                                        </div>
+                                        <div class="training-status-mini">
+                                            <span>当前 Epoch</span>
+                                            <strong id="training-status-epoch">--</strong>
+                                        </div>
+                                        <div class="training-status-mini">
+                                            <span>预估剩余</span>
+                                            <strong id="training-status-eta">--</strong>
+                                        </div>
+                                    </div>
+                                    <pre class="training-log-box" id="training-log-box">[15:13:30] 训练数据：50 张，3.7 MB</pre>
+                                    <div class="training-status-dot-row" aria-hidden="true">
+                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                        <span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span>
+                                    </div>
+                                </article>
+                            </div>
+
+                            <div class="training-column training-column-right training-column-right-top">
+                                <div class="training-config-head">
+                                    <div>
+                                        <div class="training-workbench-kicker training-config-kicker">训练编排</div>
+                                        <h3>配置本次训练任务</h3>
+                                        <p>模块顺序保持目标、阶段、数据、参数、操作，和你想要的训练流程一致。</p>
+                                    </div>
+                                    <span class="training-pill">同步接口</span>
+                                </div>
+
+                                <div class="training-config-grid">
+                                    <section class="training-card training-target-card">
+                                        <div class="training-card-title">训练目标</div>
+                                        <div class="training-target-list" id="training-targets">
+                                            <label class="training-target-item is-selected">
+                                                <input id="training-target-neuralpreset" type="radio" name="training-target" value="neuralpreset" checked>
+                                                <span class="training-target-dot"></span>
+                                                <div class="training-target-copy">
+                                                    <strong>NeuralPreset</strong>
+                                                    <small>当前唯一可启动的训练目标</small>
+                                                </div>
+                                            </label>
+                                            <label class="training-target-item">
+                                                <input id="training-target-modflows-b0" type="radio" name="training-target" value="modflows_b0">
+                                                <span class="training-target-dot"></span>
+                                                <div class="training-target-copy">
+                                                    <strong>ModFlows B0</strong>
+                                                    <small>已预留后端分流，当前版本未开放训练</small>
+                                                </div>
+                                            </label>
+                                            <label class="training-target-item">
+                                                <input id="training-target-modflows-b6" type="radio" name="training-target" value="modflows_b6">
+                                                <span class="training-target-dot"></span>
+                                                <div class="training-target-copy">
+                                                    <strong>ModFlows B6</strong>
+                                                    <small>已预留后端分流，当前版本未开放训练</small>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div id="training-target-hint" class="training-card-hint">NeuralPreset 已接入真实训练链路；ModFlows B0 / B6 目前只保留后端分流入口，选择后会明确提示未实现。</div>
+                                    </section>
+
+                                    <section class="training-card training-stage-card">
+                                        <div class="training-card-title">训练阶段</div>
+                                        <div class="training-form-stack">
+                                            <label class="training-form-field">
+                                                <span>阶段选择</span>
+                                                <select id="training-stage">
+                                                    <option value="both" selected>完整训练</option>
+                                                    <option value="norm">归一化阶段</option>
+                                                    <option value="style">风格阶段</option>
+                                                </select>
+                                            </label>
+                                            <div class="training-stage-desc-card">
+                                                <span>阶段说明</span>
+                                                <strong id="training-stage-desc">归一化 + 风格阶段同时执行</strong>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                </div>
+                            </div>
+
+                            <section class="training-card training-data-card">
+                                <div class="training-data-card-glow" aria-hidden="true"></div>
+                                <div class="training-data-header">
+                                    <div class="training-data-title-area">
+                                        <div class="training-card-title">Training Dataset</div>
+                                        <div class="training-data-summary">
+                                            <span class="training-data-pulse" aria-hidden="true"></span>
+                                            <span class="training-data-summary-label">DATASET STATUS</span>
+                                            <strong id="training-data-count" class="training-data-summary-value">50 张 / 3.7 MB</strong>
+                                        </div>
+                                    </div>
+                                    <div class="training-data-actions">
+                                        <button id="training-data-refresh" class="training-data-action-btn" type="button" title="刷新数据量">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M21 12a9 9 0 0 1-15.1 6.6M3 12A9 9 0 0 1 18.1 5.4"></path>
+                                                <path d="M21 4v6h-6M3 20v-6h6"></path>
+                                            </svg>
+                                            <span>Refresh</span>
+                                        </button>
+                                        <button id="training-data-clear" class="training-data-action-btn training-data-action-btn--danger" type="button" title="清除上传数据">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M4 7h16"></path>
+                                                <path d="M10 11v6M14 11v6"></path>
+                                                <path d="M6 7l1 13h10l1-13"></path>
+                                                <path d="M9 7V4h6v3"></path>
+                                            </svg>
+                                            <span>Clear Data</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="training-data-path-panel">
+                                    <span class="training-data-path-label">DIRECTORY</span>
+                                    <input id="training-image-dir" type="text" value="temp_train_data" aria-label="训练数据目录">
+                                </div>
+
+                                <div class="training-upload-grid">
+                                    <button id="training-upload-btn" class="training-upload-card" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M12 3v12"></path>
+                                                <path d="M7 8l5-5 5 5"></path>
+                                                <path d="M4 15v4h16v-4"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>Upload Images</strong>
+                                            <small>Single or multi-image import</small>
+                                        </span>
+                                    </button>
+                                    <button id="training-upload-folder-btn" class="training-upload-card training-upload-card--folder" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M3 6h6l2 3h10v10H3z"></path>
+                                                <path d="M12 12v5M9.5 14.5h5"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>Upload Folder</strong>
+                                            <small>Recursive subfolder import</small>
+                                        </span>
+                                    </button>
+                                    <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
+                                    <input id="training-upload-folder-input" type="file" webkitdirectory directory multiple hidden>
+                                </div>
+                            </section>
+
+                            <div class="training-column training-column-right training-column-right-bottom">
+                                <div class="training-config-grid">
+                                    <section class="training-card training-param-card training-span-2">
+                                        <div class="training-card-title">训练参数</div>
+                                        <div class="training-params-grid">
+                                            <label class="training-form-field">
+                                                <span>Epoch</span>
+                                                <input id="training-epoch" type="number" value="100">
+                                            </label>
+                                            <label class="training-form-field">
+                                                <span>Batch Size</span>
+                                                <input id="training-batch" type="number" value="4">
+                                            </label>
+                                            <label class="training-form-field">
+                                                <span>Learning Rate</span>
+                                                <input id="training-lr" type="text" value="0.0001">
+                                            </label>
+                                            <label class="training-form-field">
+                                                <span>训练尺寸</span>
+                                                <input id="training-size" type="text" value="512">
+                                            </label>
+                                        </div>
+                                        <label class="training-switch-row">
+                                            <input id="training-val-enabled" type="checkbox" checked>
+                                            <span class="training-switch-track"></span>
+                                            <span class="training-switch-label">启用验证集</span>
+                                        </label>
+                                        <div class="training-param-summary-grid">
+                                            <div class="training-param-summary-item">
+                                                <span>Epoch</span>
+                                                <strong id="training-summary-epochs">100</strong>
+                                            </div>
+                                            <div class="training-param-summary-item">
+                                                <span>Batch Size</span>
+                                                <strong id="training-summary-batch">4</strong>
+                                            </div>
+                                            <div class="training-param-summary-item">
+                                                <span>Learning Rate</span>
+                                                <strong id="training-summary-lr">0.0001</strong>
+                                            </div>
+                                            <div class="training-param-summary-item">
+                                                <span>训练尺寸</span>
+                                                <strong id="training-summary-size">512</strong>
+                                            </div>
+                                        </div>
+                                    </section>
+
+                                    <section class="training-control-card training-span-2">
+                                        <div class="training-card-title">训练控制</div>
+                                        <div class="training-control-actions">
+                                            <button id="training-start-btn" class="training-control-btn primary" type="button">开始训练</button>
+                                            <button id="training-pause-btn" class="training-control-btn" type="button" disabled>暂停</button>
+                                            <button id="training-resume-btn" class="training-control-btn" type="button" disabled>继续</button>
+                                            <button id="training-cancel-btn" class="training-control-btn" type="button" disabled>取消</button>
+                                        </div>
+                                        <div class="training-control-note">暂停、继续、取消需要后端返回训练任务 ID 才能准确控制。当前为意图演示，实际对接时请携带真实 taskId 请求后端接口。</div>
+                                    </section>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <div class="home-project-grid" id="home-project-grid"></div>
+        </div>
+    </div>
+</div>
+
+<div id="view-login" class="view-container" style="display:none;">
+    <div class="auth-container">
+        <div class="auth-card">
+            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">登录</h2>
+            <input type="text" id="login-account" class="auth-input" placeholder="邮箱 / 手机号">
+            <input type="password" id="login-password" class="auth-input" placeholder="密码">
+            <div id="login-error" class="auth-error" style="display:none;"></div>
+            <button id="login-submit-btn" class="auth-btn">登录</button>
+            <div class="auth-link">还没有账号？<span class="auth-link-action" id="login-to-register">立即注册</span></div>
+        </div>
+    </div>
+</div>
+
+<div id="view-register" class="view-container" style="display:none;">
+    <div class="auth-container">
+        <div class="auth-card">
+            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">注册</h2>
+            <input type="text" id="register-account" class="auth-input" placeholder="邮箱（用于接收验证码）">
+            <div class="auth-code-row">
+                <input type="text" id="register-code" class="auth-input auth-code-input" placeholder="验证码">
+                <button id="send-code-btn" class="auth-btn auth-code-btn" type="button">发送验证码</button>
+            </div>
+            <div id="send-code-tip" class="auth-code-tip" style="display:none;"></div>
+            <input type="password" id="register-password" class="auth-input" placeholder="密码">
+            <input type="password" id="register-password2" class="auth-input" placeholder="确认密码">
+            <div id="register-error" class="auth-error" style="display:none;"></div>
+            <button id="register-submit-btn" class="auth-btn">注册</button>
+            <div class="auth-link">已有账号？<span class="auth-link-action" id="register-to-login">立即登录</span></div>
+        </div>
+    </div>
+</div>
+
+<div id="view-workspace" class="view-container" style="display:none;">
+    <div class="app-shell">
+        <header class="top-bar">
+            <div class="logo-area">
+                <img src="./static/assets/logo.png" class="logo-icon" alt="ColorChase">
+            </div>
+            <div class="top-actions">
+                <span id="workspace-home-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;margin-right:12px;" title="返回主页">🏠</span>
+                <button id="workspace-notice-btn" class="top-icon-btn" type="button" title="更新日志">
+                    <span id="workspace-notice-badge" class="top-icon-badge" style="display:none;"></span>
+                    <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
+                        <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
+                    </svg>
+                </button>
+                <button id="workspace-contact-btn" class="top-icon-btn" type="button" title="联系方式">
+                    <span id="workspace-contact-badge" class="top-icon-badge" style="display:none;"></span>
+                    <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H10l-3.5 3v-3H7.5A2.5 2.5 0 0 1 5 13.5Z"></path>
+                        <path d="M9 10.5h6"></path>
+                    </svg>
+                </button>
+                <span id="workspace-settings-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;" title="设置">⚙️</span>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <aside class="left-sidebar" id="left-sidebar">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">📂 目标图库</span>
+                    <button class="sidebar-toggle" id="sidebar-toggle" title="折叠侧栏">◀</button>
+                </div>
+                <div class="sidebar-actions" id="sidebar-actions">
+                    <button class="sidebar-import-btn" id="batch-import-btn">📥 导入图片</button>
+                    <input type="file" id="batch-file-input" multiple accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz,.psd,.psb,.heif,.heic,.avif,.jxl,.exr,.tif,.tiff" hidden>
+                    <input type="file" id="batch-dir-input" webkitdirectory hidden>
+                    <div class="batch-select-bar" id="batch-select-bar" hidden>
+                        <button class="batch-select-btn" id="toggle-select-btn" title="全选">☐</button>
+                        <span class="batch-star-rating" id="batch-star-rating"></span>
+                    </div>
+                </div>
+                <div class="sidebar-body" id="gallery-list">
+                    <div class="gallery-empty" id="gallery-empty">
+                        <p>📷</p>
+                        <p>点击上方按钮导入图片</p>
+                    </div>
+                </div>
+                <div class="selection-count-bar" id="selection-count-bar">
+                    <span id="selection-count-text">未选择图片</span>
+                </div>
+            </aside>
+
+            <main class="center-canvas" id="center-canvas">
+                <div class="canvas-toolbar" id="canvas-toolbar">
+                    <span class="canvas-filename" id="canvas-filename">未选择图片</span>
+                    <span class="canvas-resolution" id="canvas-resolution"></span>
+                </div>
+
+                <div class="view-controls" id="view-controls">
+                    <button class="view-btn active" data-view="single" id="view-btn-single">
+                        <span class="view-btn-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
+                        </span> 单视图
+                    </button>
+                    <button class="view-btn" data-view="compare" id="view-btn-compare" disabled>
+                        <span class="view-btn-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="18" rx="1"></rect><rect x="13" y="3" width="8" height="18" rx="1"></rect></svg>
+                        </span> 对比视图
+                    </button>
+                    <button class="view-btn" data-view="reference" id="view-btn-reference" disabled>
+                        <span class="view-btn-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="M20 19l-4-4"></path><path d="M4 19l4-4"></path></svg>
+                        </span> 参考视图
+                    </button>
+                    <span class="view-separator"></span>
+                    <button class="view-press-btn" id="view-press-btn" disabled title="长按对比原图">
+                        <span class="view-btn-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </span>
+                    </button>
+                </div>
+
+                <div class="canvas-area" id="canvas-area">
+                    <div class="canvas-placeholder" id="canvas-placeholder">
+                        <div class="placeholder-icon"><img src="./static/assets/icon-small.png" alt="" style="width:100px;height:100px;"></div>
+                        <p>从左侧图库选择目标图片</p>
+                        <p class="placeholder-sub">或点击左侧"导入图片"批量添加</p>
+                    </div>
+                    <div class="canvas-stack" id="canvas-stack" hidden>
+                        <div class="canvas-pane-overlay" id="pane-result">
+                            <img id="canvas-result" class="canvas-layer" draggable="false">
+                            <img id="canvas-depth-preview" class="canvas-depth-preview" hidden draggable="false">
+                            <img id="canvas-mask-preview" class="canvas-mask-preview" hidden draggable="false">
+                        </div>
+                    </div>
+                    <div class="compare-pane compare-pane-left" id="compare-left" hidden>
+                        <div class="compare-pane-inner" id="compare-left-inner">
+                            <img id="compare-left-img" class="compare-layer" draggable="false">
+                        </div>
+                    </div>
+                    <div class="compare-pane compare-pane-right" id="compare-right" hidden>
+                        <div class="compare-pane-inner" id="compare-right-inner">
+                            <img id="compare-right-img" class="compare-layer" draggable="false">
+                        </div>
+                    </div>
+                    <img id="canvas-original" style="display:none" draggable="false">
+                    <img id="canvas-reference" style="display:none" draggable="false">
+                    <div class="canvas-divider-fixed" id="canvas-divider-fixed" hidden></div>
+                    <div class="zoom-indicator" id="zoom-indicator">Fit</div>
+                    <button class="fit-btn" id="fit-btn" title="适应画布">Fit</button>
+                </div>
+                <div class="canvas-status" id="canvas-status" hidden>
+                    <div class="progress-bar-wrap">
+                        <div class="progress-bar" id="canvas-progress-bar" style="width: 0%"></div>
+                        <span class="progress-text" id="canvas-progress-text">0%</span>
+                    </div>
+                    <div class="progress-message" id="canvas-progress-message"></div>
+                </div>
+                </main>
+
+            <aside class="right-sidebar" id="right-sidebar">
+                <div class="tab-nav" id="tab-nav">
+                    <button class="tab-btn-s active" data-tab="ai">🤖 AI 追色</button>
+                    <button class="tab-btn-s" data-tab="profile">🎨 配置文件</button>
+                    <button class="tab-btn-s" data-tab="adjust">🎚️ 调整</button>
+                    <button class="tab-btn-s" data-tab="export">💾 导出</button>
+                </div>
+
+                <div class="tab-panels" id="tab-panels">
+                    <div class="tab-panel active" data-panel="ai">
+                        <div class="panel-section">
+                            <div class="panel-label">🖼️ 参考图片</div>
+                            <div class="upload-area-s" id="ref-upload-area">
+                                <input type="file" id="ref-input" accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz,.psd,.psb,.heif,.heic,.avif,.jxl,.exr,.tif,.tiff" hidden>
+                                <div class="upload-placeholder-s" id="ref-placeholder">
+                                    <p>+ 点击上传参考图</p>
+                                </div>
+                                <img id="ref-preview" class="preview-img-s" hidden>
+                            </div>
+                            <button class="clear-btn-s" id="ref-clear" hidden>✕ 清除</button>
+                        </div>
+
+                        <div class="panel-section">
+                            <div class="panel-label">🧠 追色模式</div>
+                            <select id="ai-algorithm-select" class="panel-select">
+                                <option value="reinhard">经典追色-快速</option>
+                                <option value="histogram">直方图追色-精确</option>
+                                <option value="luminance_partition">亮度分区追色-自然</option>
+                                <option value="modflows_b0">AI全局追色-B0快速模式</option>
+                                <option value="modflows">AI全局追色-高保真</option>
+                                <option value="regional_luminance">快速分区追色-皮肤保护</option>
+                                <option value="regional_modflows">AI分区追色-皮肤保护</option>
+                                <option value="ai_portrait">AI人像追色-肤色保护</option>
+                                <option value="dncm_lut">神经预设追色-精确LUT</option>
+                                <option value="neural_preset">神经预设追色-需训练</option>
+                            </select>
+                        </div>
+
+                        <div class="panel-section" id="dncm-lut-mode-group">
+                            <div class="panel-label">LUT 模式</div>
+                            <select id="dncm-lut-mode" class="panel-select">
+                                <option value="fast">快速 LUT</option>
+                                <option value="quality">高质量 LUT</option>
+                            </select>
+                        </div>
+
+                        <div class="panel-section" id="ai-blend-group">
+                            <div class="panel-label">融合强度: <span id="ai-blend-value">85</span>%</div>
+                            <input type="range" id="ai-blend-slider" min="0" max="100" value="85">
+                        </div>
+
+                        <div class="fold-panel ai-advanced-fold collapsed" id="ai-advanced-fold">
+                            <div class="fold-header" data-fold="ai-advanced">
+                                <span class="fold-title">区域保护 / 深度分层 / 语义匹配</span>
+                                <span class="fold-arrow">▾</span>
+                            </div>
+                            <div class="fold-body">
+                                <div class="panel-section mask-panel" id="ai-mask-panel">
+                                    <div class="panel-label">区域保护</div>
+                                    <select id="ai-mask-model" class="panel-select">
+                                        <option value="auto">自动选择可用模型</option>
+                                        <option value="birefnet">BiRefNet 高质量抠图</option>
+                                        <option value="sam">SAM/SAM2 主体分割</option>
+                                        <option value="fallback">快速降级模式</option>
+                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="ai-mask-enabled"> 启用 mask
+                                    </label>
+                                    <select id="ai-mask-mode" class="panel-select">
+                                        <option value="protect_subject">保护主体 / 只追背景</option>
+                                        <option value="subject_only">只追主体</option>
+                                        <option value="protect_local">保护点选区域</option>
+                                        <option value="local_only">只追点选区域</option>
+                                    </select>
+                                    <div class="mask-actions">
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-generate" type="button">生成主体 mask</button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-clear-points" type="button">清除点选</button>
+                                    </div>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="ai-mask-preview-toggle"> mask 预览
+                                    </label>
+                                    <div class="mask-strength-row">
+                                        <span>强度 <span id="ai-mask-strength-value">100</span>%</span>
+                                        <input type="range" id="ai-mask-strength" min="0" max="100" value="100">
+                                    </div>
+                                    <div class="algo-info-s mask-status" id="ai-mask-status">未生成 mask</div>
+                                </div>
+
+                                <div class="panel-section depth-panel" id="ai-depth-panel">
+                                    <div class="panel-label">深度分层追色</div>
+                                    <select id="ai-depth-model" class="panel-select">
+                                        <option value="auto">自动选择可用模型</option>
+                                        <option value="depth_anything_v2">Depth Anything V2</option>
+                                        <option value="fallback">规则降级模式</option>
+                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="ai-depth-enabled"> 启用深度分层
+                                    </label>
+                                    <div class="mask-actions">
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-generate" type="button">生成深度图</button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-clear" type="button">清除深度</button>
+                                    </div>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="ai-depth-preview-toggle"> 深度图预览
+                                    </label>
+                                    <div class="mask-strength-row">
+                                        <span>分层强度 <span id="ai-depth-strength-value">65</span>%</span>
+                                        <input type="range" id="ai-depth-strength" min="0" max="100" value="65">
+                                    </div>
+                                    <div class="algo-info-s mask-status" id="ai-depth-status">未生成深度图</div>
+                                </div>
+
+                                <div class="panel-section semantic-panel" id="ai-semantic-panel">
+                                    <div class="panel-label">参考图语义匹配</div>
+                                    <select id="ai-semantic-model" class="panel-select">
+                                        <option value="auto">自动选择可用模型</option>
+                                        <option value="dinov2">DINOv2 语义匹配</option>
+                                        <option value="fallback">规则降级模式</option>
+                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="ai-semantic-enabled"> 启用按内容借色
+                                    </label>
+                                    <button class="panel-action-btn-secondary mask-action-btn semantic-action-btn" id="ai-semantic-analyze" type="button">分析语义匹配</button>
+                                    <div class="mask-strength-row">
+                                        <span>匹配强度 <span id="ai-semantic-strength-value">55</span>%</span>
+                                        <input type="range" id="ai-semantic-strength" min="0" max="100" value="55">
+                                    </div>
+                                    <div class="algo-info-s mask-status" id="ai-semantic-status">未分析语义匹配</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="ai-postprocess" checked> ✨ 智能后处理
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="ai-metrics"> 📊 质量评估
+                            </label>
+                        </div>
+
+                        <button class="panel-action-btn" id="ai-transfer-btn" disabled>
+                            开始 AI 追色
+                        </button>
+                        <div class="metrics-result" id="metrics-result" hidden>
+                            <div class="metrics-title">📊 质量评估结果</div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">风格相似度</span>
+                                <div class="metrics-bar-bg"><div class="metrics-bar" id="metrics-style-bar"></div></div>
+                                <span class="metrics-val" id="metrics-style-val">-</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">内容保持度</span>
+                                <div class="metrics-bar-bg"><div class="metrics-bar" id="metrics-content-bar"></div></div>
+                                <span class="metrics-val" id="metrics-content-val">-</span>
+                            </div>
+                            <div class="metrics-row">
+                                <span class="metrics-label">综合评分</span>
+                                <div class="metrics-bar-bg"><div class="metrics-bar metrics-bar-overall" id="metrics-overall-bar"></div></div>
+                                <span class="metrics-val" id="metrics-overall-val">-</span>
+                            </div>
+                        </div>
+                        <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                            批量应用
+                        </button>
+
+                        <div class="algo-info-s" id="algo-info-s"></div>
+                    </div>
+
+                    <div class="tab-panel" data-panel="profile">
+                        <div class="panel-section">
+                            <div class="panel-label">预设</div>
+                            <select id="profile-select" class="panel-select">
+                                <option value="standard">标准（无滤镜）</option>
+                                <option value="bw">黑白</option>
+                                <option value="orange_bw">橙镜黑白</option>
+                                <option value="warm">暖色调</option>
+                                <option value="cool">冷色调</option>
+                            </select>
+                        </div>
+
+                        <div class="panel-section">
+                            <div class="panel-label">自定义配置文件</div>
+                            <button class="panel-import-btn" id="profile-import-btn">导入 LUT 文件 (.cube/.3dl/.xmp...)</button>
+                            <input type="file" id="profile-file-input" accept=".cube,.3dl,.csp,.spi3d,.spi1d,.lut,.pf3,.xmp" hidden>
+                            <div class="profile-status" id="profile-status">
+                                <span id="profile-status-text">未加载配置文件</span>
+                            </div>
+                        </div>
+
+                        <button class="panel-action-btn-secondary" id="apply-profile-btn" disabled>
+                            应用配置
+                        </button>
+
+                        <div class="panel-section" id="lr-hifi-section" style="display:none;">
+                            <div class="panel-label">Lightroom 预设 (高保真)</div>
+                            <div id="lr-upgrade-hint" style="display:none;margin-top:10px;padding:14px;background:linear-gradient(135deg,rgba(14,165,233,0.07),rgba(99,102,241,0.04));border-radius:10px;border:1px solid rgba(14,165,233,0.15);position:relative;overflow:hidden;">
+                                <div style="position:absolute;top:-30px;right:-30px;width:90px;height:90px;background:radial-gradient(circle,rgba(14,165,233,0.12),transparent 70%);pointer-events:none;"></div>
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                    <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;line-height:1;">快速预览</div>
+                                    <div style="font-size:12px;color:#a1a1aa;font-weight:500;">已应用 <strong id="lr-upgrade-name" style="color:#0ea5e9;font-weight:600;"></strong></div>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                                    <span style="font-size:10px;color:#71717a;">80% 精度</span>
+                                    <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;position:relative;overflow:hidden;">
+                                        <div style="position:absolute;left:0;top:0;height:100%;width:50%;background:linear-gradient(90deg,#0ea5e9,#6366f1);border-radius:2px;"></div>
+                                    </div>
+                                    <span style="font-size:10px;color:#0ea5e9;font-weight:600;">98%</span>
+                                    <span style="font-size:9px;color:#6366f1;">高保真</span>
+                                </div>
+                                <a id="lr-upgrade-download" href="#" style="display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:11px 16px;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .2s;box-shadow:0 2px 10px rgba(14,165,233,0.3);">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    一键下载 DNG 包升级至高保真
+                                </a>
+                                <div style="font-size:10px;color:#666;margin-top:8px;text-align:center;">下载后在 Lightroom 中打开 DNG 导出 JPG，拖回上传即获 98% 高保真</div>
+                            </div>
+                            <div id="lr-manual-area" style="display:none;flex-direction:column;gap:6px;margin-top:6px;">
+                                <button class="panel-import-btn" id="lr-xmp-import-btn">1. 导入 XMP 预设文件</button>
+                                <input type="file" id="lr-xmp-input" accept=".xmp" hidden>
+                                <button class="panel-action-btn-secondary" id="lr-download-btn" disabled>2. 下载 DNG 预设包</button>
+                                <div style="display:flex;gap:6px;">
+                                    <button class="panel-import-btn" id="lr-upload-jpg-btn" style="flex:1;" disabled>3. 上传 Lightroom JPG</button>
+                                    <input type="file" id="lr-jpg-input" accept=".jpg,.jpeg" hidden>
+                                </div>
+                                <div id="lr-step2-area" style="display:none;"></div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section" id="profile-assets-section" hidden>
+                            <div class="panel-label">我的配置文件</div>
+                            <div class="assets-list" id="profile-assets-list"></div>
+                        </div>
+
+                        <div class="panel-section" style="margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
+                            <div class="panel-label">相机风格逆向 (需提供 RAW + 机内JPG)</div>
+                            <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+                                <div style="display:flex; gap:6px;">
+                                    <button class="panel-import-btn capture-file-btn" id="capture-raw-btn">选择 RAW 文件</button>
+                                    <input type="file" id="capture-raw-input" accept=".dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz" hidden>
+                                    <button class="panel-import-btn capture-file-btn" id="capture-jpg-btn">选择机内 JPG</button>
+                                    <input type="file" id="capture-jpg-input" accept=".jpg,.jpeg" hidden>
+                                </div>
+                                <button class="panel-action-btn-secondary" id="btn-capture-style" disabled>提取相机风格</button>
+                            </div>
+                            <div class="profile-status" id="capture-status">
+                                <span id="capture-status-text">请选择 RAW 和 JPG 文件</span>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <div class="panel-label">相机风格库</div>
+                            <div id="style-gallery" class="style-gallery-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px; max-height:180px; overflow-y:auto;"></div>
+                            <div id="style-gallery-empty" class="panel-hint" style="text-align:center; color:#666; font-size:11px; padding:8px 0;">尚未提取风格，双击可重命名</div>
+                        </div>
+
+                        </div>
+
+                    <div class="tab-panel" data-panel="adjust">
+                        <div class="panel-section">
+                            <div class="panel-label">需先完成 AI 追色或应用配置后方可调整</div>
+                        </div>
+                        <div class="adjust-sliders-s" id="adjust-sliders" hidden>
+                            <div class="adjust-item">
+                                <label data-param="0">程度</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="intensity-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="intensity-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                            <div class="adjust-item">
+                                <label data-param="1">曝光</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="exposure-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="exposure-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                            <div class="adjust-item">
+                                <label data-param="2">影调</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="contrast-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="contrast-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                            <div class="adjust-item">
+                                <label data-param="3">高光</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="highlight-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="highlight-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                            <div class="adjust-item">
+                                <label data-param="4">阴影</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="shadow-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="shadow-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                            <div class="adjust-item">
+                                <label data-param="5">色彩</label>
+                                <div class="adjust-row">
+                                    <input type="number" id="vibrance-num" min="0" max="200" value="100" step="5">
+                                    <input type="range" id="vibrance-slider" min="0" max="200" value="100" step="1">
+                                </div>
+                            </div>
+                        </div>
+                        <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                            批量应用
+                        </button>
+                    </div>
+
+                    <div class="tab-panel" data-panel="export">
+                        <div class="panel-section">
+                            <div class="panel-label">导出模式</div>
+                        <div class="export-mode-switch">
+                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-quick" style="flex:1; padding:8px 0; font-size:12px;">直接导出 ⚡</button>
+                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-custom" style="flex:1; padding:8px 0; font-size:12px;">自定义导出</button>
+                            </div>
+                        </div>
+
+                        <div id="export-quick-panel">
+                            <div class="panel-section">
+                                <div class="panel-label">快速设置</div>
+                                <div class="field-row">
+                                    <label class="field-label">格式</label>
+                                    <select id="quick-format" class="panel-select">
+                                        <option value="jpg">JPEG (95%)</option>
+                                        <option value="png">PNG</option>
+                                    </select>
+                                </div>
+                                <div class="field-row">
+                                    <label class="field-label">尺寸</label>
+                                    <select id="quick-size" class="panel-select">
+                                        <option value="full">原始尺寸</option>
+                                        <option value="half">1/2 缩小</option>
+                                        <option value="custom">自定义长边</option>
+                                    </select>
+                                </div>
+                                <div class="field-row" id="quick-size-custom-row" hidden>
+                                    <label class="field-label">长边像素</label>
+                                    <input type="number" id="quick-size-custom" class="input-text size-custom" value="3000" min="100" max="20000">
+                                    <span class="px-unit">px</span>
+                                </div>
+                                <div class="field-row">
+                                    <label class="field-label">色彩空间</label>
+                                    <select id="quick-colorspace" class="panel-select">
+                                        <option value="srgb">sRGB</option>
+                                        <option value="adobergb">Adobe RGB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button class="panel-action-btn-download" id="quick-export-btn" disabled>
+                                导出单张图片
+                            </button>
+                            <button class="panel-action-btn-folder" id="quick-export-folder-btn" disabled>
+                                下载到文件夹
+                            </button>
+                        </div>
+
+                        <div id="export-custom-panel" hidden>
+                            <div class="panel-section">
+                                <div class="panel-label">设置模板</div>
+                                <select id="export-template" class="panel-select">
+                                    <option value="web">网络分享 (JPEG 95% sRGB)</option>
+                                    <option value="print">印刷输出 (PNG 16-bit Adobe RGB)</option>
+                                    <option value="social">社交媒体 (JPEG 85% sRGB 长边2000px)</option>
+                                    <option value="custom">自定义</option>
+                                </select>
+                            </div>
+
+                            <div class="fold-panel">
+                                <div class="fold-header" data-fold="location">
+                                    <span class="fold-title">导出位置</span>
+                                    <span class="fold-arrow">▾</span>
+                                </div>
+                                <div class="fold-body">
+                                    <div class="field-row">
+                                        <label class="field-label">保存到</label>
+                                        <button class="btn-outline-s" id="export-pick-folder">选择文件夹...</button>
+                                        <span class="folder-path" id="export-folder-path">未选择</span>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">组织方式</label>
+                                        <select id="export-org" class="panel-select">
+                                            <option value="flat">直接保存</option>
+                                            <option value="date">按日期分组</option>
+                                            <option value="style">按风格分组</option>
+                                            <option value="date_style">按日期+风格</option>
+                                        </select>
+                                    </div>
+                                    <div class="location-preview" id="export-location-preview">
+                                        <span class="preview-path">请先选择文件夹</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="fold-panel">
+                                <div class="fold-header" data-fold="naming">
+                                    <span class="fold-title">文件命名</span>
+                                    <span class="fold-arrow">▾</span>
+                                </div>
+                                <div class="fold-body">
+                                    <div class="field-row">
+                                        <label class="field-label">命名规则</label>
+                                        <select id="export-naming" class="panel-select">
+                                            <option value="original">原文件名</option>
+                                            <option value="original_style">原文件名_风格</option>
+                                            <option value="date_original">日期_原文件名</option>
+                                            <option value="date_original_style">日期_原文件名_风格</option>
+                                            <option value="custom">自定义</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row" id="export-naming-custom-row" hidden>
+                                        <label class="field-label">自定义模板</label>
+                                        <input type="text" id="export-naming-custom" class="input-text" value="{name}_{style}" placeholder="{date}_{name}_{style}_{seq}">
+                                        <span class="field-hint">可用变量：{date} {name} {style} {seq}</span>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">序号位数</label>
+                                        <select id="export-seq-digits" class="panel-select">
+                                            <option value="2">2 位 (01-99)</option>
+                                            <option value="3">3 位 (001-999)</option>
+                                            <option value="4">4 位 (001-9999)</option>
+                                        </select>
+                                    </div>
+                                    <div class="naming-preview" id="export-naming-preview">
+                                        <span class="preview-label">预览：</span>
+                                        <span class="preview-value" id="export-naming-preview-value">IMG_001.jpg</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="fold-panel">
+                                <div class="fold-header" data-fold="settings">
+                                    <span class="fold-title">文件设置</span>
+                                    <span class="fold-arrow">▾</span>
+                                </div>
+                                <div class="fold-body">
+                                    <div class="field-row">
+                                        <label class="field-label">格式</label>
+                                        <select id="export-format" class="panel-select">
+                                            <option value="jpg">JPEG</option>
+                                            <option value="png">PNG (无损)</option>
+                                            <option value="both">JPEG + PNG</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row" id="export-quality-row">
+                                        <label class="field-label">品质: <span id="export-quality-val">95</span></label>
+                                        <input type="range" id="export-quality" class="slider-s" min="1" max="100" value="95">
+                                    </div>
+                                    <div class="field-row" id="export-est-row">
+                                        <span class="field-hint">预估大小：<span id="export-size-est">~2.3MB</span></span>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">色彩空间</label>
+                                        <select id="export-colorspace" class="panel-select">
+                                            <option value="srgb">sRGB（网络通用）</option>
+                                            <option value="adobergb">Adobe RGB（印刷用）</option>
+                                            <option value="prophoto">ProPhoto RGB（后期用）</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">位深</label>
+                                        <select id="export-bitdepth" class="panel-select">
+                                            <option value="8">8-bit</option>
+                                            <option value="16">16-bit (仅 PNG)</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">尺寸</label>
+                                        <select id="export-size" class="panel-select">
+                                            <option value="full">原始尺寸</option>
+                                            <option value="2x">2x 超分辨率</option>
+                                            <option value="half">1/2 缩小</option>
+                                            <option value="custom">自定义长边</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row" id="export-size-custom-row" hidden>
+                                        <label class="field-label">长边像素</label>
+                                        <input type="number" id="export-size-custom" class="input-text size-custom" value="3000" min="100" max="20000" step="100">
+                                        <span class="px-unit">px</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="fold-panel">
+                                <div class="fold-header" data-fold="post">
+                                    <span class="fold-title">后期处理</span>
+                                    <span class="fold-arrow">▾</span>
+                                </div>
+                                <div class="fold-body">
+                                    <div class="field-row">
+                                        <label class="field-label">导出后</label>
+                                        <select id="export-after" class="panel-select">
+                                            <option value="none">无操作</option>
+                                            <option value="open_folder">打开文件夹</option>
+                                            <option value="open_file">打开文件</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row">
+                                        <label class="field-label">水印</label>
+                                        <span class="switch-label-s">暂未实现</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button class="panel-action-btn-download" id="export-btn" disabled>
+                                导出单张图片
+                            </button>
+                            <button class="panel-action-btn-folder" id="export-folder-btn" disabled>
+                                下载到文件夹
+                            </button>
+                            <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                                批量应用到选中图片
+                            </button>
+                        </div>
+
+                        <div class="batch-progress" id="batch-progress" hidden>
+                            <div class="batch-progress-bar" id="batch-progress-bar"></div>
+                            <span class="batch-progress-text" id="batch-progress-text"></span>
+                        </div>
+                        <div class="export-current-file" id="export-current-file" hidden>
+                            <span id="export-current-file-name"></span>
+                        </div>
+                    </div>
+                </div>
+                </aside>
         </div>
 
-        <article class="screen is-active" data-view="overview">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Workspace Snapshot</strong><span class="chip">Home</span></div>
-              <div class="panel-body">
-                <div class="workspace-grid">
-                  <div class="placeholder"></div>
-                  <div class="control-list">
-                    <div class="control"></div>
-                    <div class="control"></div>
-                    <div class="control"></div>
-                    <div class="control"></div>
-                  </div>
+        <div class="modal-overlay" id="batch-modal" hidden>
+            <div class="modal-dialog batch-modal-card" role="dialog" aria-modal="true" aria-labelledby="batch-modal-title">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="batch-modal-title">批量应用</h3>
+                    <button class="modal-close" id="batch-modal-close" type="button" aria-label="关闭">×</button>
                 </div>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Signal Map</strong><span class="chip">Flow</span></div>
-              <div class="panel-body">
-                <div class="flow">
-                  <div class="step"><div class="no">1</div><b>Input</b><span>Targets, references, videos, folders, presets.</span></div>
-                  <div class="step"><div class="no">2</div><b>Analyze</b><span>Mask, depth, semantic and LUT session.</span></div>
-                  <div class="step"><div class="no">3</div><b>Transfer</b><span>Color migration, render and refinement.</span></div>
-                  <div class="step"><div class="no">4</div><b>Publish</b><span>Save, export and archive project assets.</span></div>
+                <div class="modal-body">
+                    <p class="modal-desc">将当前图片的效果应用到 <strong id="batch-target-count">0</strong> 张已选图片。</p>
+                    <label class="modal-checkbox" id="batch-opt-ai-label">
+                        <input id="batch-opt-ai" type="checkbox">
+                        <span class="modal-checkbox-text">
+                            <strong>AI 追色 / 预设效果</strong>
+                            <small>复制当前图片已生成的追色或预设结果</small>
+                        </span>
+                    </label>
+                    <label class="modal-checkbox">
+                        <input id="batch-opt-adjust" type="checkbox">
+                        <span class="modal-checkbox-text">
+                            <strong>基础调整参数</strong>
+                            <small>同步曝光、影调、色彩等滑杆设置</small>
+                        </span>
+                    </label>
                 </div>
-                <div class="flowline"></div>
-                <img class="shot" src="assets/colorchase-visual-guide.svg" alt="ColorChase visual feature guide">
-              </div>
+                <div class="modal-footer">
+                    <button class="modal-btn-cancel" id="batch-modal-cancel" type="button">取消</button>
+                    <button class="modal-btn-confirm" id="batch-modal-confirm" type="button">开始应用</button>
+                </div>
             </div>
-          </div>
-        </article>
+        </div>
 
-        <article class="screen" data-view="image">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Image Transfer</strong><span class="chip">Preview</span></div>
-              <div class="panel-body">
-                <div class="workspace-grid">
-                  <div class="placeholder" style="background:linear-gradient(145deg,#1f2937,#0f766e);"></div>
-                  <div class="placeholder" style="background:linear-gradient(145deg,#2e1065,#7c2d12);"></div>
+        <div id="video-workspace-container" style="display: none;" class="flex flex-1 overflow-hidden pt-2 px-2 gap-2 pb-2">
+            <aside class="w-72 flex flex-col gap-3 overflow-y-auto">
+                <div class="bg-[#141c29] rounded-xl p-3 border border-gray-700">
+                    <button id="video-upload-btn" class="w-full py-2 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2 shadow-lg hover:opacity-90 transition">
+                        <i class="fas fa-cloud-upload-alt"></i> 上传视频
+                    </button>
+                    <input type="file" id="video-file-input" accept="video/*" class="hidden">
                 </div>
-                <div class="flowline"></div>
-                <div class="control-list">
-                  <div class="control"></div>
-                  <div class="control"></div>
-                  <div class="control"></div>
-                </div>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Workflow</strong><span class="chip">Image</span></div>
-              <div class="panel-body">
-                <img class="shot" src="assets/colorchase-image-flow.svg" alt="Image transfer flow">
-                <div style="display:grid;gap:12px;margin-top:14px;">
-                  <div class="control"></div>
-                  <div class="control"></div>
-                  <div class="control"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
 
-        <article class="screen" data-view="video">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Video Transfer</strong><span class="chip">Frames</span></div>
-              <div class="panel-body">
-                <div class="workspace-grid">
-                  <div class="placeholder" style="background:linear-gradient(145deg,#0f172a,#312e81);"></div>
-                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#1f2937);"></div>
+                <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-medium text-gray-300">视频信息</h3>
+                        <i class="fas fa-info-circle text-gray-500 text-xs"></i>
+                    </div>
+                    <div class="space-y-1.5 text-xs" id="video-info-panel">
+                        <div class="flex justify-between"><span class="text-gray-400">文件名</span><span class="text-gray-200" id="vinfo-name">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">时长</span><span class="text-gray-200" id="vinfo-duration">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">分辨率</span><span class="text-gray-200" id="vinfo-resolution">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">帧率</span><span class="text-gray-200" id="vinfo-fps">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">大小</span><span class="text-gray-200" id="vinfo-size">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">编码</span><span class="text-gray-200" id="vinfo-codec">—</span></div>
+                    </div>
                 </div>
-                <div class="flowline"></div>
-                <div class="control-list">
-                  <div class="control"></div>
-                  <div class="control"></div>
-                  <div class="control"></div>
+
+                <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700 flex-1 overflow-y-auto" id="frame-thumbnails-container">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-medium text-gray-300">帧缩略图</h3>
+                        <div class="flex gap-2 text-gray-500"><i class="fas fa-th-large text-xs cursor-pointer hover:text-white"></i><i class="fas fa-list text-xs cursor-pointer hover:text-white"></i></div>
+                    </div>
+                    <div id="frame-thumbnails-list" class="space-y-3"></div>
                 </div>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Export Console</strong><span class="chip">MP4</span></div>
-              <div class="panel-body">
-                <div class="control" style="height:90px;"></div>
-                <div class="control" style="height:90px;margin-top:12px;"></div>
-                <div class="control" style="height:90px;margin-top:12px;"></div>
-              </div>
-            </div>
-          </div>
-        </article>
+            </aside>
 
-        <article class="screen" data-view="styles">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Styles / LUT</strong><span class="chip">Palette</span></div>
-              <div class="panel-body">
-                <div class="flow">
-                  <div class="step"><div class="no">A</div><b>Browse</b><span>Style list, extracted styles and presets.</span></div>
-                  <div class="step"><div class="no">B</div><b>Apply</b><span>Target image + style or LUT session.</span></div>
-                  <div class="step"><div class="no">C</div><b>Merge</b><span>Combine two sessions into one look.</span></div>
-                  <div class="step"><div class="no">D</div><b>Export</b><span>Lightroom-style package or preset zip.</span></div>
+            <section class="flex-1 flex flex-col gap-2 overflow-hidden min-w-0">
+                <div class="bg-[#141c29] rounded-xl flex-1 relative flex flex-col justify-center items-center overflow-hidden group">
+                    <video id="video-player" class="w-full h-full object-contain" controlsList="nodownload" style="display: none;"></video>
+                    <div id="video-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-sm">
+                        <img src="./static/assets/icon-small.png" alt="" style="width:100px;height:100px;margin-bottom:12px;">
+                        <span>上传视频后开始预览</span>
+                    </div>
+                    <div class="absolute bottom-0 w-full bg-gradient-to-t from-[#141c29]/90 to-transparent pt-20 pb-4 px-6" id="video-controls-overlay">
+                        <div class="flex items-center gap-3 text-xs text-white">
+                            <i class="fas fa-play hover:text-purple-400 cursor-pointer" id="btn-play-pause"></i>
+                            <i class="fas fa-step-backward hover:text-purple-400 cursor-pointer" id="btn-prev-frame"></i>
+                            <i class="fas fa-step-forward hover:text-purple-400 cursor-pointer" id="btn-next-frame"></i>
+                            <span id="video-time-display">00:00:00 / 00:00:00</span>
+                            <div class="flex-1 h-1 bg-gray-600 rounded-full relative cursor-pointer" id="video-progress-bar">
+                                <div class="h-full bg-purple-500 rounded-full" id="video-progress-fill" style="width: 0%;"></div>
+                                <div class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full border-2 border-purple-500" id="video-progress-thumb" style="left: 0%;"></div>
+                            </div>
+                            <i class="fas fa-volume-up hover:text-purple-400 cursor-pointer" id="btn-mute"></i>
+                        </div>
+                    </div>
                 </div>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Style Cards</strong><span class="chip">UI</span></div>
-              <div class="panel-body">
-                <div class="workspace-grid">
-                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#4338ca);"></div>
-                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#be185d);"></div>
+
+                <div class="bg-[#141c29] rounded-xl p-3 border border-gray-700">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-[15px] text-white font-medium">关键帧时间轴</span>
+                    </div>
+                    <div class="relative h-[130px] border-y border-gray-700/50" id="keyframe-timeline">
+                        <div class="absolute left-[10px] right-[10px] h-[1.5px] bg-[#6d7dda]" style="top: 43px"></div>
+                        <div class="flex justify-between items-center w-full h-full relative z-10 px-[50px]" id="keyframe-nodes-container"></div>
+                    </div>
+                    <div class="flex justify-center items-center h-15 mt-1">
+                        <span class="text-[13px] text-gray-400">← 可拖拽调整关键帧位置 →</span>
+                    </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        </article>
 
-        <article class="screen" data-view="training">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Training Dataset</strong><span class="chip">Upload</span></div>
-              <div class="panel-body">
-                <img class="shot" src="assets/colorchase-training-panel.svg" alt="Training dataset panel">
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Training Status</strong><span class="chip">Live</span></div>
-              <div class="panel-body">
-                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
-                  <div class="metric"><div class="k">Stage</div><div class="v">Both</div><div class="s">NeuralPreset</div></div>
-                  <div class="metric"><div class="k">Dataset</div><div class="v">142</div><div class="s">Images / folders</div></div>
+                <div class="bg-[#141c29] rounded-xl p-2 border border-gray-700 flex justify-between items-center px-2 text-white">
+                    <button class="flex-1 py-3 bg-indigo-600 rounded text-xs font-medium hover:bg-indigo-500 flex items-center justify-center gap-1 mx-1" id="btn-play"><i class="fas fa-play"></i> 播放</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-pause"><i class="fas fa-pause"></i> 暂停</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-prev"><i class="fas fa-step-backward"></i> 上一帧</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-next"><i class="fas fa-step-forward"></i> 下一帧</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-settings"><i class="fas fa-cog"></i></button>
                 </div>
-                <div class="control" style="height:154px;margin-top:14px;"></div>
-                <div class="control" style="height:76px;margin-top:14px;"></div>
-              </div>
-            </div>
-          </div>
-        </article>
+            </section>
 
-        <article class="screen" data-view="space">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>User Space</strong><span class="chip">Profile</span></div>
-              <div class="panel-body">
-                <img class="shot" src="assets/colorchase-user-space.svg" alt="User space dashboard">
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Resources</strong><span class="chip">KPI</span></div>
-              <div class="panel-body">
-                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
-                  <div class="metric"><div class="k">Tasks</div><div class="v">38</div><div class="s">Latest 7 days</div></div>
-                  <div class="metric"><div class="k">Storage</div><div class="v">6.3 GB</div><div class="s">Project footprint</div></div>
+            <aside class="w-80 flex flex-col gap-3 overflow-y-auto">
+                <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700">
+                    <div class="flex items-center gap-2 mb-4 text-white font-medium text-sm"><i class="fas fa-microchip text-purple-400"></i> AI 追色</div>
+
+                    <div class="border border-dashed border-gray-600 rounded-lg p-1 mb-3 text-center text-gray-400 cursor-pointer hover:border-purple-400 transition overflow-hidden relative" id="ref-dropzone" style="aspect-ratio: 4/3;">
+                        <div id="ref-dropzone-placeholder" class="flex flex-col items-center justify-center h-full">
+                            <i class="far fa-image text-2xl text-gray-500 mb-1 block"></i>
+                            <span class="text-[10px]">点击或拖拽上传参考图片</span>
+                        </div>
+                        <img id="video-ref-preview" class="absolute inset-0 w-full h-full object-contain rounded" hidden>
+                        <input type="file" id="ref-file-input" accept="image/*" class="hidden">
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs text-gray-300"><i class="fas fa-circle text-rose-400 text-[8px] mr-1"></i> 追色模式</span>
+                        <select id="chase-mode-select" class="bg-gray-800 rounded px-2 py-1 text-xs text-gray-300 border border-gray-600 cursor-pointer hover:bg-gray-700">
+                            <option value="reinhard">经典追色-快速</option>
+                            <option value="histogram">直方图追色-精确</option>
+                            <option value="luminance_partition">亮度分区追色-自然</option>
+                            <option value="modflows_b0">AI全局追色-B0快速模式</option>
+                            <option value="modflows">AI全局追色-高保真</option>
+                            <option value="regional_luminance">快速分区追色-皮肤保护</option>
+                            <option value="regional_modflows">AI分区追色-皮肤保护</option>
+                            <option value="ai_portrait">AI人像追色-肤色保护</option>
+                            <option value="dncm_lut">神经预设追色-精确LUT</option>
+                            <option value="neural_preset">神经预设追色-需训练</option>
+                        </select>
+                    </div>
+
+                    <div class="video-axes-panel mb-4">
+                        <div class="video-axis-item">
+                            <div class="video-axis-head">
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 关键帧间隔</span>
+                                <span class="video-axis-value" id="keyframe-interval-value">12</span>
+                            </div>
+                            <input type="range" id="keyframe-interval-slider" min="1" max="120" value="12" class="video-axis-range">
+                            <div class="video-axis-scale"><span>1帧</span><span>30帧</span><span>60帧</span><span>90帧</span><span>120帧</span></div>
+                        </div>
+
+                        <div class="video-axis-toggle">
+                            <input type="checkbox" id="enable-scene-detect" checked>
+                            <label for="enable-scene-detect">启用场景检测（自动发现镜头切换）</label>
+                        </div>
+
+                        <div class="video-axis-item">
+                            <div class="video-axis-head">
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 融合强度</span>
+                                <span class="video-axis-value" id="blend-intensity-value">0.75</span>
+                            </div>
+                            <input type="range" id="blend-intensity-slider" min="0" max="1" step="0.01" value="0.75" class="video-axis-range">
+                            <div class="video-axis-scale"><span>0.00</span><span>0.25</span><span>0.50</span><span>0.75</span><span>1.00</span></div>
+                        </div>
+
+                        <div class="video-axis-item">
+                            <div class="video-axis-head">
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 帧融合数量</span>
+                                <span class="video-axis-value" id="frame-blend-value">15</span>
+                            </div>
+                            <input type="range" id="frame-blend-slider" min="1" max="30" step="1" value="15" class="video-axis-range">
+                            <div class="video-axis-scale"><span>1</span><span>10</span><span>20</span><span>30</span></div>
+                        </div>
+                    </div>
+
+                    <button id="start-video-chase" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-blue-500 rounded-lg text-white font-medium text-sm flex items-center justify-center gap-2 hover:opacity-90 transition"><i class="fas fa-magic"></i> 开始追色</button>
                 </div>
-                <div class="control" style="height:110px;margin-top:14px;"></div>
-                <div class="control" style="height:110px;margin-top:14px;"></div>
-              </div>
-            </div>
-          </div>
-        </article>
 
-        <article class="screen" data-view="admin">
-          <div class="screen-grid">
-            <div class="panel">
-              <div class="panel-head"><strong>Admin Center</strong><span class="chip">Logs</span></div>
-              <div class="panel-body">
-                <div class="control" style="height:72px;"></div>
-                <div class="control" style="height:72px;margin-top:12px;"></div>
-                <div class="control" style="height:72px;margin-top:12px;"></div>
-                <div class="control" style="height:72px;margin-top:12px;"></div>
-              </div>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><strong>Model / Storage</strong><span class="chip">Ops</span></div>
-              <div class="panel-body">
-                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
-                  <div class="metric"><div class="k">Models</div><div class="v">12</div><div class="s">Ready / disabled</div></div>
-                  <div class="metric"><div class="k">Disk</div><div class="v">63%</div><div class="s">Storage used</div></div>
+                <div class="video-surface-card p-3 space-y-1 -mt-2">
+                    <div class="video-surface-row" id="btn-profile-panel">
+                        <div class="video-surface-title"><i class="fas fa-file-alt text-purple-400"></i> 配置文件</div>
+                        <i class="fas fa-chevron-right video-surface-chevron"></i>
+                    </div>
+                    <div class="video-surface-subtitle pl-8" id="video-profile-outside-status">预设管理 / 导入 LUT / 保存配置</div>
+
+                    <div class="video-surface-row video-surface-row--spaced" id="btn-export-panel">
+                        <div class="video-surface-title"><i class="fas fa-file-export text-purple-400"></i> 导出</div>
+                        <i class="fas fa-chevron-right video-surface-chevron"></i>
+                    </div>
+                    <div class="video-surface-subtitle pl-8">格式设置 / 码率设置 / 导出视频</div>
                 </div>
-                <div class="control" style="height:150px;margin-top:14px;"></div>
-              </div>
+            </aside>
+        </div>
+        <div id="video-global-progress" class="h-16 border-t border-gray-800 bg-[#141c29] flex items-center px-6 shrink-0 w-full" style="display: none;">
+            <div class="flex-grow-[2] min-w-[8px]"></div>
+            <div class="flex items-center text-sm text-gray-300 font-medium whitespace-nowrap">
+                <span id="progress-status-text">逐帧追色中...</span>
             </div>
-          </div>
-        </article>
-      </section>
-    </section>
+            <div class="flex-grow-[1] min-w-[4px]"></div>
+            <div class="flex-[3] flex items-center gap-[3px] h-5" id="progress-bar-segments"></div>
+            <div class="text-base font-medium text-purple-400 whitespace-nowrap ml-2" id="progress-percent">0%</div>
+            <div class="flex-grow-[1] min-w-[4px]"></div>
+            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-time-info">已处理: 00:00:00 / 00:00:00</div>
+            <div class="flex-grow-[1] min-w-[4px]"></div>
+            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-remaining">剩余时间: 计算中...</div>
+            <div class="flex-grow-[1] min-w-[4px]"></div>
+            <button id="btn-cancel-chase" class="px-5 py-1.5 bg-rose-600 hover:bg-rose-500 rounded text-sm font-medium text-white transition">取消</button>
+            <div class="flex-grow-[2] min-w-[8px]"></div>
+        </div>
+    </div>
+</div>
 
-    <section class="footer">
-      <div>Open the source README, or preview this page directly on GitHub Pages.</div>
-      <div><a href="https://github.com/meiyoutou/ColorChase" target="_blank" rel="noreferrer">GitHub Repo</a> · <a href="../README.md">README</a></div>
-    </section>
-  </main>
+<div id="video-profile-popup" class="video-popup" style="display:none;">
+    <div class="video-popup-inner">
+        <div class="video-popup-header">
+            <span><i class="fas fa-file-alt text-purple-400 mr-2"></i>配置文件</span>
+            <button class="video-popup-close" id="close-video-profile">&times;</button>
+        </div>
+        <div class="video-popup-body">
+            <div class="mb-3">
+                <label class="video-popup-label">预设</label>
+                <select id="video-profile-select" class="w-full bg-transparent rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
+                    <option value="standard">标准（无滤镜）</option>
+                    <option value="bw">黑白</option>
+                    <option value="orange_bw">橙镜黑白</option>
+                    <option value="warm">暖色调</option>
+                    <option value="cool">冷色调</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="video-popup-label">自定义配置文件</label>
+                <button id="btn-import-video-lut" class="video-popup-btn video-popup-btn-secondary py-1.5">导入 LUT 文件 (.cube/.3dl/.lut...)</button>
+                <input type="file" id="video-lut-input" accept=".cube,.3dl,.csp,.spi3d,.spi1d,.lut,.pf3,.xmp" class="hidden">
+                <div class="text-xs text-purple-300 mt-1 font-medium" id="video-profile-status">未加载配置文件</div>
+            </div>
+            <div class="mb-3">
+            <button id="btn-apply-video-profile" class="video-popup-btn video-popup-btn-primary py-1.5">应用配置</button>
+            <div class="video-preset-save-row">
+                <input type="text" id="video-preset-name" placeholder="预设名称" class="video-preset-name-input panel-select">
+                <button id="btn-save-video-preset" class="video-popup-btn video-popup-btn-accent video-preset-save-btn">保存</button>
+            </div>
+            </div>
+            <div class="video-popup-divider mb-3">
+                <label class="video-popup-label">相机风格逆向 (RAW + JPG)</label>
+                <div class="flex gap-2 mb-2">
+                    <button id="vcapture-raw-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">选择 RAW</button>
+                    <input type="file" id="vcapture-raw-input" accept=".dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz" hidden>
+                    <button id="vcapture-jpg-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">选择 JPG</button>
+                    <input type="file" id="vcapture-jpg-input" accept=".jpg,.jpeg" hidden>
+                </div>
+                <button id="vbtn-capture-style" class="video-popup-btn video-popup-btn-secondary w-full py-1.5" disabled>提取相机风格</button>
+                <div class="text-[10px] text-gray-500 mt-1" id="vcapture-status-text">请选择 RAW 和 JPG 文件</div>
+            </div>
+            <div class="mb-3">
+                <label class="text-xs text-gray-300 block mb-1">相机风格库</label>
+                <div id="vstyle-gallery" class="style-gallery-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px; max-height:140px; overflow-y:auto;"></div>
+                <div id="vstyle-gallery-empty" class="text-[10px] text-gray-600 text-center py-2">尚未提取风格，双击可重命名</div>
+            </div>
+        </div>
+    </div>
+</div>
 
-  <script>
-    const navButtons = Array.from(document.querySelectorAll('.nav button'));
-    const screens = Array.from(document.querySelectorAll('.screen'));
+<div id="video-export-popup" class="video-popup" style="display:none;">
+    <div class="video-popup-inner">
+        <div class="video-popup-header">
+            <span><i class="fas fa-file-export text-purple-400 mr-2"></i>导出设置</span>
+            <button class="video-popup-close" id="close-video-export">&times;</button>
+        </div>
+        <div class="video-popup-body">
+            <div class="mb-3">
+                <label class="video-popup-label">输出格式</label>
+                <select id="video-export-format" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
+                    <option value="mp4">MP4 (H.264)</option>
+                    <option value="mp4_h265">MP4 (H.265/HEVC)</option>
+                    <option value="mov">MOV (ProRes)</option>
+                    <option value="avi">AVI (无压缩)</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="video-popup-label">码率: <span class="text-purple-400 font-bold" id="video-bitrate-value">8</span> Mbps</label>
+                <input type="range" id="video-bitrate-slider" min="1" max="50" value="8" class="w-full">
+                <div class="flex justify-between text-[9px] text-gray-500 px-1"><span>1</span><span>25</span><span>50</span></div>
+            </div>
+            <div class="mb-3">
+                <label class="video-popup-label">分辨率</label>
+                <select id="video-export-resolution" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
+                    <option value="original">原始分辨率</option>
+                    <option value="4k">4K (3840×2160)</option>
+                    <option value="1080p">1080p (1920×1080)</option>
+                    <option value="720p">720p (1280×720)</option>
+                    <option value="480p">480p (854×480)</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="video-popup-label">帧率</label>
+                <select id="video-export-fps" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
+                    <option value="original">原始帧率</option>
+                    <option value="24">24 fps</option>
+                    <option value="30">30 fps</option>
+                    <option value="60">60 fps</option>
+                </select>
+            </div>
+            <button id="btn-export-video" class="w-full py-2 video-popup-btn video-popup-btn-gradient flex items-center justify-center gap-2"><i class="fas fa-download"></i> 导出视频</button>
+        </div>
+    </div>
+</div>
 
-    function setActive(name) {
-      navButtons.forEach(btn => btn.classList.toggle('is-active', btn.dataset.screen === name));
-      screens.forEach(screen => screen.classList.toggle('is-active', screen.dataset.view === name));
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+</div>
 
-    navButtons.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.screen)));
-  </script>
+<div id="settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:99990;">
+    <div style="position:absolute; top:50px; right:16px; background:#1a1a2e; padding:12px; border-radius:8px; width:150px; border:1px solid #333;">
+        <div style="padding:10px;">
+            <div style="background:#3a3a52; border-radius:6px; padding:8px; margin-bottom:6px;">
+                <div style="display:flex; align-items:center; gap:3px; margin-bottom:4px;">
+                    <span id="settings-username" style="color:#fff; font-size:13px; font-weight:600;">用户</span>
+                    <span id="settings-edit-name-btn" style="color:#888; cursor:pointer; font-size:10px;">✏️</span>
+                </div>
+                <div id="settings-name-edit-area" style="display:none; margin-bottom:4px;">
+                    <input type="text" id="settings-nickname-input" class="auth-input" placeholder="输入昵称" style="font-size:11px; padding:4px 8px;">
+                </div>
+                <div style="color:#aaa; font-size:11px; line-height:1.6;">
+                    <div>账户：<span id="settings-name-val" style="color:#ccc;"></span></div>
+                    <div>类型：<span id="settings-role-val" style="color:#f59e0b;"></span></div>
+                </div>
+            </div>
+
+            <div style="background:#32324a; border-radius:6px; padding:8px 10px; margin-bottom:6px;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <div>
+                        <div style="color:#888; font-size:10px;">已评分</div>
+                        <div style="color:#fff; font-size:13px;"><span id="settings-rated-count">0</span> <span style="color:#888; font-size:11px;">/ <span id="settings-total-count">0</span></span></div>
+                    </div>
+                    <button id="settings-rating-detail-btn" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:10px;">明细</button>
+                </div>
+            </div>
+
+            <div class="settings-menu-item" data-action="storage" style="padding-left:12px;" onclick="showStorageSettings()">项目地址</div>
+            <div class="settings-menu-item" data-action="export" style="padding-left:12px;">导出明细</div>
+            <div class="settings-theme-panel">
+                <div class="settings-theme-title">界面主题</div>
+                <button class="theme-switch theme-switch-settings" id="settings-theme-toggle" type="button">浅色模式</button>
+            </div>
+            <div class="settings-menu-item" id="settings-logout-btn" style="color:#e94560;padding-left:12px;">退出登录</div>
+            <div class="settings-menu-item" id="settings-delete-account-btn" style="color:#ff6b81;padding-left:12px;">注销账户</div>
+        </div>
+    </div>
+</div>
+
+<div id="delete-account-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.68); z-index:99992; align-items:center; justify-content:center;">
+    <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:420px; border:1px solid #444;">
+        <h3 style="color:#ff6b81; margin:0 0 10px 0; font-size:16px;">注销账户</h3>
+        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">注销后将删除你的账户、项目和相关数据，且无法恢复。</p>
+        <div id="delete-account-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">验证码将发送到当前绑定邮箱。</div>
+        <input type="password" id="delete-account-password" class="auth-input" placeholder="请输入当前密码" style="font-size:12px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="delete-account-code" class="auth-input" placeholder="请输入邮箱验证码" style="flex:1;font-size:12px;margin-bottom:0;">
+            <button id="delete-account-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">发送验证码</button>
+        </div>
+        <input type="text" id="delete-account-confirm" class="auth-input" placeholder="请输入“注销账户”确认" style="font-size:12px;">
+        <div id="delete-account-error" style="display:none;color:#ff6b81;font-size:12px;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="delete-account-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">取消</button>
+            <button id="delete-account-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;background:#ff6b81;">确认注销</button>
+        </div>
+    </div>
+</div>
+
+<div id="storage-settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:99991; align-items:center; justify-content:center;">
+    <div style="background:#2b2b3d; border-radius:8px; width:560px; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+        <div style="padding:20px 24px; border-bottom:1px solid #3a3a52;">
+            <h3 style="color:#e8e8f0; margin:0; font-size:16px;">项目地址设置</h3>
+        </div>
+        <div style="padding:24px;">
+            <div style="margin-bottom:20px;">
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #2ed573; padding-left:8px;">项目根目录</div>
+                <div class="storage-row"><span>项目文件</span><input type="text" id="sc-project-assets" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-project-assets">…</button></div>
+                <div class="storage-row"><span>本地授权</span><input type="text" id="sc-browser-project-root" class="auth-input" style="flex:1;font-size:12px;" readonly placeholder="支持的浏览器可选择本地文件夹"><button id="browser-project-root-btn" type="button" class="storage-pick-btn">…</button></div>
+                <div id="browser-project-root-status" style="color:#888;font-size:11px;line-height:1.6;margin-top:6px;">不选择时使用上方项目文件路径保存；Firefox/Safari 会自动使用后端保存。</div>
+            </div>
+            <!-- 图片追色 -->
+            <div style="margin-bottom:20px;">
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #e94560; padding-left:8px;">📷 图片追色</div>
+                <div class="storage-row"><span>图片缓存</span><input type="text" id="sc-image-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-uploads">…</button></div>
+                <div class="storage-row"><span>LUT缓存</span><input type="text" id="sc-image-luts" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-luts">…</button></div>
+                <div class="storage-row"><span>调试截图</span><input type="text" id="sc-image-debug" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-debug">…</button></div>
+            </div>
+            <!-- 视频追色 -->
+            <div style="margin-bottom:20px;">
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #6ba4e0; padding-left:8px;">🎬 视频追色</div>
+                <div class="storage-row"><span>视频缓存</span><input type="text" id="sc-video-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-uploads">…</button></div>
+                <div class="storage-row"><span>视频结果</span><input type="text" id="sc-video-results" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-results">…</button></div>
+                <div class="storage-row"><span>帧缓存</span><input type="text" id="sc-video-frames" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-frames">…</button></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <span style="color:#888; font-size:12px;">磁盘可用：<span id="storage-disk-space" style="color:#2ed573;">--</span></span>
+                <button id="storage-reset-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:6px 12px;font-size:11px;">重置默认</button>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button id="storage-cancel-btn" class="auth-btn" style="background:transparent; border:1px solid #555; width:auto; padding:8px 20px; font-size:12px;">取消</button>
+                <button id="storage-save-btn" class="auth-btn" style="width:auto; padding:8px 20px; font-size:12px;">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="notice-modal" class="top-modal-overlay" style="display:none;">
+    <div class="top-modal-card" role="dialog" aria-modal="true" aria-labelledby="notice-modal-title">
+        <div class="top-modal-header">
+            <div>
+                <div class="top-modal-kicker">NOTICE</div>
+                <h3 id="notice-modal-title">更新日志</h3>
+            </div>
+            <button id="notice-modal-close" class="top-modal-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="top-modal-body">
+            <div id="notice-modal-view"></div>
+            <div id="notice-modal-admin" class="portal-admin-editor" style="display:none;">
+                <label class="portal-admin-label" for="notice-admin-title">通知标题</label>
+                <input id="notice-admin-title" class="portal-admin-input" type="text" maxlength="80" placeholder="输入通知标题" autocomplete="off">
+                <label class="portal-admin-label" for="notice-admin-body">通知内容</label>
+                <textarea id="notice-admin-body" class="portal-admin-textarea" rows="6" placeholder="输入将发布给用户的新消息"></textarea>
+                <div class="portal-admin-actions">
+                    <button id="notice-admin-save" class="portal-admin-btn" type="button">发布通知</button>
+                </div>
+                <div class="portal-admin-history">
+                    <div class="portal-admin-history-head">
+                        <span class="portal-admin-history-title">历史更新日志</span>
+                        <label class="portal-admin-check-all">
+                            <input id="notice-admin-select-all" type="checkbox">
+                            <span>全选</span>
+                        </label>
+                    </div>
+                    <div id="notice-admin-history-list" class="portal-admin-history-list"></div>
+                    <div class="portal-admin-actions">
+                        <button id="notice-admin-delete-selected" class="portal-admin-btn portal-admin-btn-danger" type="button">删除选中</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="change-password-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.68); z-index:99992; align-items:center; justify-content:center;">
+    <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:440px; border:1px solid #444;">
+        <h3 style="color:#e8e8f0; margin:0 0 10px 0; font-size:16px;">修改密码</h3>
+        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">请输入当前密码，并通过邮箱验证码确认后设置新密码。</p>
+        <div id="change-password-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">验证码将发送到当前绑定邮箱。</div>
+        <input type="password" id="change-password-old" class="auth-input" placeholder="请输入当前密码" style="font-size:12px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="change-password-code" class="auth-input" placeholder="请输入邮箱验证码" style="flex:1;font-size:12px;margin-bottom:0;">
+            <button id="change-password-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">发送验证码</button>
+        </div>
+        <input type="password" id="change-password-new" class="auth-input" placeholder="请输入新密码（至少 6 位）" style="font-size:12px;">
+        <input type="password" id="change-password-confirm" class="auth-input" placeholder="请再次输入新密码" style="font-size:12px;">
+        <div id="change-password-error" style="display:none;color:#ff6b81;font-size:12px;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="change-password-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">取消</button>
+            <button id="change-password-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;">确认修改</button>
+        </div>
+    </div>
+</div>
+
+<div id="contact-modal" class="top-modal-overlay" style="display:none;">
+    <div class="top-modal-card top-modal-card-compact" role="dialog" aria-modal="true" aria-labelledby="contact-modal-title">
+        <div class="top-modal-header">
+            <div>
+                <div class="top-modal-kicker">CONTACT</div>
+                <h3 id="contact-modal-title">联系方式</h3>
+            </div>
+            <button id="contact-modal-close" class="top-modal-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="top-modal-body">
+            <div id="contact-modal-view"></div>
+            <div id="contact-modal-admin" class="portal-admin-editor" style="display:none;">
+                <label class="portal-admin-label" for="contact-admin-qq">QQ群</label>
+                <input id="contact-admin-qq" class="portal-admin-input" type="text" maxlength="40" placeholder="输入QQ群号" autocomplete="off">
+                <label class="portal-admin-label" for="contact-admin-notes">说明</label>
+                <textarea id="contact-admin-notes" class="portal-admin-textarea" rows="4" placeholder="输入联系方式说明"></textarea>
+                <div class="portal-admin-actions">
+                    <button id="contact-admin-save" class="portal-admin-btn" type="button">更新联系方式</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.storage-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.storage-row span { color:#aaa; font-size:12px; width:70px; flex-shrink:0; }
+.storage-pick-btn { background:#3a3a52; border:1px solid #555; color:#ccc; border-radius:4px; cursor:pointer; font-size:14px; padding:4px 8px; line-height:1; }
+.storage-pick-btn:hover { background:#4a4a62; color:#fff; }
+</style>
+
+<div id="project-context-menu" style="display:none; position:fixed; z-index:10001; background:#252545; border:1px solid #3a3a52; border-radius:6px; padding:4px 0; min-width:120px; box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+    <div class="context-menu-item" onclick="startInlineRename(contextMenuTargetId)">重命名</div>
+    <div class="context-menu-item" onclick="confirmMoveToTrash()" style="color:#ffa502;">移入回收站</div>
+    <div class="context-menu-item" onclick="confirmPermanentDeleteFromMenu()" style="color:#e94560;">永久删除</div>
+</div>
+
+<div id="trash-context-menu" style="display:none; position:fixed; z-index:10001; background:#252545; border:1px solid #3a3a52; border-radius:6px; padding:4px 0; min-width:120px; box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+    <div class="context-menu-item" onclick="restoreProject(getTrashMenuTargetId())">恢复项目</div>
+    <div class="context-menu-item" onclick="permanentlyDeleteProject(getTrashMenuTargetId())" style="color:#e94560;">永久删除</div>
+</div>
+
+<div id="rating-intercept-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:99999; align-items:center; justify-content:center;">
+    <div style="background:#1a1a2e; padding:30px; border-radius:8px; width:450px; border:1px solid #d32f2f; text-align:center;">
+        <h3 style="color:#d32f2f; margin-top:0;">⚠️ 导出拦截：存在未评分项目</h3>
+        <p style="color:#e8e8f0; font-size:14px; line-height:1.6;">您的评分将会计入模型训练，为今后更优秀的使用请认真评分后导出。</p>
+        <button id="rating-intercept-confirm-btn" class="auth-btn" style="background:#d32f2f; margin-top:20px;">我知道了，去评分</button>
+    </div>
+</div>
+
+<div id="create-project-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
+    <div class="create-project-dialog">
+        <h3 class="create-project-title">创建项目</h3>
+        <input type="hidden" id="project-type-input" value="image">
+        <input type="text" id="project-name-input" class="auth-input" placeholder="项目名称" style="font-size:13px;">
+        <div class="create-project-actions">
+            <button id="create-project-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">取消</button>
+            <button id="create-project-confirm-btn" class="auth-btn project-modal-btn project-modal-btn-primary">创建</button>
+        </div>
+    </div>
+</div>
+
+<div id="type-select-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
+    <div class="create-project-dialog type-select-dialog">
+        <h3 class="create-project-title">选择项目类型</h3>
+        <div class="project-type-grid">
+            <div id="select-type-image" class="project-type-choice project-type-choice-image">
+                <div class="project-type-icon project-type-icon-image">
+                    <svg class="project-type-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-8.5c0-.83-.67-1.5-1.5-1.5S7 10.67 7 11.5 7.67 13 8.5 13s1.5-.67 1.5-1.5zm7 0c-.83 0-1.5.67-1.5 1.5S16.17 13 17 13s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm-4-7c-.83 0-1.5.67-1.5 1.5S12.17 7 13 7s1.5-.67 1.5-1.5S13.83 4 13 4z"/></svg>
+                </div>
+                <div class="project-type-label">图片追色</div>
+            </div>
+            <div id="select-type-video" class="project-type-choice project-type-choice-video">
+                <div class="project-type-icon project-type-icon-video">
+                    <svg class="project-type-svg" viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4z"/><path d="M10 9l5 3-5 3V9z"/></svg>
+                </div>
+                <div class="project-type-label">视频追色</div>
+            </div>
+        </div>
+        <div class="create-project-actions">
+            <button id="type-select-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">取消</button>
+        </div>
+    </div>
+</div>
+
+<div id="projects-list-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
+    <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:480px; max-height:80vh; overflow-y:auto; border:1px solid #333;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 style="color:#e8e8f0; margin:0; font-size:15px;">我的项目</h3>
+            <button id="projects-list-close-btn" style="background:none; border:none; color:#888; cursor:pointer; font-size:18px;">✕</button>
+        </div>
+        <div id="projects-list-container"></div>
+    </div>
+</div>
+
+<div class="lightbox" id="lightbox" hidden>
+    <div class="lightbox-overlay" onclick="closeLightbox()"></div>
+    <div class="lightbox-content">
+        <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+        <img id="lightbox-img" class="lightbox-img">
+    </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="./static/js/mock-api.js?v=github-pages-preview"></script>
+<script src="./static/js/app.js?v=20260630-bugfix9"></script>
+<script src="./static/js/router.js?v=20260630-bugfix9"></script>
+
 </body>
 </html>

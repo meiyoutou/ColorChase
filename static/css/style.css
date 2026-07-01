@@ -6157,13 +6157,18 @@ html[data-theme="light"] .training-stage-card select {
 }
 
 .training-status-shell {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
   border-radius: 34px;
   border: 1px solid rgba(48, 42, 33, 0.86);
   background:
     radial-gradient(circle at 82% 14%, rgba(240, 207, 87, 0.22), transparent 22%),
     linear-gradient(180deg, #2d2926 0%, #1e1b18 100%);
   color: #fffdf7;
-  padding: 22px;
+  padding: 18px;
   box-shadow: 0 24px 54px rgba(34, 29, 21, 0.24);
 }
 
@@ -6199,11 +6204,11 @@ html[data-theme="light"] .training-stage-card select {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-top: 24px;
+  margin-top: 14px;
 }
 
 .training-status-progress strong {
-  font-size: 80px;
+  font-size: 54px;
   line-height: 0.9;
   font-weight: 800;
 }
@@ -6224,14 +6229,14 @@ html[data-theme="light"] .training-stage-card select {
 .training-status-mini-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .training-status-mini {
-  min-height: 92px;
-  padding: 14px 16px;
-  border-radius: 20px;
+  min-height: 62px;
+  padding: 10px 12px;
+  border-radius: 16px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.07);
 }
@@ -6244,7 +6249,7 @@ html[data-theme="light"] .training-stage-card select {
 
 .training-status-mini strong {
   display: block;
-  margin-top: 14px;
+  margin-top: 8px;
   color: #fffdf7;
   font-size: 17px;
   font-weight: 800;
@@ -6253,13 +6258,13 @@ html[data-theme="light"] .training-stage-card select {
 .training-status-dot-row {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  gap: 7px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .training-dot {
-  width: 11px;
-  height: 11px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: rgba(255,255,255,0.14);
 }
@@ -6270,11 +6275,12 @@ html[data-theme="light"] .training-stage-card select {
 }
 
 .training-status-shell .training-log-box {
-  min-height: 178px;
-  max-height: 220px;
-  margin-top: 16px;
-  padding: 18px;
-  border-radius: 22px;
+  flex: 1 1 88px;
+  min-height: 88px;
+  max-height: 130px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 18px;
   border: 1px solid rgba(231, 187, 152, 0.26);
   background:
     radial-gradient(circle at 14% 20%, rgba(247, 202, 96, 0.28), transparent 34%),
@@ -6829,4 +6835,15 @@ html[data-theme="dark"] .training-upload-card strong {
 
 html[data-theme="dark"] .training-upload-card span {
   color: #a89ec9;
+}
+
+/* config-grid 布局：训练状态左列跨 2 行，训练参数/训练控制右列 */
+.training-config-grid > .training-status-shell {
+  grid-column: 1;
+  grid-row: span 2;
+}
+
+.training-config-grid > .training-param-card,
+.training-config-grid > .training-control-card {
+  grid-column: 2;
 }

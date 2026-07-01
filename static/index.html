@@ -271,45 +271,6 @@
                                         <div class="model-manager-empty">正在准备模型管理数据...</div>
                                     </div>
                                 </article>
-
-                                <article class="training-status-shell">
-                                    <div class="training-status-head">
-                                        <div>
-                                            <h3>训练状态</h3>
-                                            <p>这一块对应你现有的进度、损失、耗时、状态和日志核心区域。</p>
-                                        </div>
-                                        <button id="training-log-clear" class="training-status-clear" type="button">清空日志</button>
-                                    </div>
-                                    <div class="training-status-progress">
-                                        <strong id="training-status-progress">0</strong>
-                                        <span>%</span>
-                                    </div>
-                                    <div id="training-status-message" class="training-status-note">等待启动</div>
-                                    <div class="training-status-mini-grid">
-                                        <div class="training-status-mini">
-                                            <span>当前损失</span>
-                                            <strong id="training-status-loss">--</strong>
-                                        </div>
-                                        <div class="training-status-mini">
-                                            <span>已用时间</span>
-                                            <strong id="training-status-time">--</strong>
-                                        </div>
-                                        <div class="training-status-mini">
-                                            <span>当前 Epoch</span>
-                                            <strong id="training-status-epoch">--</strong>
-                                        </div>
-                                        <div class="training-status-mini">
-                                            <span>预估剩余</span>
-                                            <strong id="training-status-eta">--</strong>
-                                        </div>
-                                    </div>
-                                    <pre class="training-log-box" id="training-log-box">[15:13:30] 训练数据：50 张，3.7 MB</pre>
-                                    <div class="training-status-dot-row" aria-hidden="true">
-                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span>
-                                        <span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span>
-                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span>
-                                    </div>
-                                </article>
                             </div>
 
                             <div class="training-column training-column-right">
@@ -404,7 +365,46 @@
                                         </div>
                                     </section>
 
-                                    <section class="training-card training-param-card training-span-2">
+                                    <article class="training-status-shell">
+                                        <div class="training-status-head">
+                                            <div>
+                                                <h3>训练状态</h3>
+                                                <p>这一块对应你现有的进度、损失、耗时、状态和日志核心区域。</p>
+                                            </div>
+                                            <button id="training-log-clear" class="training-status-clear" type="button">清空日志</button>
+                                        </div>
+                                        <div class="training-status-progress">
+                                            <strong id="training-status-progress">0</strong>
+                                            <span>%</span>
+                                        </div>
+                                        <div id="training-status-message" class="training-status-note">等待启动</div>
+                                        <div class="training-status-mini-grid">
+                                            <div class="training-status-mini">
+                                                <span>当前损失</span>
+                                                <strong id="training-status-loss">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>已用时间</span>
+                                                <strong id="training-status-time">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>当前 Epoch</span>
+                                                <strong id="training-status-epoch">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>预估剩余</span>
+                                                <strong id="training-status-eta">--</strong>
+                                            </div>
+                                        </div>
+                                        <pre class="training-log-box" id="training-log-box">[15:13:30] 训练数据：50 张，3.7 MB</pre>
+                                        <div class="training-status-dot-row" aria-hidden="true">
+                                            <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                            <span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                            <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span>
+                                        </div>
+                                    </article>
+
+                                    <section class="training-card training-param-card">
                                         <div class="training-card-title">训练参数</div>
                                         <div class="training-params-grid">
                                             <label class="training-form-field">
@@ -449,7 +449,7 @@
                                         </div>
                                     </section>
 
-                                    <section class="training-control-card training-span-2">
+                                    <section class="training-control-card">
                                         <div class="training-card-title">训练控制</div>
                                         <div class="training-control-actions">
                                             <button id="training-start-btn" class="training-control-btn primary" type="button">开始训练</button>

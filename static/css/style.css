@@ -6070,19 +6070,27 @@ html[data-theme="light"] .training-stage-card select {
 }
 
 .training-column-left {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  align-self: start;
+  display: contents;
 }
 
-.training-column-left > .training-status-shell {
-  margin-top: auto;
+.training-plan-card {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .training-column-right {
   grid-column: 2;
   grid-row: 1 / span 2;
+}
+
+.training-model-status-card {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.model-manager-card {
+  grid-column: 2;
+  grid-row: 3;
 }
 
 .model-manager-title {
@@ -6650,7 +6658,11 @@ html[data-theme="light"] .training-stage-card select {
     grid-template-columns: 1fr;
   }
 
-  .training-column-right {
+  .training-plan-card,
+  .training-status-shell,
+  .training-column-right,
+  .training-model-status-card,
+  .model-manager-card {
     grid-column: 1;
     grid-row: auto;
   }

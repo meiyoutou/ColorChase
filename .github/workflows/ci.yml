@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Python compile check
+        shell: bash
+        run: |
+          python -m py_compile main.py auth.py config.py database.py models.py progress.py admin_runtime_metrics.py
+          find app core algorithms scripts tests -name "*.py" -print0 | xargs -0 python -m py_compile
+
+      - name: Frontend syntax check
+        run: |
+          node --check static/js/app.js
+          node --check static/js/router.js
+          node --check static/js/adjust_worker.js
+          node --check docs/static/js/mock-api.js
+
+      - name: Pages preview path check
+        shell: bash
+        run: |
+          test -f docs/index.html
+          test -f docs/static/js/mock-api.js
+          ! grep -R '"/static/\|'\''/static/\|href="/static\|src="/static' docs/index.html docs/static/js

@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ColorChase Static Preview</title>
+  <meta name="description" content="ColorChase static UI preview for GitHub Pages">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --panel: rgba(17, 24, 39, .88);
+      --panel-2: rgba(15, 23, 42, .94);
+      --line: rgba(255,255,255,.12);
+      --text: #f8fafc;
+      --muted: #a1a1aa;
+      --cyan: #22d3ee;
+      --violet: #818cf8;
+      --green: #34d399;
+      --pink: #fb7185;
+      --amber: #f59e0b;
+      --shadow: 0 28px 84px rgba(0,0,0,.34);
+      font-synthesis-weight: none;
+      text-rendering: geometricPrecision;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 82% 0%, rgba(129,140,248,.24), transparent 34rem),
+        radial-gradient(circle at 10% 82%, rgba(34,211,238,.14), transparent 30rem),
+        linear-gradient(180deg, #09090b 0%, #0b1120 100%);
+      color: var(--text);
+    }
+    a { color: inherit; }
+    .shell {
+      width: min(1500px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 34px;
+      background: linear-gradient(145deg, rgba(17,24,39,.96), rgba(35,22,58,.90));
+      box-shadow: var(--shadow);
+      padding: 34px;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 28px;
+      overflow: hidden;
+    }
+    .hero h1 {
+      margin: 0 0 14px;
+      font-size: clamp(42px, 4vw, 74px);
+      line-height: .95;
+      letter-spacing: 0;
+    }
+    .hero p {
+      margin: 0;
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.8;
+    }
+    .hero-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    .pill.primary {
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      color: #0b1020;
+      border-color: transparent;
+    }
+    .hero-preview {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .mini-screen {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel-2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+      overflow: hidden;
+    }
+    .mini-screen .bar {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      background: rgba(255,255,255,.03);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .dots { display: flex; gap: 6px; }
+    .dots span {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.18);
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 14px;
+      padding: 14px;
+    }
+    .photo {
+      min-height: 220px;
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(145deg, #1f2937, #4c1d95);
+    }
+    .photo::after {
+      content: "";
+      position: absolute;
+      inset: 30px;
+      border-radius: 999px;
+      border: 10px solid rgba(255,255,255,.16);
+      transform: rotate(-18deg);
+    }
+    .stack { display: grid; gap: 14px; }
+    .card-line {
+      height: 70px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .metric {
+      min-height: 110px;
+      padding: 18px 20px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .metric .k { color: var(--muted); font-size: 14px; font-weight: 700; }
+    .metric .v { margin-top: 12px; font-size: 28px; font-weight: 900; }
+    .metric .s { margin-top: 8px; color: var(--muted); font-size: 13px; }
+    .gallery {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 18px;
+      margin-top: 22px;
+      align-items: start;
+    }
+    .nav {
+      position: sticky;
+      top: 16px;
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .nav button {
+      width: 100%;
+      border: 0;
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .18s ease;
+    }
+    .nav button:hover,
+    .nav button.is-active {
+      background: linear-gradient(90deg, rgba(34,211,238,.18), rgba(129,140,248,.20));
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+    }
+    .stage {
+      min-height: 900px;
+      border-radius: 30px;
+      border: 1px solid var(--line);
+      background: rgba(17,24,39,.76);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      padding: 22px;
+    }
+    .stage-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .stage-head h2 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    .stage-head span {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .screen {
+      display: none;
+      gap: 18px;
+      animation: fade .2s ease;
+    }
+    .screen.is-active { display: grid; }
+    @keyframes fade {
+      from { opacity: .65; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .screen-grid {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 18px;
+    }
+    .panel {
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,.08);
+      background:
+        radial-gradient(circle at 50% -26%, rgba(129,140,248,.10), transparent 34%),
+        rgba(15, 23, 42, .96);
+      overflow: hidden;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.02);
+    }
+    .panel-head strong {
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.07);
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .panel-body { padding: 18px 20px 20px; }
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .placeholder {
+      min-height: 180px;
+      border-radius: 20px;
+      background: linear-gradient(145deg, rgba(59,130,246,.15), rgba(168,85,247,.16));
+      border: 1px solid rgba(255,255,255,.08);
+      position: relative;
+      overflow: hidden;
+    }
+    .placeholder::before,
+    .placeholder::after {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border-radius: 16px;
+      border: 2px dashed rgba(255,255,255,.15);
+    }
+    .placeholder::after {
+      inset: 42px 36px;
+      border-style: solid;
+      border-radius: 999px;
+      opacity: .55;
+    }
+    .control-list {
+      display: grid;
+      gap: 12px;
+    }
+    .control {
+      height: 56px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.09);
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .step {
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.08);
+      min-height: 152px;
+      position: relative;
+    }
+    .step .no {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      color: #0b1020;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      margin-bottom: 14px;
+    }
+    .step b {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+    .step span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+    .flowline {
+      height: 8px;
+      border-radius: 999px;
+      margin: 12px 0 18px;
+      background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink));
+    }
+    .shot {
+      width: 100%;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+      display: block;
+      background: #0f172a;
+    }
+    .footer {
+      margin-top: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.8;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+    }
+    .footer a { color: #dbeafe; text-decoration: none; }
+    @media (max-width: 1120px) {
+      .hero, .gallery, .screen-grid { grid-template-columns: 1fr; }
+      .nav { position: static; grid-auto-flow: column; grid-template-columns: repeat(4, 1fr); overflow-x: auto; }
+      .nav button { white-space: nowrap; }
+      .metric-row, .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .shell { width: min(100vw - 18px, 1500px); padding: 10px 0 32px; }
+      .hero, .stage { padding: 18px; }
+      .metric-row, .flow, .workspace-grid { grid-template-columns: 1fr; }
+      .preview-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <h1>ColorChase</h1>
+        <p>一个可在 GitHub Pages 上直接浏览的静态 UI 预览。这里把图片追色、视频追色、风格 / LUT、训练、个人空间和管理后台，做成可以翻看的界面样张。</p>
+        <div class="hero-links">
+          <a class="pill primary" href="#gallery">Open Preview</a>
+          <a class="pill" href="assets/colorchase-showcase.html">Open HTML Showcase</a>
+          <a class="pill" href="../README.md">Project README</a>
+        </div>
+        <div class="metric-row">
+          <div class="metric"><div class="k">Screens</div><div class="v">7</div><div class="s">覆盖主要页面</div></div>
+          <div class="metric"><div class="k">Modes</div><div class="v">2</div><div class="s">Dark / Light</div></div>
+          <div class="metric"><div class="k">Assets</div><div class="v">SVG</div><div class="s">可直接渲染</div></div>
+          <div class="metric"><div class="k">Deploy</div><div class="v">Pages</div><div class="s">静态托管</div></div>
+        </div>
+      </div>
+      <div class="hero-preview">
+        <div class="mini-screen">
+          <div class="bar">
+            <div class="dots"><span></span><span></span><span></span></div>
+            <span style="color:var(--muted);font-weight:800;font-size:13px;">workspace preview</span>
+          </div>
+          <div class="preview-grid">
+            <div class="photo" aria-hidden="true"></div>
+            <div class="stack">
+              <div class="card-line"></div>
+              <div class="card-line"></div>
+              <div class="card-line"></div>
+            </div>
+          </div>
+        </div>
+        <img class="shot" src="assets/colorchase-overview.svg" alt="ColorChase workspace overview">
+      </div>
+    </section>
+
+    <section class="gallery" id="gallery">
+      <aside class="nav" aria-label="preview navigation">
+        <button class="is-active" data-screen="overview">Overview</button>
+        <button data-screen="image">Image Transfer</button>
+        <button data-screen="video">Video Transfer</button>
+        <button data-screen="styles">Styles / LUT</button>
+        <button data-screen="training">Training</button>
+        <button data-screen="space">User Space</button>
+        <button data-screen="admin">Admin Center</button>
+      </aside>
+
+      <section class="stage">
+        <div class="stage-head">
+          <h2>Static UI Preview</h2>
+          <span>Click tabs to browse each screen</span>
+        </div>
+
+        <article class="screen is-active" data-view="overview">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Workspace Snapshot</strong><span class="chip">Home</span></div>
+              <div class="panel-body">
+                <div class="workspace-grid">
+                  <div class="placeholder"></div>
+                  <div class="control-list">
+                    <div class="control"></div>
+                    <div class="control"></div>
+                    <div class="control"></div>
+                    <div class="control"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Signal Map</strong><span class="chip">Flow</span></div>
+              <div class="panel-body">
+                <div class="flow">
+                  <div class="step"><div class="no">1</div><b>Input</b><span>Targets, references, videos, folders, presets.</span></div>
+                  <div class="step"><div class="no">2</div><b>Analyze</b><span>Mask, depth, semantic and LUT session.</span></div>
+                  <div class="step"><div class="no">3</div><b>Transfer</b><span>Color migration, render and refinement.</span></div>
+                  <div class="step"><div class="no">4</div><b>Publish</b><span>Save, export and archive project assets.</span></div>
+                </div>
+                <div class="flowline"></div>
+                <img class="shot" src="assets/colorchase-visual-guide.svg" alt="ColorChase visual feature guide">
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="image">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Image Transfer</strong><span class="chip">Preview</span></div>
+              <div class="panel-body">
+                <div class="workspace-grid">
+                  <div class="placeholder" style="background:linear-gradient(145deg,#1f2937,#0f766e);"></div>
+                  <div class="placeholder" style="background:linear-gradient(145deg,#2e1065,#7c2d12);"></div>
+                </div>
+                <div class="flowline"></div>
+                <div class="control-list">
+                  <div class="control"></div>
+                  <div class="control"></div>
+                  <div class="control"></div>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Workflow</strong><span class="chip">Image</span></div>
+              <div class="panel-body">
+                <img class="shot" src="assets/colorchase-image-flow.svg" alt="Image transfer flow">
+                <div style="display:grid;gap:12px;margin-top:14px;">
+                  <div class="control"></div>
+                  <div class="control"></div>
+                  <div class="control"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="video">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Video Transfer</strong><span class="chip">Frames</span></div>
+              <div class="panel-body">
+                <div class="workspace-grid">
+                  <div class="placeholder" style="background:linear-gradient(145deg,#0f172a,#312e81);"></div>
+                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#1f2937);"></div>
+                </div>
+                <div class="flowline"></div>
+                <div class="control-list">
+                  <div class="control"></div>
+                  <div class="control"></div>
+                  <div class="control"></div>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Export Console</strong><span class="chip">MP4</span></div>
+              <div class="panel-body">
+                <div class="control" style="height:90px;"></div>
+                <div class="control" style="height:90px;margin-top:12px;"></div>
+                <div class="control" style="height:90px;margin-top:12px;"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="styles">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Styles / LUT</strong><span class="chip">Palette</span></div>
+              <div class="panel-body">
+                <div class="flow">
+                  <div class="step"><div class="no">A</div><b>Browse</b><span>Style list, extracted styles and presets.</span></div>
+                  <div class="step"><div class="no">B</div><b>Apply</b><span>Target image + style or LUT session.</span></div>
+                  <div class="step"><div class="no">C</div><b>Merge</b><span>Combine two sessions into one look.</span></div>
+                  <div class="step"><div class="no">D</div><b>Export</b><span>Lightroom-style package or preset zip.</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Style Cards</strong><span class="chip">UI</span></div>
+              <div class="panel-body">
+                <div class="workspace-grid">
+                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#4338ca);"></div>
+                  <div class="placeholder" style="background:linear-gradient(145deg,#111827,#be185d);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="training">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Training Dataset</strong><span class="chip">Upload</span></div>
+              <div class="panel-body">
+                <img class="shot" src="assets/colorchase-training-panel.svg" alt="Training dataset panel">
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Training Status</strong><span class="chip">Live</span></div>
+              <div class="panel-body">
+                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
+                  <div class="metric"><div class="k">Stage</div><div class="v">Both</div><div class="s">NeuralPreset</div></div>
+                  <div class="metric"><div class="k">Dataset</div><div class="v">142</div><div class="s">Images / folders</div></div>
+                </div>
+                <div class="control" style="height:154px;margin-top:14px;"></div>
+                <div class="control" style="height:76px;margin-top:14px;"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="space">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>User Space</strong><span class="chip">Profile</span></div>
+              <div class="panel-body">
+                <img class="shot" src="assets/colorchase-user-space.svg" alt="User space dashboard">
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Resources</strong><span class="chip">KPI</span></div>
+              <div class="panel-body">
+                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
+                  <div class="metric"><div class="k">Tasks</div><div class="v">38</div><div class="s">Latest 7 days</div></div>
+                  <div class="metric"><div class="k">Storage</div><div class="v">6.3 GB</div><div class="s">Project footprint</div></div>
+                </div>
+                <div class="control" style="height:110px;margin-top:14px;"></div>
+                <div class="control" style="height:110px;margin-top:14px;"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="screen" data-view="admin">
+          <div class="screen-grid">
+            <div class="panel">
+              <div class="panel-head"><strong>Admin Center</strong><span class="chip">Logs</span></div>
+              <div class="panel-body">
+                <div class="control" style="height:72px;"></div>
+                <div class="control" style="height:72px;margin-top:12px;"></div>
+                <div class="control" style="height:72px;margin-top:12px;"></div>
+                <div class="control" style="height:72px;margin-top:12px;"></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><strong>Model / Storage</strong><span class="chip">Ops</span></div>
+              <div class="panel-body">
+                <div class="metric-row" style="grid-template-columns: repeat(2, 1fr); margin-top:0;">
+                  <div class="metric"><div class="k">Models</div><div class="v">12</div><div class="s">Ready / disabled</div></div>
+                  <div class="metric"><div class="k">Disk</div><div class="v">63%</div><div class="s">Storage used</div></div>
+                </div>
+                <div class="control" style="height:150px;margin-top:14px;"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </section>
+
+    <section class="footer">
+      <div>Open the source README, or preview this page directly on GitHub Pages.</div>
+      <div><a href="https://github.com/meiyoutou/ColorChase" target="_blank" rel="noreferrer">GitHub Repo</a> · <a href="../README.md">README</a></div>
+    </section>
+  </main>
+
+  <script>
+    const navButtons = Array.from(document.querySelectorAll('.nav button'));
+    const screens = Array.from(document.querySelectorAll('.screen'));
+
+    function setActive(name) {
+      navButtons.forEach(btn => btn.classList.toggle('is-active', btn.dataset.screen === name));
+      screens.forEach(screen => screen.classList.toggle('is-active', screen.dataset.view === name));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    navButtons.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.screen)));
+  </script>
+</body>
+</html>

@@ -1,9 +1,9 @@
-﻿﻿<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ColorChase - AI鏅鸿兘杩借壊</title>
+    <title>ColorChase - AI智能追色</title>
     <link rel="stylesheet" href="/static/css/style.css?v=20260630-bugfix9">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -34,47 +34,47 @@
             <img src="/static/assets/logo.png" class="logo-icon" alt="ColorChase">
         </div>
         <div class="top-actions">
-            <span id="nav-login-btn" style="cursor:pointer;color:var(--text-primary);font-size:14px;display:flex;align-items:center;gap:6px;">馃懁 鐧诲綍</span>
-            <button id="nav-notice-btn" class="top-icon-btn" type="button" title="鏇存柊鏃ュ織" style="display:none;">
+            <span id="nav-login-btn" style="cursor:pointer;color:var(--text-primary);font-size:14px;display:flex;align-items:center;gap:6px;">👤 登录</span>
+            <button id="nav-notice-btn" class="top-icon-btn" type="button" title="更新日志" style="display:none;">
                 <span id="nav-notice-badge" class="top-icon-badge" style="display:none;"></span>
                 <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
                     <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
                 </svg>
             </button>
-            <button id="nav-contact-btn" class="top-icon-btn" type="button" title="鑱旂郴鏂瑰紡" style="display:none;">
+            <button id="nav-contact-btn" class="top-icon-btn" type="button" title="联系方式" style="display:none;">
                 <span id="nav-contact-badge" class="top-icon-badge" style="display:none;"></span>
                 <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H10l-3.5 3v-3H7.5A2.5 2.5 0 0 1 5 13.5Z"></path>
                     <path d="M9 10.5h6"></path>
                 </svg>
             </button>
-            <span id="nav-settings-btn" style="cursor:pointer;font-size:18px;display:none;">鈿欙笍</span>
+            <span id="nav-settings-btn" style="cursor:pointer;font-size:18px;display:none;">⚙️</span>
         </div>
     </header>
     <div style="display:flex;height:calc(100vh - var(--topbar-h));">
         <div class="home-sidebar">
-            <div class="home-nav-item active" data-nav="home"><span class="nav-icon nav-icon-home"></span>鎴戠殑涓婚〉</div>
-            <div class="home-nav-item" data-nav="local"><span class="nav-icon nav-icon-folder"></span>鏈湴椤圭洰</div>
-            <div class="home-nav-item" data-nav="space"><span class="nav-icon nav-icon-user"></span>涓汉绌洪棿</div>
-            <div class="home-nav-item" data-nav="trash"><span class="nav-icon nav-icon-trash"></span>鍥炴敹绔?/div>
-            <div class="home-nav-item admin-only-nav" data-nav="train" style="display:none;"><span class="nav-icon nav-icon-folder"></span>妯″瀷璁粌</div>
+            <div class="home-nav-item active" data-nav="home"><span class="nav-icon nav-icon-home"></span>我的主页</div>
+            <div class="home-nav-item" data-nav="local"><span class="nav-icon nav-icon-folder"></span>本地项目</div>
+            <div class="home-nav-item" data-nav="space"><span class="nav-icon nav-icon-user"></span>个人空间</div>
+            <div class="home-nav-item" data-nav="trash"><span class="nav-icon nav-icon-trash"></span>回收站</div>
+            <div class="home-nav-item admin-only-nav" data-nav="train" style="display:none;"><span class="nav-icon nav-icon-folder"></span>模型训练</div>
             <div class="home-theme-slot">
-                <button class="theme-switch theme-switch-home" id="home-theme-toggle" type="button" title="鍒囨崲涓婚">娴呰壊妯″紡</button>
+                <button class="theme-switch theme-switch-home" id="home-theme-toggle" type="button" title="切换主题">浅色模式</button>
             </div>
         </div>
         <div class="home-content">
             <div class="home-content-header">
-                <span class="home-content-title" id="home-content-title">鎴戠殑涓婚〉</span>
-                <input type="text" class="home-search-input" name="project-search" placeholder="鎼滅储" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-form-type="other">
+                <span class="home-content-title" id="home-content-title">我的主页</span>
+                <input type="text" class="home-search-input" name="project-search" placeholder="搜索" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-form-type="other">
             </div>
             <div class="admin-welcome-banner" id="admin-welcome-banner" style="display:none;">
                 <div class="admin-welcome-copy">
                     <div class="admin-welcome-eyebrow">ADMIN MODE</div>
-                    <div class="admin-welcome-title">娆㈣繋鍥炴潵锛岀鐞嗗憳</div>
-                    <div class="admin-welcome-text">ColorChase 宸插噯澶囧ソ缁х画瀛︿範鏂扮殑鑹插僵椋庢牸銆?/div>
+                    <div class="admin-welcome-title">欢迎回来，管理员</div>
+                    <div class="admin-welcome-text">ColorChase 已准备好继续学习新的色彩风格。</div>
                 </div>
-                <button class="admin-welcome-action" id="admin-welcome-train-btn" type="button">杩涘叆妯″瀷璁粌</button>
+                <button class="admin-welcome-action" id="admin-welcome-train-btn" type="button">进入模型训练</button>
             </div>
             <div class="card-row" id="home-func-cards">
                 <div class="card card-pic" data-type="image">
@@ -82,8 +82,8 @@
                         <div class="icon-circle">
                             <svg class="card-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-8.5c0-.83-.67-1.5-1.5-1.5S7 10.67 7 11.5 7.67 13 8.5 13s1.5-.67 1.5-1.5zm7 0c-.83 0-1.5.67-1.5 1.5S16.17 13 17 13s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm-4-7c-.83 0-1.5.67-1.5 1.5S12.17 7 13 7s1.5-.67 1.5-1.5S13.83 4 13 4z"/></svg>
                         </div>
-                        <div class="card-title">鍥剧墖杩借壊</div>
-                        <div class="card-subtitle">浠庡浘鐗囦腑鎹曟崏鑹插僵鐏垫劅</div>
+                        <div class="card-title">图片追色</div>
+                        <div class="card-subtitle">从图片中捕捉色彩灵感</div>
                     </div>
                     <div class="card-media">
                         <div class="media-overlay">
@@ -103,8 +103,8 @@
                         <div class="icon-circle">
                             <svg class="card-svg" viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4z"/><path d="M10 9l5 3-5 3V9z"/></svg>
                         </div>
-                        <div class="card-title">瑙嗛杩借壊</div>
-                        <div class="card-subtitle">浠庤棰戜腑鎹曟崏鍔ㄦ€佽壊褰?/div>
+                        <div class="card-title">视频追色</div>
+                        <div class="card-subtitle">从视频中捕捉动态色彩</div>
                     </div>
                     <div class="card-media">
                         <div class="media-overlay">
@@ -121,41 +121,41 @@
                 </div>
             </div>
             <div class="home-section-sep"></div>
-            <div class="home-section-subtitle">鎴戠殑椤圭洰</div>
+            <div class="home-section-subtitle">我的项目</div>
             <div class="home-filter-bar">
-                <span class="home-filter-tag active">鏈€杩戞祻瑙堣繃 <span id="home-project-count">0</span></span>
-                <span class="home-filter-tag">鍒涘缓鐨勯」鐩?/span>
-                <span class="home-filter-tag">鐩稿唽</span>
+                <span class="home-filter-tag active">最近浏览过 <span id="home-project-count">0</span></span>
+                <span class="home-filter-tag">创建的项目</span>
+                <span class="home-filter-tag">相册</span>
             </div>
             <div id="trash-toolbar" style="display:none; margin-bottom:14px;">
                 <div style="display:flex; align-items:center; justify-content:space-between; background:#2a1a1e; border:1px solid #4a2a2e; border-radius:8px; padding:10px 16px; margin-bottom:10px;">
-                    <span style="color:#f87171; font-size:13px;">鈿狅笍 鍥炴敹绔欎腑鐨勯」鐩皢鍦?30 澶╁悗鑷姩娓呴櫎</span>
-                    <button id="empty-trash-btn" style="background:transparent; border:1px solid #d32f2f; color:#d32f2f; padding:4px 14px; border-radius:4px; cursor:pointer; font-size:12px;">娓呯┖鍥炴敹绔?/button>
+                    <span style="color:#f87171; font-size:13px;">⚠️ 回收站中的项目将在 30 天后自动清除</span>
+                    <button id="empty-trash-btn" style="background:transparent; border:1px solid #d32f2f; color:#d32f2f; padding:4px 14px; border-radius:4px; cursor:pointer; font-size:12px;">清空回收站</button>
                 </div>
             </div>
             <div id="space-panel" class="admin-panel-shell" style="display:none;">
-                <div id="space-panel-content" class="admin-empty-state">姝ｅ湪鍑嗗浣犵殑绌洪棿姒傝...</div>
+                <div id="space-panel-content" class="admin-empty-state">正在准备你的空间概览...</div>
             </div>
             <div id="train-panel" class="admin-panel-shell" style="display:none;">
                 <section class="admin-training-page">
                     <div class="admin-welcome-banner training-welcome-banner">
                         <div class="admin-welcome-copy">
-                            <div class="admin-welcome-title">娆㈣繋鍥炴潵锛岀鐞嗗憳</div>
-                            <div class="admin-welcome-text">ColorChase 宸插噯澶囧ソ缁х画瀛︿範鏂扮殑鑹插僵椋庢牸銆?/div>
+                            <div class="admin-welcome-title">欢迎回来，管理员</div>
+                            <div class="admin-welcome-text">ColorChase 已准备好继续学习新的色彩风格。</div>
                         </div>
-                        <button id="admin-training-enter" class="admin-welcome-action" type="button">杩涘叆妯″瀷璁粌</button>
+                        <button id="admin-training-enter" class="admin-welcome-action" type="button">进入模型训练</button>
                     </div>
 
                     <div class="training-workbench">
                         <header class="training-workbench-hero">
                             <div class="training-workbench-hero-copy">
                                 <div class="training-workbench-kicker">TRAINING DASHBOARD</div>
-                                <h2>妯″瀷璁粌</h2>
-                                <p>浠呯鐞嗗憳鍙敤銆傝缁冧細鍗犵敤褰撳墠鏈嶅姟锛岃纭璁粌鏁版嵁涓庢湇鍔＄姸鎬佸悗鍐嶅惎鍔ㄣ€?/p>
+                                <h2>模型训练</h2>
+                                <p>仅管理员可用。训练会占用当前服务，请确认训练数据与服务状态后再启动。</p>
                             </div>
                             <div class="training-workbench-hero-actions">
                                 <span class="admin-chip">Admin Only</span>
-                                <button id="training-workbench-close" class="training-workbench-close" type="button" aria-label="鍏抽棴">脳</button>
+                                <button id="training-workbench-close" class="training-workbench-close" type="button" aria-label="关闭">×</button>
                             </div>
                         </header>
 
@@ -164,35 +164,35 @@
                                 <section class="training-card training-plan-card">
                                     <div class="training-card-header">
                                         <div>
-                                            <h3>褰撳墠璁粌璁″垝</h3>
-                                            <p>鎶婂叧閿憳瑕佹彁鍒板墠闈紝鍚姩鍓嶄竴鐪肩‘璁ょ洰鏍囥€侀樁娈点€佹暟鎹拰鎵ц妯″紡銆?/p>
+                                            <h3>当前训练计划</h3>
+                                            <p>把关键摘要提到前面，启动前一眼确认目标、阶段、数据和执行模式。</p>
                                         </div>
-                                        <span class="training-pill training-pill-primary" id="training-mode-pill">鍚屾璁粌</span>
+                                        <span class="training-pill training-pill-primary" id="training-mode-pill">同步训练</span>
                                     </div>
                                     <div class="training-summary-grid">
                                         <div class="training-summary-item">
-                                            <span>鐩爣妯″瀷</span>
+                                            <span>目标模型</span>
                                             <strong id="training-summary-target">NeuralPreset</strong>
                                         </div>
                                         <div class="training-summary-item">
-                                            <span>璁粌闃舵</span>
-                                            <strong id="training-summary-stage">瀹屾暣璁粌</strong>
+                                            <span>训练阶段</span>
+                                            <strong id="training-summary-stage">完整训练</strong>
                                         </div>
                                         <div class="training-summary-item">
-                                            <span>鏁版嵁鐩綍</span>
+                                            <span>数据目录</span>
                                             <strong id="training-summary-dir">temp_train_data</strong>
                                         </div>
                                         <div class="training-summary-item">
-                                            <span>楠岃瘉闆?/span>
-                                            <strong id="training-summary-validation">鍚敤</strong>
+                                            <span>验证集</span>
+                                            <strong id="training-summary-validation">启用</strong>
                                         </div>
                                         <div class="training-summary-item">
-                                            <span>鏁版嵁瑙勬ā</span>
-                                            <strong id="training-summary-data">50 寮?/ 3.7 MB</strong>
+                                            <span>数据规模</span>
+                                            <strong id="training-summary-data">50 张 / 3.7 MB</strong>
                                         </div>
                                         <div class="training-summary-item">
-                                            <span>鎵ц妯″紡</span>
-                                            <strong id="training-summary-mode">鍚屾鎵ц</strong>
+                                            <span>执行模式</span>
+                                            <strong id="training-summary-mode">同步执行</strong>
                                         </div>
                                     </div>
                                 </section>
@@ -200,51 +200,51 @@
                                 <article class="training-card training-model-status-card">
                                     <div class="training-card-header">
                                         <div>
-                                            <h3>褰撳墠妯″瀷鐘舵€?/h3>
-                                            <p id="training-model-status-summary">姝ｅ湪璇诲彇妯″瀷鏉冮噸銆佽澶囧拰鍙敤鍏ュ彛銆?/p>
+                                            <h3>当前模型状态</h3>
+                                            <p id="training-model-status-summary">正在读取模型权重、设备和可用入口。</p>
                                         </div>
-                                        <button id="admin-model-refresh" class="training-chip-btn" type="button">鍒锋柊鐘舵€?/button>
+                                        <button id="admin-model-refresh" class="training-chip-btn" type="button">刷新状态</button>
                                     </div>
                                     <div class="training-model-list" id="training-model-list">
                                         <div class="training-model-item training-model-ready">
                                             <div class="training-model-copy">
                                                 <em>N</em>
                                                 <div>
-                                                    <span>褰掍竴鍖栭樁娈?/span>
-                                                    <small>鍩虹鏄犲皠</small>
+                                                    <span>归一化阶段</span>
+                                                    <small>基础映射</small>
                                                 </div>
                                             </div>
-                                            <strong id="training-model-norm">鏈氨缁?/strong>
+                                            <strong id="training-model-norm">未就绪</strong>
                                         </div>
                                         <div class="training-model-item training-model-pending">
                                             <div class="training-model-copy">
                                                 <em>S</em>
                                                 <div>
-                                                    <span>椋庢牸闃舵</span>
-                                                    <small>椋庢牸鎷熷悎</small>
+                                                    <span>风格阶段</span>
+                                                    <small>风格拟合</small>
                                                 </div>
                                             </div>
-                                            <strong id="training-model-style">鏈氨缁?/strong>
+                                            <strong id="training-model-style">未就绪</strong>
                                         </div>
                                         <div class="training-model-item training-model-ready">
                                             <div class="training-model-copy">
                                                 <em>NP</em>
                                                 <div>
                                                     <span>NeuralPreset</span>
-                                                    <small>涓昏缁冮摼璺?/small>
+                                                    <small>主训练链路</small>
                                                 </div>
                                             </div>
-                                            <strong id="training-model-neural">鏈氨缁?/strong>
+                                            <strong id="training-model-neural">未就绪</strong>
                                         </div>
                                         <div class="training-model-item">
                                             <div class="training-model-copy">
                                                 <em>MF</em>
                                                 <div>
                                                     <span>ModFlows</span>
-                                                    <small>鎵╁睍鐩爣</small>
+                                                    <small>扩展目标</small>
                                                 </div>
                                             </div>
-                                            <strong id="training-model-modflows">棰勭暀</strong>
+                                            <strong id="training-model-modflows">预留</strong>
                                         </div>
                                     </div>
                                 </article>
@@ -252,46 +252,47 @@
                                 <article class="training-card model-manager-card">
                                     <div class="training-card-header">
                                         <div>
-                                            <h3>妯″瀷绠＄悊</h3>
-                                            <p id="model-manager-summary">姝ｅ湪璇诲彇妯″瀷瀹夎鐘舵€併€侀粯璁ゆā鍨嬪拰鏈€杩戜竴娆?benchmark銆?/p>
+                                            <h3>模型管理</h3>
+                                            <p id="model-manager-summary">正在读取模型安装状态、默认模型和最近一次 benchmark。</p>
                                         </div>
-                                        <button id="model-manager-refresh" class="training-chip-btn" type="button">鍒锋柊绠＄悊</button>
+                                        <button id="model-manager-refresh" class="training-chip-btn" type="button">刷新管理</button>
                                     </div>
                                     <div class="model-manager-toolbar">
                                         <div class="model-manager-device">
-                                            <span>杩愯璁惧</span>
+                                            <span>运行设备</span>
                                             <strong id="model-manager-device">unknown</strong>
                                         </div>
                                         <label class="model-manager-default">
-                                            <span>榛樿妯″瀷</span>
+                                            <span>默认模型</span>
                                             <select id="model-manager-default-select"></select>
                                         </label>
                                     </div>
                                     <div class="model-manager-list" id="model-manager-list">
-                                        <div class="model-manager-empty">姝ｅ湪鍑嗗妯″瀷绠＄悊鏁版嵁...</div>
+                                        <div class="model-manager-empty">正在准备模型管理数据...</div>
                                     </div>
-                                </article></div>
+                                </article>
+                            </div>
 
                             <div class="training-column training-column-right">
                                 <div class="training-config-head">
                                     <div>
-                                        <div class="training-workbench-kicker training-config-kicker">璁粌缂栨帓</div>
-                                        <h3>閰嶇疆鏈璁粌浠诲姟</h3>
-                                        <p>妯″潡椤哄簭淇濇寔鐩爣銆侀樁娈点€佹暟鎹€佸弬鏁般€佹搷浣滐紝鍜屼綘鎯宠鐨勮缁冩祦绋嬩竴鑷淬€?/p>
+                                        <div class="training-workbench-kicker training-config-kicker">训练编排</div>
+                                        <h3>配置本次训练任务</h3>
+                                        <p>模块顺序保持目标、阶段、数据、参数、操作，和你想要的训练流程一致。</p>
                                     </div>
-                                    <span class="training-pill">鍚屾鎺ュ彛</span>
+                                    <span class="training-pill">同步接口</span>
                                 </div>
 
                                 <div class="training-config-grid">
                                     <section class="training-card training-target-card">
-                                        <div class="training-card-title">璁粌鐩爣</div>
+                                        <div class="training-card-title">训练目标</div>
                                         <div class="training-target-list" id="training-targets">
                                             <label class="training-target-item is-selected">
                                                 <input id="training-target-neuralpreset" type="radio" name="training-target" value="neuralpreset" checked>
                                                 <span class="training-target-dot"></span>
                                                 <div class="training-target-copy">
                                                     <strong>NeuralPreset</strong>
-                                                    <small>褰撳墠鍞竴鍙惎鍔ㄧ殑璁粌鐩爣</small>
+                                                    <small>当前唯一可启动的训练目标</small>
                                                 </div>
                                             </label>
                                             <label class="training-target-item">
@@ -299,7 +300,7 @@
                                                 <span class="training-target-dot"></span>
                                                 <div class="training-target-copy">
                                                     <strong>ModFlows B0</strong>
-                                                    <small>宸查鐣欏悗绔垎娴侊紝褰撳墠鐗堟湰鏈紑鏀捐缁?/small>
+                                                    <small>已预留后端分流，当前版本未开放训练</small>
                                                 </div>
                                             </label>
                                             <label class="training-target-item">
@@ -307,48 +308,48 @@
                                                 <span class="training-target-dot"></span>
                                                 <div class="training-target-copy">
                                                     <strong>ModFlows B6</strong>
-                                                    <small>宸查鐣欏悗绔垎娴侊紝褰撳墠鐗堟湰鏈紑鏀捐缁?/small>
+                                                    <small>已预留后端分流，当前版本未开放训练</small>
                                                 </div>
                                             </label>
                                         </div>
-                                        <div id="training-target-hint" class="training-card-hint">NeuralPreset 宸叉帴鍏ョ湡瀹炶缁冮摼璺紱ModFlows B0 / B6 鐩墠鍙繚鐣欏悗绔垎娴佸叆鍙ｏ紝閫夋嫨鍚庝細鏄庣‘鎻愮ず鏈疄鐜般€?/div>
+                                        <div id="training-target-hint" class="training-card-hint">NeuralPreset 已接入真实训练链路；ModFlows B0 / B6 目前只保留后端分流入口，选择后会明确提示未实现。</div>
                                     </section>
 
                                     <section class="training-card training-stage-card">
-                                        <div class="training-card-title">璁粌闃舵</div>
+                                        <div class="training-card-title">训练阶段</div>
                                         <div class="training-form-stack">
                                             <label class="training-form-field">
-                                                <span>闃舵閫夋嫨</span>
+                                                <span>阶段选择</span>
                                                 <select id="training-stage">
-                                                    <option value="both" selected>瀹屾暣璁粌</option>
-                                                    <option value="norm">褰掍竴鍖栭樁娈?/option>
-                                                    <option value="style">椋庢牸闃舵</option>
+                                                    <option value="both" selected>完整训练</option>
+                                                    <option value="norm">归一化阶段</option>
+                                                    <option value="style">风格阶段</option>
                                                 </select>
                                             </label>
                                             <div class="training-stage-desc-card">
-                                                <span>闃舵璇存槑</span>
-                                                <strong id="training-stage-desc">褰掍竴鍖?+ 椋庢牸闃舵鍚屾椂鎵ц</strong>
+                                                <span>阶段说明</span>
+                                                <strong id="training-stage-desc">归一化 + 风格阶段同时执行</strong>
                                             </div>
                                         </div>
                                     </section>
 
                                     <section class="training-card training-data-card training-span-2">
                                         <div class="training-card-head-inline">
-                                            <div class="training-card-title">璁粌鏁版嵁</div>
-                                            <button id="training-data-refresh" class="training-chip-btn" type="button">鍒锋柊鏁版嵁閲?/button>
+                                            <div class="training-card-title">训练数据</div>
+                                            <button id="training-data-refresh" class="training-chip-btn" type="button">刷新数据量</button>
                                         </div>
                                         <div class="training-data-layout">
                                             <div class="training-upload-buttons">
                                                 <button id="training-upload-btn" class="training-upload-card" type="button">
                                                     <div>
-                                                        <strong>涓婁紶璁粌鍥剧墖</strong>
-                                                        <span>閫夋嫨鏂扮殑璁粌鏍锋湰锛岀敤鏉ヨˉ鍏呮垨鏇挎崲褰撳墠鏁版嵁銆?/span>
+                                                        <strong>上传训练图片</strong>
+                                                        <span>选择新的训练样本，用来补充或替换当前数据。</span>
                                                     </div>
                                                 </button>
                                                 <button id="training-upload-folder-btn" class="training-upload-card training-upload-card--folder" type="button">
                                                     <div>
-                                                        <strong>涓婁紶鏂囦欢澶?/strong>
-                                                        <span>閫夋嫨鏁翠釜鏂囦欢澶癸紝鑷姩鍖呭惈鎵€鏈夊瓙鏂囦欢澶逛笅鐨勫浘鐗囥€?/span>
+                                                        <strong>上传文件夹</strong>
+                                                        <span>选择整个文件夹，自动包含所有子文件夹下的图片。</span>
                                                     </div>
                                                 </button>
                                                 <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
@@ -356,55 +357,55 @@
                                             </div>
                                             <div class="training-form-stack">
                                                 <label class="training-form-field">
-                                                    <span>璁粌鏁版嵁鐩綍</span>
+                                                    <span>训练数据目录</span>
                                                     <input id="training-image-dir" type="text" value="temp_train_data">
                                                 </label>
-                                                <div class="training-data-size-bar">褰撳墠璁粌鏁版嵁閲忥細<strong id="training-data-count">50 寮?/ 3.7 MB</strong></div>
+                                                <div class="training-data-size-bar">当前训练数据量：<strong id="training-data-count">50 张 / 3.7 MB</strong></div>
                                             </div>
                                         </div>
                                     </section>
 
                                     <article class="training-status-shell training-span-2">
-                                    <div class="training-status-head">
-                                        <div>
-                                            <h3>璁粌鐘舵€?/h3>
-                                            <p>杩欎竴鍧楀搴斾綘鐜版湁鐨勮繘搴︺€佹崯澶便€佽€楁椂銆佺姸鎬佸拰鏃ュ織鏍稿績鍖哄煙銆?/p>
+                                        <div class="training-status-head">
+                                            <div>
+                                                <h3>训练状态</h3>
+                                                <p>这一块对应你现有的进度、损失、耗时、状态和日志核心区域。</p>
+                                            </div>
+                                            <button id="training-log-clear" class="training-status-clear" type="button">清空日志</button>
                                         </div>
-                                        <button id="training-log-clear" class="training-status-clear" type="button">娓呯┖鏃ュ織</button>
-                                    </div>
-                                    <div class="training-status-progress">
-                                        <strong id="training-status-progress">0</strong>
-                                        <span>%</span>
-                                    </div>
-                                    <div id="training-status-message" class="training-status-note">绛夊緟鍚姩</div>
-                                    <div class="training-status-mini-grid">
-                                        <div class="training-status-mini">
-                                            <span>褰撳墠鎹熷け</span>
-                                            <strong id="training-status-loss">--</strong>
+                                        <div class="training-status-progress">
+                                            <strong id="training-status-progress">0</strong>
+                                            <span>%</span>
                                         </div>
-                                        <div class="training-status-mini">
-                                            <span>宸茬敤鏃堕棿</span>
-                                            <strong id="training-status-time">--</strong>
+                                        <div id="training-status-message" class="training-status-note">等待启动</div>
+                                        <div class="training-status-mini-grid">
+                                            <div class="training-status-mini">
+                                                <span>当前损失</span>
+                                                <strong id="training-status-loss">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>已用时间</span>
+                                                <strong id="training-status-time">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>当前 Epoch</span>
+                                                <strong id="training-status-epoch">--</strong>
+                                            </div>
+                                            <div class="training-status-mini">
+                                                <span>预估剩余</span>
+                                                <strong id="training-status-eta">--</strong>
+                                            </div>
                                         </div>
-                                        <div class="training-status-mini">
-                                            <span>褰撳墠 Epoch</span>
-                                            <strong id="training-status-epoch">--</strong>
+                                        <pre class="training-log-box" id="training-log-box">[15:13:30] 训练数据：50 张，3.7 MB</pre>
+                                        <div class="training-status-dot-row" aria-hidden="true">
+                                            <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                            <span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span>
+                                            <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span>
                                         </div>
-                                        <div class="training-status-mini">
-                                            <span>棰勪及鍓╀綑</span>
-                                            <strong id="training-status-eta">--</strong>
-                                        </div>
-                                    </div>
-                                    <pre class="training-log-box" id="training-log-box">[15:13:30] 璁粌鏁版嵁锛?0 寮狅紝3.7 MB</pre>
-                                    <div class="training-status-dot-row" aria-hidden="true">
-                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span>
-                                        <span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span>
-                                        <span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span><span class="training-dot on"></span><span class="training-dot"></span>
-                                    </div>
-                                </article>
+                                    </article>
 
                                     <section class="training-card training-param-card training-span-2">
-                                        <div class="training-card-title">璁粌鍙傛暟</div>
+                                        <div class="training-card-title">训练参数</div>
                                         <div class="training-params-grid">
                                             <label class="training-form-field">
                                                 <span>Epoch</span>
@@ -419,14 +420,14 @@
                                                 <input id="training-lr" type="text" value="0.0001">
                                             </label>
                                             <label class="training-form-field">
-                                                <span>璁粌灏哄</span>
+                                                <span>训练尺寸</span>
                                                 <input id="training-size" type="text" value="512">
                                             </label>
                                         </div>
                                         <label class="training-switch-row">
                                             <input id="training-val-enabled" type="checkbox" checked>
                                             <span class="training-switch-track"></span>
-                                            <span class="training-switch-label">鍚敤楠岃瘉闆?/span>
+                                            <span class="training-switch-label">启用验证集</span>
                                         </label>
                                         <div class="training-param-summary-grid">
                                             <div class="training-param-summary-item">
@@ -442,21 +443,21 @@
                                                 <strong id="training-summary-lr">0.0001</strong>
                                             </div>
                                             <div class="training-param-summary-item">
-                                                <span>璁粌灏哄</span>
+                                                <span>训练尺寸</span>
                                                 <strong id="training-summary-size">512</strong>
                                             </div>
                                         </div>
                                     </section>
 
                                     <section class="training-control-card training-span-2">
-                                        <div class="training-card-title">璁粌鎺у埗</div>
+                                        <div class="training-card-title">训练控制</div>
                                         <div class="training-control-actions">
-                                            <button id="training-start-btn" class="training-control-btn primary" type="button">寮€濮嬭缁?/button>
-                                            <button id="training-pause-btn" class="training-control-btn" type="button" disabled>鏆傚仠</button>
-                                            <button id="training-resume-btn" class="training-control-btn" type="button" disabled>缁х画</button>
-                                            <button id="training-cancel-btn" class="training-control-btn" type="button" disabled>鍙栨秷</button>
+                                            <button id="training-start-btn" class="training-control-btn primary" type="button">开始训练</button>
+                                            <button id="training-pause-btn" class="training-control-btn" type="button" disabled>暂停</button>
+                                            <button id="training-resume-btn" class="training-control-btn" type="button" disabled>继续</button>
+                                            <button id="training-cancel-btn" class="training-control-btn" type="button" disabled>取消</button>
                                         </div>
-                                        <div class="training-control-note">鏆傚仠銆佺户缁€佸彇娑堥渶瑕佸悗绔繑鍥炶缁冧换鍔?ID 鎵嶈兘鍑嗙‘鎺у埗銆傚綋鍓嶄负鎰忓浘婕旂ず锛屽疄闄呭鎺ユ椂璇锋惡甯︾湡瀹?taskId 璇锋眰鍚庣鎺ュ彛銆?/div>
+                                        <div class="training-control-note">暂停、继续、取消需要后端返回训练任务 ID 才能准确控制。当前为意图演示，实际对接时请携带真实 taskId 请求后端接口。</div>
                                     </section>
                                 </div>
                             </div>
@@ -472,12 +473,12 @@
 <div id="view-login" class="view-container" style="display:none;">
     <div class="auth-container">
         <div class="auth-card">
-            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">鐧诲綍</h2>
-            <input type="text" id="login-account" class="auth-input" placeholder="閭 / 鎵嬫満鍙?>
-            <input type="password" id="login-password" class="auth-input" placeholder="瀵嗙爜">
+            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">登录</h2>
+            <input type="text" id="login-account" class="auth-input" placeholder="邮箱 / 手机号">
+            <input type="password" id="login-password" class="auth-input" placeholder="密码">
             <div id="login-error" class="auth-error" style="display:none;"></div>
-            <button id="login-submit-btn" class="auth-btn">鐧诲綍</button>
-            <div class="auth-link">杩樻病鏈夎处鍙凤紵<span class="auth-link-action" id="login-to-register">绔嬪嵆娉ㄥ唽</span></div>
+            <button id="login-submit-btn" class="auth-btn">登录</button>
+            <div class="auth-link">还没有账号？<span class="auth-link-action" id="login-to-register">立即注册</span></div>
         </div>
     </div>
 </div>
@@ -485,18 +486,18 @@
 <div id="view-register" class="view-container" style="display:none;">
     <div class="auth-container">
         <div class="auth-card">
-            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">娉ㄥ唽</h2>
-            <input type="text" id="register-account" class="auth-input" placeholder="閭锛堢敤浜庢帴鏀堕獙璇佺爜锛?>
+            <h2 style="text-align:center;color:#e8e8f0;margin-bottom:20px;">注册</h2>
+            <input type="text" id="register-account" class="auth-input" placeholder="邮箱（用于接收验证码）">
             <div class="auth-code-row">
-                <input type="text" id="register-code" class="auth-input auth-code-input" placeholder="楠岃瘉鐮?>
-                <button id="send-code-btn" class="auth-btn auth-code-btn" type="button">鍙戦€侀獙璇佺爜</button>
+                <input type="text" id="register-code" class="auth-input auth-code-input" placeholder="验证码">
+                <button id="send-code-btn" class="auth-btn auth-code-btn" type="button">发送验证码</button>
             </div>
             <div id="send-code-tip" class="auth-code-tip" style="display:none;"></div>
-            <input type="password" id="register-password" class="auth-input" placeholder="瀵嗙爜">
-            <input type="password" id="register-password2" class="auth-input" placeholder="纭瀵嗙爜">
+            <input type="password" id="register-password" class="auth-input" placeholder="密码">
+            <input type="password" id="register-password2" class="auth-input" placeholder="确认密码">
             <div id="register-error" class="auth-error" style="display:none;"></div>
-            <button id="register-submit-btn" class="auth-btn">娉ㄥ唽</button>
-            <div class="auth-link">宸叉湁璐﹀彿锛?span class="auth-link-action" id="register-to-login">绔嬪嵆鐧诲綍</span></div>
+            <button id="register-submit-btn" class="auth-btn">注册</button>
+            <div class="auth-link">已有账号？<span class="auth-link-action" id="register-to-login">立即登录</span></div>
         </div>
     </div>
 </div>
@@ -508,54 +509,54 @@
                 <img src="/static/assets/logo.png" class="logo-icon" alt="ColorChase">
             </div>
             <div class="top-actions">
-                <span id="workspace-home-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;margin-right:12px;" title="杩斿洖涓婚〉">馃彔</span>
-                <button id="workspace-notice-btn" class="top-icon-btn" type="button" title="鏇存柊鏃ュ織">
+                <span id="workspace-home-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;margin-right:12px;" title="返回主页">🏠</span>
+                <button id="workspace-notice-btn" class="top-icon-btn" type="button" title="更新日志">
                     <span id="workspace-notice-badge" class="top-icon-badge" style="display:none;"></span>
                     <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
                         <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
                     </svg>
                 </button>
-                <button id="workspace-contact-btn" class="top-icon-btn" type="button" title="鑱旂郴鏂瑰紡">
+                <button id="workspace-contact-btn" class="top-icon-btn" type="button" title="联系方式">
                     <span id="workspace-contact-badge" class="top-icon-badge" style="display:none;"></span>
                     <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H10l-3.5 3v-3H7.5A2.5 2.5 0 0 1 5 13.5Z"></path>
                         <path d="M9 10.5h6"></path>
                     </svg>
                 </button>
-                <span id="workspace-settings-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;" title="璁剧疆">鈿欙笍</span>
+                <span id="workspace-settings-btn" style="cursor:pointer;color:var(--text-primary);font-size:18px;display:flex;align-items:center;" title="设置">⚙️</span>
             </div>
         </header>
 
         <div class="main-layout">
             <aside class="left-sidebar" id="left-sidebar">
                 <div class="sidebar-header">
-                    <span class="sidebar-title">馃搨 鐩爣鍥惧簱</span>
-                    <button class="sidebar-toggle" id="sidebar-toggle" title="鎶樺彔渚ф爮">鈼€</button>
+                    <span class="sidebar-title">📂 目标图库</span>
+                    <button class="sidebar-toggle" id="sidebar-toggle" title="折叠侧栏">◀</button>
                 </div>
                 <div class="sidebar-actions" id="sidebar-actions">
-                    <button class="sidebar-import-btn" id="batch-import-btn">馃摜 瀵煎叆鍥剧墖</button>
+                    <button class="sidebar-import-btn" id="batch-import-btn">📥 导入图片</button>
                     <input type="file" id="batch-file-input" multiple accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz,.psd,.psb,.heif,.heic,.avif,.jxl,.exr,.tif,.tiff" hidden>
                     <input type="file" id="batch-dir-input" webkitdirectory hidden>
                     <div class="batch-select-bar" id="batch-select-bar" hidden>
-                        <button class="batch-select-btn" id="toggle-select-btn" title="鍏ㄩ€?>鈽?/button>
+                        <button class="batch-select-btn" id="toggle-select-btn" title="全选">☐</button>
                         <span class="batch-star-rating" id="batch-star-rating"></span>
                     </div>
                 </div>
                 <div class="sidebar-body" id="gallery-list">
                     <div class="gallery-empty" id="gallery-empty">
-                        <p>馃摲</p>
-                        <p>鐐瑰嚮涓婃柟鎸夐挳瀵煎叆鍥剧墖</p>
+                        <p>📷</p>
+                        <p>点击上方按钮导入图片</p>
                     </div>
                 </div>
                 <div class="selection-count-bar" id="selection-count-bar">
-                    <span id="selection-count-text">鏈€夋嫨鍥剧墖</span>
+                    <span id="selection-count-text">未选择图片</span>
                 </div>
             </aside>
 
             <main class="center-canvas" id="center-canvas">
                 <div class="canvas-toolbar" id="canvas-toolbar">
-                    <span class="canvas-filename" id="canvas-filename">鏈€夋嫨鍥剧墖</span>
+                    <span class="canvas-filename" id="canvas-filename">未选择图片</span>
                     <span class="canvas-resolution" id="canvas-resolution"></span>
                 </div>
 
@@ -563,20 +564,20 @@
                     <button class="view-btn active" data-view="single" id="view-btn-single">
                         <span class="view-btn-icon">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
-                        </span> 鍗曡鍥?
+                        </span> 单视图
                     </button>
                     <button class="view-btn" data-view="compare" id="view-btn-compare" disabled>
                         <span class="view-btn-icon">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="18" rx="1"></rect><rect x="13" y="3" width="8" height="18" rx="1"></rect></svg>
-                        </span> 瀵规瘮瑙嗗浘
+                        </span> 对比视图
                     </button>
                     <button class="view-btn" data-view="reference" id="view-btn-reference" disabled>
                         <span class="view-btn-icon">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="M20 19l-4-4"></path><path d="M4 19l4-4"></path></svg>
-                        </span> 鍙傝€冭鍥?
+                        </span> 参考视图
                     </button>
                     <span class="view-separator"></span>
-                    <button class="view-press-btn" id="view-press-btn" disabled title="闀挎寜瀵规瘮鍘熷浘">
+                    <button class="view-press-btn" id="view-press-btn" disabled title="长按对比原图">
                         <span class="view-btn-icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                         </span>
@@ -586,8 +587,8 @@
                 <div class="canvas-area" id="canvas-area">
                     <div class="canvas-placeholder" id="canvas-placeholder">
                         <div class="placeholder-icon"><img src="/static/assets/icon-small.png" alt="" style="width:100px;height:100px;"></div>
-                        <p>浠庡乏渚у浘搴撻€夋嫨鐩爣鍥剧墖</p>
-                        <p class="placeholder-sub">鎴栫偣鍑诲乏渚?瀵煎叆鍥剧墖"鎵归噺娣诲姞</p>
+                        <p>从左侧图库选择目标图片</p>
+                        <p class="placeholder-sub">或点击左侧"导入图片"批量添加</p>
                     </div>
                     <div class="canvas-stack" id="canvas-stack" hidden>
                         <div class="canvas-pane-overlay" id="pane-result">
@@ -610,7 +611,7 @@
                     <img id="canvas-reference" style="display:none" draggable="false">
                     <div class="canvas-divider-fixed" id="canvas-divider-fixed" hidden></div>
                     <div class="zoom-indicator" id="zoom-indicator">Fit</div>
-                    <button class="fit-btn" id="fit-btn" title="閫傚簲鐢诲竷">Fit</button>
+                    <button class="fit-btn" id="fit-btn" title="适应画布">Fit</button>
                 </div>
                 <div class="canvas-status" id="canvas-status" hidden>
                     <div class="progress-bar-wrap">
@@ -623,168 +624,168 @@
 
             <aside class="right-sidebar" id="right-sidebar">
                 <div class="tab-nav" id="tab-nav">
-                    <button class="tab-btn-s active" data-tab="ai">馃 AI 杩借壊</button>
-                    <button class="tab-btn-s" data-tab="profile">馃帹 閰嶇疆鏂囦欢</button>
-                    <button class="tab-btn-s" data-tab="adjust">馃帤锔?璋冩暣</button>
-                    <button class="tab-btn-s" data-tab="export">馃捑 瀵煎嚭</button>
+                    <button class="tab-btn-s active" data-tab="ai">🤖 AI 追色</button>
+                    <button class="tab-btn-s" data-tab="profile">🎨 配置文件</button>
+                    <button class="tab-btn-s" data-tab="adjust">🎚️ 调整</button>
+                    <button class="tab-btn-s" data-tab="export">💾 导出</button>
                 </div>
 
                 <div class="tab-panels" id="tab-panels">
                     <div class="tab-panel active" data-panel="ai">
                         <div class="panel-section">
-                            <div class="panel-label">馃柤锔?鍙傝€冨浘鐗?/div>
+                            <div class="panel-label">🖼️ 参考图片</div>
                             <div class="upload-area-s" id="ref-upload-area">
                                 <input type="file" id="ref-input" accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz,.psd,.psb,.heif,.heic,.avif,.jxl,.exr,.tif,.tiff" hidden>
                                 <div class="upload-placeholder-s" id="ref-placeholder">
-                                    <p>+ 鐐瑰嚮涓婁紶鍙傝€冨浘</p>
+                                    <p>+ 点击上传参考图</p>
                                 </div>
                                 <img id="ref-preview" class="preview-img-s" hidden>
                             </div>
-                            <button class="clear-btn-s" id="ref-clear" hidden>鉁?娓呴櫎</button>
+                            <button class="clear-btn-s" id="ref-clear" hidden>✕ 清除</button>
                         </div>
 
                         <div class="panel-section">
-                            <div class="panel-label">馃 杩借壊妯″紡</div>
+                            <div class="panel-label">🧠 追色模式</div>
                             <select id="ai-algorithm-select" class="panel-select">
-                                <option value="reinhard">缁忓吀杩借壊-蹇€?/option>
-                                <option value="histogram">鐩存柟鍥捐拷鑹?绮剧‘</option>
-                                <option value="luminance_partition">浜害鍒嗗尯杩借壊-鑷劧</option>
-                                <option value="modflows_b0">AI鍏ㄥ眬杩借壊-B0蹇€熸ā寮?/option>
-                                <option value="modflows">AI鍏ㄥ眬杩借壊-楂樹繚鐪?/option>
-                                <option value="regional_luminance">蹇€熷垎鍖鸿拷鑹?鐨偆淇濇姢</option>
-                                <option value="regional_modflows">AI鍒嗗尯杩借壊-鐨偆淇濇姢</option>
-                                <option value="ai_portrait">AI浜哄儚杩借壊-鑲よ壊淇濇姢</option>
-                                <option value="dncm_lut">绁炵粡棰勮杩借壊-绮剧‘LUT</option>
-                                <option value="neural_preset">绁炵粡棰勮杩借壊-闇€璁粌</option>
+                                <option value="reinhard">经典追色-快速</option>
+                                <option value="histogram">直方图追色-精确</option>
+                                <option value="luminance_partition">亮度分区追色-自然</option>
+                                <option value="modflows_b0">AI全局追色-B0快速模式</option>
+                                <option value="modflows">AI全局追色-高保真</option>
+                                <option value="regional_luminance">快速分区追色-皮肤保护</option>
+                                <option value="regional_modflows">AI分区追色-皮肤保护</option>
+                                <option value="ai_portrait">AI人像追色-肤色保护</option>
+                                <option value="dncm_lut">神经预设追色-精确LUT</option>
+                                <option value="neural_preset">神经预设追色-需训练</option>
                             </select>
                         </div>
 
                         <div class="panel-section" id="dncm-lut-mode-group">
-                            <div class="panel-label">LUT 妯″紡</div>
+                            <div class="panel-label">LUT 模式</div>
                             <select id="dncm-lut-mode" class="panel-select">
-                                <option value="fast">蹇€?LUT</option>
-                                <option value="quality">楂樿川閲?LUT</option>
+                                <option value="fast">快速 LUT</option>
+                                <option value="quality">高质量 LUT</option>
                             </select>
                         </div>
 
                         <div class="panel-section" id="ai-blend-group">
-                            <div class="panel-label">铻嶅悎寮哄害: <span id="ai-blend-value">85</span>%</div>
+                            <div class="panel-label">融合强度: <span id="ai-blend-value">85</span>%</div>
                             <input type="range" id="ai-blend-slider" min="0" max="100" value="85">
                         </div>
 
                         <div class="fold-panel ai-advanced-fold collapsed" id="ai-advanced-fold">
                             <div class="fold-header" data-fold="ai-advanced">
-                                <span class="fold-title">鍖哄煙淇濇姢 / 娣卞害鍒嗗眰 / 璇箟鍖归厤</span>
-                                <span class="fold-arrow">鈻?/span>
+                                <span class="fold-title">区域保护 / 深度分层 / 语义匹配</span>
+                                <span class="fold-arrow">▾</span>
                             </div>
                             <div class="fold-body">
                                 <div class="panel-section mask-panel" id="ai-mask-panel">
-                                    <div class="panel-label">鍖哄煙淇濇姢</div>
+                                    <div class="panel-label">区域保护</div>
                                     <select id="ai-mask-model" class="panel-select">
-                                        <option value="auto">鑷姩閫夋嫨鍙敤妯″瀷</option>
-                                        <option value="birefnet">BiRefNet 楂樿川閲忔姞鍥?/option>
-                                        <option value="sam">SAM/SAM2 涓讳綋鍒嗗壊</option>
-                                        <option value="fallback">蹇€熼檷绾фā寮?/option>
+                                        <option value="auto">自动选择可用模型</option>
+                                        <option value="birefnet">BiRefNet 高质量抠图</option>
+                                        <option value="sam">SAM/SAM2 主体分割</option>
+                                        <option value="fallback">快速降级模式</option>
                                     </select>
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="ai-mask-enabled"> 鍚敤 mask
+                                        <input type="checkbox" id="ai-mask-enabled"> 启用 mask
                                     </label>
                                     <select id="ai-mask-mode" class="panel-select">
-                                        <option value="protect_subject">淇濇姢涓讳綋 / 鍙拷鑳屾櫙</option>
-                                        <option value="subject_only">鍙拷涓讳綋</option>
-                                        <option value="protect_local">淇濇姢鐐归€夊尯鍩?/option>
-                                        <option value="local_only">鍙拷鐐归€夊尯鍩?/option>
+                                        <option value="protect_subject">保护主体 / 只追背景</option>
+                                        <option value="subject_only">只追主体</option>
+                                        <option value="protect_local">保护点选区域</option>
+                                        <option value="local_only">只追点选区域</option>
                                     </select>
                                     <div class="mask-actions">
-                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-generate" type="button">鐢熸垚涓讳綋 mask</button>
-                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-clear-points" type="button">娓呴櫎鐐归€?/button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-generate" type="button">生成主体 mask</button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-mask-clear-points" type="button">清除点选</button>
                                     </div>
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="ai-mask-preview-toggle"> mask 棰勮
+                                        <input type="checkbox" id="ai-mask-preview-toggle"> mask 预览
                                     </label>
                                     <div class="mask-strength-row">
-                                        <span>寮哄害 <span id="ai-mask-strength-value">100</span>%</span>
+                                        <span>强度 <span id="ai-mask-strength-value">100</span>%</span>
                                         <input type="range" id="ai-mask-strength" min="0" max="100" value="100">
                                     </div>
-                                    <div class="algo-info-s mask-status" id="ai-mask-status">鏈敓鎴?mask</div>
+                                    <div class="algo-info-s mask-status" id="ai-mask-status">未生成 mask</div>
                                 </div>
 
                                 <div class="panel-section depth-panel" id="ai-depth-panel">
-                                    <div class="panel-label">娣卞害鍒嗗眰杩借壊</div>
+                                    <div class="panel-label">深度分层追色</div>
                                     <select id="ai-depth-model" class="panel-select">
-                                        <option value="auto">鑷姩閫夋嫨鍙敤妯″瀷</option>
+                                        <option value="auto">自动选择可用模型</option>
                                         <option value="depth_anything_v2">Depth Anything V2</option>
-                                        <option value="fallback">瑙勫垯闄嶇骇妯″紡</option>
+                                        <option value="fallback">规则降级模式</option>
                                     </select>
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="ai-depth-enabled"> 鍚敤娣卞害鍒嗗眰
+                                        <input type="checkbox" id="ai-depth-enabled"> 启用深度分层
                                     </label>
                                     <div class="mask-actions">
-                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-generate" type="button">鐢熸垚娣卞害鍥?/button>
-                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-clear" type="button">娓呴櫎娣卞害</button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-generate" type="button">生成深度图</button>
+                                        <button class="panel-action-btn-secondary mask-action-btn" id="ai-depth-clear" type="button">清除深度</button>
                                     </div>
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="ai-depth-preview-toggle"> 娣卞害鍥鹃瑙?
+                                        <input type="checkbox" id="ai-depth-preview-toggle"> 深度图预览
                                     </label>
                                     <div class="mask-strength-row">
-                                        <span>鍒嗗眰寮哄害 <span id="ai-depth-strength-value">65</span>%</span>
+                                        <span>分层强度 <span id="ai-depth-strength-value">65</span>%</span>
                                         <input type="range" id="ai-depth-strength" min="0" max="100" value="65">
                                     </div>
-                                    <div class="algo-info-s mask-status" id="ai-depth-status">鏈敓鎴愭繁搴﹀浘</div>
+                                    <div class="algo-info-s mask-status" id="ai-depth-status">未生成深度图</div>
                                 </div>
 
                                 <div class="panel-section semantic-panel" id="ai-semantic-panel">
-                                    <div class="panel-label">鍙傝€冨浘璇箟鍖归厤</div>
+                                    <div class="panel-label">参考图语义匹配</div>
                                     <select id="ai-semantic-model" class="panel-select">
-                                        <option value="auto">鑷姩閫夋嫨鍙敤妯″瀷</option>
-                                        <option value="dinov2">DINOv2 璇箟鍖归厤</option>
-                                        <option value="fallback">瑙勫垯闄嶇骇妯″紡</option>
+                                        <option value="auto">自动选择可用模型</option>
+                                        <option value="dinov2">DINOv2 语义匹配</option>
+                                        <option value="fallback">规则降级模式</option>
                                     </select>
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="ai-semantic-enabled"> 鍚敤鎸夊唴瀹瑰€熻壊
+                                        <input type="checkbox" id="ai-semantic-enabled"> 启用按内容借色
                                     </label>
-                                    <button class="panel-action-btn-secondary mask-action-btn semantic-action-btn" id="ai-semantic-analyze" type="button">鍒嗘瀽璇箟鍖归厤</button>
+                                    <button class="panel-action-btn-secondary mask-action-btn semantic-action-btn" id="ai-semantic-analyze" type="button">分析语义匹配</button>
                                     <div class="mask-strength-row">
-                                        <span>鍖归厤寮哄害 <span id="ai-semantic-strength-value">55</span>%</span>
+                                        <span>匹配强度 <span id="ai-semantic-strength-value">55</span>%</span>
                                         <input type="range" id="ai-semantic-strength" min="0" max="100" value="55">
                                     </div>
-                                    <div class="algo-info-s mask-status" id="ai-semantic-status">鏈垎鏋愯涔夊尮閰?/div>
+                                    <div class="algo-info-s mask-status" id="ai-semantic-status">未分析语义匹配</div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="panel-section">
                             <label class="checkbox-label">
-                                <input type="checkbox" id="ai-postprocess" checked> 鉁?鏅鸿兘鍚庡鐞?
+                                <input type="checkbox" id="ai-postprocess" checked> ✨ 智能后处理
                             </label>
                             <label class="checkbox-label">
-                                <input type="checkbox" id="ai-metrics"> 馃搳 璐ㄩ噺璇勪及
+                                <input type="checkbox" id="ai-metrics"> 📊 质量评估
                             </label>
                         </div>
 
                         <button class="panel-action-btn" id="ai-transfer-btn" disabled>
-                            寮€濮?AI 杩借壊
+                            开始 AI 追色
                         </button>
                         <div class="metrics-result" id="metrics-result" hidden>
-                            <div class="metrics-title">馃搳 璐ㄩ噺璇勪及缁撴灉</div>
+                            <div class="metrics-title">📊 质量评估结果</div>
                             <div class="metrics-row">
-                                <span class="metrics-label">椋庢牸鐩镐技搴?/span>
+                                <span class="metrics-label">风格相似度</span>
                                 <div class="metrics-bar-bg"><div class="metrics-bar" id="metrics-style-bar"></div></div>
                                 <span class="metrics-val" id="metrics-style-val">-</span>
                             </div>
                             <div class="metrics-row">
-                                <span class="metrics-label">鍐呭淇濇寔搴?/span>
+                                <span class="metrics-label">内容保持度</span>
                                 <div class="metrics-bar-bg"><div class="metrics-bar" id="metrics-content-bar"></div></div>
                                 <span class="metrics-val" id="metrics-content-val">-</span>
                             </div>
                             <div class="metrics-row">
-                                <span class="metrics-label">缁煎悎璇勫垎</span>
+                                <span class="metrics-label">综合评分</span>
                                 <div class="metrics-bar-bg"><div class="metrics-bar metrics-bar-overall" id="metrics-overall-bar"></div></div>
                                 <span class="metrics-val" id="metrics-overall-val">-</span>
                             </div>
                         </div>
-                        <button class="panel-batch-btn batch-apply-btn" disabled title="闇€瑕佸褰撳墠鍥剧墖瀹屾垚杩借壊鍚庢墠鑳芥壒閲忓簲鐢?>
-                            鎵归噺搴旂敤
+                        <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                            批量应用
                         </button>
 
                         <div class="algo-info-s" id="algo-info-s"></div>
@@ -792,57 +793,57 @@
 
                     <div class="tab-panel" data-panel="profile">
                         <div class="panel-section">
-                            <div class="panel-label">棰勮</div>
+                            <div class="panel-label">预设</div>
                             <select id="profile-select" class="panel-select">
-                                <option value="standard">鏍囧噯锛堟棤婊ら暅锛?/option>
-                                <option value="bw">榛戠櫧</option>
-                                <option value="orange_bw">姗欓暅榛戠櫧</option>
-                                <option value="warm">鏆栬壊璋?/option>
-                                <option value="cool">鍐疯壊璋?/option>
+                                <option value="standard">标准（无滤镜）</option>
+                                <option value="bw">黑白</option>
+                                <option value="orange_bw">橙镜黑白</option>
+                                <option value="warm">暖色调</option>
+                                <option value="cool">冷色调</option>
                             </select>
                         </div>
 
                         <div class="panel-section">
-                            <div class="panel-label">鑷畾涔夐厤缃枃浠?/div>
-                            <button class="panel-import-btn" id="profile-import-btn">瀵煎叆 LUT 鏂囦欢 (.cube/.3dl/.xmp...)</button>
+                            <div class="panel-label">自定义配置文件</div>
+                            <button class="panel-import-btn" id="profile-import-btn">导入 LUT 文件 (.cube/.3dl/.xmp...)</button>
                             <input type="file" id="profile-file-input" accept=".cube,.3dl,.csp,.spi3d,.spi1d,.lut,.pf3,.xmp" hidden>
                             <div class="profile-status" id="profile-status">
-                                <span id="profile-status-text">鏈姞杞介厤缃枃浠?/span>
+                                <span id="profile-status-text">未加载配置文件</span>
                             </div>
                         </div>
 
                         <button class="panel-action-btn-secondary" id="apply-profile-btn" disabled>
-                            搴旂敤閰嶇疆
+                            应用配置
                         </button>
 
                         <div class="panel-section" id="lr-hifi-section" style="display:none;">
-                            <div class="panel-label">Lightroom 棰勮 (楂樹繚鐪?</div>
+                            <div class="panel-label">Lightroom 预设 (高保真)</div>
                             <div id="lr-upgrade-hint" style="display:none;margin-top:10px;padding:14px;background:linear-gradient(135deg,rgba(14,165,233,0.07),rgba(99,102,241,0.04));border-radius:10px;border:1px solid rgba(14,165,233,0.15);position:relative;overflow:hidden;">
                                 <div style="position:absolute;top:-30px;right:-30px;width:90px;height:90px;background:radial-gradient(circle,rgba(14,165,233,0.12),transparent 70%);pointer-events:none;"></div>
                                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                                    <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;line-height:1;">蹇€熼瑙?/div>
-                                    <div style="font-size:12px;color:#a1a1aa;font-weight:500;">宸插簲鐢?<strong id="lr-upgrade-name" style="color:#0ea5e9;font-weight:600;"></strong></div>
+                                    <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;line-height:1;">快速预览</div>
+                                    <div style="font-size:12px;color:#a1a1aa;font-weight:500;">已应用 <strong id="lr-upgrade-name" style="color:#0ea5e9;font-weight:600;"></strong></div>
                                 </div>
                                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                                    <span style="font-size:10px;color:#71717a;">80% 绮惧害</span>
+                                    <span style="font-size:10px;color:#71717a;">80% 精度</span>
                                     <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;position:relative;overflow:hidden;">
                                         <div style="position:absolute;left:0;top:0;height:100%;width:50%;background:linear-gradient(90deg,#0ea5e9,#6366f1);border-radius:2px;"></div>
                                     </div>
                                     <span style="font-size:10px;color:#0ea5e9;font-weight:600;">98%</span>
-                                    <span style="font-size:9px;color:#6366f1;">楂樹繚鐪?/span>
+                                    <span style="font-size:9px;color:#6366f1;">高保真</span>
                                 </div>
                                 <a id="lr-upgrade-download" href="#" style="display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:11px 16px;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .2s;box-shadow:0 2px 10px rgba(14,165,233,0.3);">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                    涓€閿笅杞?DNG 鍖呭崌绾ц嚦楂樹繚鐪?
+                                    一键下载 DNG 包升级至高保真
                                 </a>
-                                <div style="font-size:10px;color:#666;margin-top:8px;text-align:center;">涓嬭浇鍚庡湪 Lightroom 涓墦寮€ DNG 瀵煎嚭 JPG锛屾嫋鍥炰笂浼犲嵆鑾?98% 楂樹繚鐪?/div>
+                                <div style="font-size:10px;color:#666;margin-top:8px;text-align:center;">下载后在 Lightroom 中打开 DNG 导出 JPG，拖回上传即获 98% 高保真</div>
                             </div>
                             <div id="lr-manual-area" style="display:none;flex-direction:column;gap:6px;margin-top:6px;">
-                                <button class="panel-import-btn" id="lr-xmp-import-btn">1. 瀵煎叆 XMP 棰勮鏂囦欢</button>
+                                <button class="panel-import-btn" id="lr-xmp-import-btn">1. 导入 XMP 预设文件</button>
                                 <input type="file" id="lr-xmp-input" accept=".xmp" hidden>
-                                <button class="panel-action-btn-secondary" id="lr-download-btn" disabled>2. 涓嬭浇 DNG 棰勮鍖?/button>
+                                <button class="panel-action-btn-secondary" id="lr-download-btn" disabled>2. 下载 DNG 预设包</button>
                                 <div style="display:flex;gap:6px;">
-                                    <button class="panel-import-btn" id="lr-upload-jpg-btn" style="flex:1;" disabled>3. 涓婁紶 Lightroom JPG</button>
+                                    <button class="panel-import-btn" id="lr-upload-jpg-btn" style="flex:1;" disabled>3. 上传 Lightroom JPG</button>
                                     <input type="file" id="lr-jpg-input" accept=".jpg,.jpeg" hidden>
                                 </div>
                                 <div id="lr-step2-area" style="display:none;"></div>
@@ -850,121 +851,121 @@
                         </div>
 
                         <div class="panel-section" id="profile-assets-section" hidden>
-                            <div class="panel-label">鎴戠殑閰嶇疆鏂囦欢</div>
+                            <div class="panel-label">我的配置文件</div>
                             <div class="assets-list" id="profile-assets-list"></div>
                         </div>
 
                         <div class="panel-section" style="margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
-                            <div class="panel-label">鐩告満椋庢牸閫嗗悜 (闇€鎻愪緵 RAW + 鏈哄唴JPG)</div>
+                            <div class="panel-label">相机风格逆向 (需提供 RAW + 机内JPG)</div>
                             <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
                                 <div style="display:flex; gap:6px;">
-                                    <button class="panel-import-btn capture-file-btn" id="capture-raw-btn">閫夋嫨 RAW 鏂囦欢</button>
+                                    <button class="panel-import-btn capture-file-btn" id="capture-raw-btn">选择 RAW 文件</button>
                                     <input type="file" id="capture-raw-input" accept=".dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz" hidden>
-                                    <button class="panel-import-btn capture-file-btn" id="capture-jpg-btn">閫夋嫨鏈哄唴 JPG</button>
+                                    <button class="panel-import-btn capture-file-btn" id="capture-jpg-btn">选择机内 JPG</button>
                                     <input type="file" id="capture-jpg-input" accept=".jpg,.jpeg" hidden>
                                 </div>
-                                <button class="panel-action-btn-secondary" id="btn-capture-style" disabled>鎻愬彇鐩告満椋庢牸</button>
+                                <button class="panel-action-btn-secondary" id="btn-capture-style" disabled>提取相机风格</button>
                             </div>
                             <div class="profile-status" id="capture-status">
-                                <span id="capture-status-text">璇烽€夋嫨 RAW 鍜?JPG 鏂囦欢</span>
+                                <span id="capture-status-text">请选择 RAW 和 JPG 文件</span>
                             </div>
                         </div>
 
                         <div class="panel-section">
-                            <div class="panel-label">鐩告満椋庢牸搴?/div>
+                            <div class="panel-label">相机风格库</div>
                             <div id="style-gallery" class="style-gallery-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px; max-height:180px; overflow-y:auto;"></div>
-                            <div id="style-gallery-empty" class="panel-hint" style="text-align:center; color:#666; font-size:11px; padding:8px 0;">灏氭湭鎻愬彇椋庢牸锛屽弻鍑诲彲閲嶅懡鍚?/div>
+                            <div id="style-gallery-empty" class="panel-hint" style="text-align:center; color:#666; font-size:11px; padding:8px 0;">尚未提取风格，双击可重命名</div>
                         </div>
 
                         </div>
 
                     <div class="tab-panel" data-panel="adjust">
                         <div class="panel-section">
-                            <div class="panel-label">闇€鍏堝畬鎴?AI 杩借壊鎴栧簲鐢ㄩ厤缃悗鏂瑰彲璋冩暣</div>
+                            <div class="panel-label">需先完成 AI 追色或应用配置后方可调整</div>
                         </div>
                         <div class="adjust-sliders-s" id="adjust-sliders" hidden>
                             <div class="adjust-item">
-                                <label data-param="0">绋嬪害</label>
+                                <label data-param="0">程度</label>
                                 <div class="adjust-row">
                                     <input type="number" id="intensity-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="intensity-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                             <div class="adjust-item">
-                                <label data-param="1">鏇濆厜</label>
+                                <label data-param="1">曝光</label>
                                 <div class="adjust-row">
                                     <input type="number" id="exposure-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="exposure-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                             <div class="adjust-item">
-                                <label data-param="2">褰辫皟</label>
+                                <label data-param="2">影调</label>
                                 <div class="adjust-row">
                                     <input type="number" id="contrast-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="contrast-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                             <div class="adjust-item">
-                                <label data-param="3">楂樺厜</label>
+                                <label data-param="3">高光</label>
                                 <div class="adjust-row">
                                     <input type="number" id="highlight-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="highlight-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                             <div class="adjust-item">
-                                <label data-param="4">闃村奖</label>
+                                <label data-param="4">阴影</label>
                                 <div class="adjust-row">
                                     <input type="number" id="shadow-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="shadow-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                             <div class="adjust-item">
-                                <label data-param="5">鑹插僵</label>
+                                <label data-param="5">色彩</label>
                                 <div class="adjust-row">
                                     <input type="number" id="vibrance-num" min="0" max="200" value="100" step="5">
                                     <input type="range" id="vibrance-slider" min="0" max="200" value="100" step="1">
                                 </div>
                             </div>
                         </div>
-                        <button class="panel-batch-btn batch-apply-btn" disabled title="闇€瑕佸褰撳墠鍥剧墖瀹屾垚杩借壊鍚庢墠鑳芥壒閲忓簲鐢?>
-                            鎵归噺搴旂敤
+                        <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                            批量应用
                         </button>
                     </div>
 
                     <div class="tab-panel" data-panel="export">
                         <div class="panel-section">
-                            <div class="panel-label">瀵煎嚭妯″紡</div>
+                            <div class="panel-label">导出模式</div>
                         <div class="export-mode-switch">
-                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-quick" style="flex:1; padding:8px 0; font-size:12px;">鐩存帴瀵煎嚭 鈿?/button>
-                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-custom" style="flex:1; padding:8px 0; font-size:12px;">鑷畾涔夊鍑?/button>
+                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-quick" style="flex:1; padding:8px 0; font-size:12px;">直接导出 ⚡</button>
+                                <button class="btn-outline-s video-popup-btn video-popup-btn-secondary export-mode-btn" id="export-mode-custom" style="flex:1; padding:8px 0; font-size:12px;">自定义导出</button>
                             </div>
                         </div>
 
                         <div id="export-quick-panel">
                             <div class="panel-section">
-                                <div class="panel-label">蹇€熻缃?/div>
+                                <div class="panel-label">快速设置</div>
                                 <div class="field-row">
-                                    <label class="field-label">鏍煎紡</label>
+                                    <label class="field-label">格式</label>
                                     <select id="quick-format" class="panel-select">
                                         <option value="jpg">JPEG (95%)</option>
                                         <option value="png">PNG</option>
                                     </select>
                                 </div>
                                 <div class="field-row">
-                                    <label class="field-label">灏哄</label>
+                                    <label class="field-label">尺寸</label>
                                     <select id="quick-size" class="panel-select">
-                                        <option value="full">鍘熷灏哄</option>
-                                        <option value="half">1/2 缂╁皬</option>
-                                        <option value="custom">鑷畾涔夐暱杈?/option>
+                                        <option value="full">原始尺寸</option>
+                                        <option value="half">1/2 缩小</option>
+                                        <option value="custom">自定义长边</option>
                                     </select>
                                 </div>
                                 <div class="field-row" id="quick-size-custom-row" hidden>
-                                    <label class="field-label">闀胯竟鍍忕礌</label>
+                                    <label class="field-label">长边像素</label>
                                     <input type="number" id="quick-size-custom" class="input-text size-custom" value="3000" min="100" max="20000">
                                     <span class="px-unit">px</span>
                                 </div>
                                 <div class="field-row">
-                                    <label class="field-label">鑹插僵绌洪棿</label>
+                                    <label class="field-label">色彩空间</label>
                                     <select id="quick-colorspace" class="panel-select">
                                         <option value="srgb">sRGB</option>
                                         <option value="adobergb">Adobe RGB</option>
@@ -972,81 +973,81 @@
                                 </div>
                             </div>
                             <button class="panel-action-btn-download" id="quick-export-btn" disabled>
-                                瀵煎嚭鍗曞紶鍥剧墖
+                                导出单张图片
                             </button>
                             <button class="panel-action-btn-folder" id="quick-export-folder-btn" disabled>
-                                涓嬭浇鍒版枃浠跺す
+                                下载到文件夹
                             </button>
                         </div>
 
                         <div id="export-custom-panel" hidden>
                             <div class="panel-section">
-                                <div class="panel-label">璁剧疆妯℃澘</div>
+                                <div class="panel-label">设置模板</div>
                                 <select id="export-template" class="panel-select">
-                                    <option value="web">缃戠粶鍒嗕韩 (JPEG 95% sRGB)</option>
-                                    <option value="print">鍗板埛杈撳嚭 (PNG 16-bit Adobe RGB)</option>
-                                    <option value="social">绀句氦濯掍綋 (JPEG 85% sRGB 闀胯竟2000px)</option>
-                                    <option value="custom">鑷畾涔?/option>
+                                    <option value="web">网络分享 (JPEG 95% sRGB)</option>
+                                    <option value="print">印刷输出 (PNG 16-bit Adobe RGB)</option>
+                                    <option value="social">社交媒体 (JPEG 85% sRGB 长边2000px)</option>
+                                    <option value="custom">自定义</option>
                                 </select>
                             </div>
 
                             <div class="fold-panel">
                                 <div class="fold-header" data-fold="location">
-                                    <span class="fold-title">瀵煎嚭浣嶇疆</span>
-                                    <span class="fold-arrow">鈻?/span>
+                                    <span class="fold-title">导出位置</span>
+                                    <span class="fold-arrow">▾</span>
                                 </div>
                                 <div class="fold-body">
                                     <div class="field-row">
-                                        <label class="field-label">淇濆瓨鍒?/label>
-                                        <button class="btn-outline-s" id="export-pick-folder">閫夋嫨鏂囦欢澶?..</button>
-                                        <span class="folder-path" id="export-folder-path">鏈€夋嫨</span>
+                                        <label class="field-label">保存到</label>
+                                        <button class="btn-outline-s" id="export-pick-folder">选择文件夹...</button>
+                                        <span class="folder-path" id="export-folder-path">未选择</span>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">缁勭粐鏂瑰紡</label>
+                                        <label class="field-label">组织方式</label>
                                         <select id="export-org" class="panel-select">
-                                            <option value="flat">鐩存帴淇濆瓨</option>
-                                            <option value="date">鎸夋棩鏈熷垎缁?/option>
-                                            <option value="style">鎸夐鏍煎垎缁?/option>
-                                            <option value="date_style">鎸夋棩鏈?椋庢牸</option>
+                                            <option value="flat">直接保存</option>
+                                            <option value="date">按日期分组</option>
+                                            <option value="style">按风格分组</option>
+                                            <option value="date_style">按日期+风格</option>
                                         </select>
                                     </div>
                                     <div class="location-preview" id="export-location-preview">
-                                        <span class="preview-path">璇峰厛閫夋嫨鏂囦欢澶?/span>
+                                        <span class="preview-path">请先选择文件夹</span>
                                     </div>
                                 </div>
                             </div>
 
                             <div class="fold-panel">
                                 <div class="fold-header" data-fold="naming">
-                                    <span class="fold-title">鏂囦欢鍛藉悕</span>
-                                    <span class="fold-arrow">鈻?/span>
+                                    <span class="fold-title">文件命名</span>
+                                    <span class="fold-arrow">▾</span>
                                 </div>
                                 <div class="fold-body">
                                     <div class="field-row">
-                                        <label class="field-label">鍛藉悕瑙勫垯</label>
+                                        <label class="field-label">命名规则</label>
                                         <select id="export-naming" class="panel-select">
-                                            <option value="original">鍘熸枃浠跺悕</option>
-                                            <option value="original_style">鍘熸枃浠跺悕_椋庢牸</option>
-                                            <option value="date_original">鏃ユ湡_鍘熸枃浠跺悕</option>
-                                            <option value="date_original_style">鏃ユ湡_鍘熸枃浠跺悕_椋庢牸</option>
-                                            <option value="custom">鑷畾涔?/option>
+                                            <option value="original">原文件名</option>
+                                            <option value="original_style">原文件名_风格</option>
+                                            <option value="date_original">日期_原文件名</option>
+                                            <option value="date_original_style">日期_原文件名_风格</option>
+                                            <option value="custom">自定义</option>
                                         </select>
                                     </div>
                                     <div class="field-row" id="export-naming-custom-row" hidden>
-                                        <label class="field-label">鑷畾涔夋ā鏉?/label>
+                                        <label class="field-label">自定义模板</label>
                                         <input type="text" id="export-naming-custom" class="input-text" value="{name}_{style}" placeholder="{date}_{name}_{style}_{seq}">
-                                        <span class="field-hint">鍙敤鍙橀噺锛歿date} {name} {style} {seq}</span>
+                                        <span class="field-hint">可用变量：{date} {name} {style} {seq}</span>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">搴忓彿浣嶆暟</label>
+                                        <label class="field-label">序号位数</label>
                                         <select id="export-seq-digits" class="panel-select">
-                                            <option value="2">2 浣?(01-99)</option>
-                                            <option value="3">3 浣?(001-999)</option>
-                                            <option value="4">4 浣?(001-9999)</option>
+                                            <option value="2">2 位 (01-99)</option>
+                                            <option value="3">3 位 (001-999)</option>
+                                            <option value="4">4 位 (001-9999)</option>
                                         </select>
                                     </div>
                                     <div class="naming-preview" id="export-naming-preview">
-                                        <span class="preview-label">棰勮锛?/span>
+                                        <span class="preview-label">预览：</span>
                                         <span class="preview-value" id="export-naming-preview-value">IMG_001.jpg</span>
                                     </div>
                                 </div>
@@ -1054,51 +1055,51 @@
 
                             <div class="fold-panel">
                                 <div class="fold-header" data-fold="settings">
-                                    <span class="fold-title">鏂囦欢璁剧疆</span>
-                                    <span class="fold-arrow">鈻?/span>
+                                    <span class="fold-title">文件设置</span>
+                                    <span class="fold-arrow">▾</span>
                                 </div>
                                 <div class="fold-body">
                                     <div class="field-row">
-                                        <label class="field-label">鏍煎紡</label>
+                                        <label class="field-label">格式</label>
                                         <select id="export-format" class="panel-select">
                                             <option value="jpg">JPEG</option>
-                                            <option value="png">PNG (鏃犳崯)</option>
+                                            <option value="png">PNG (无损)</option>
                                             <option value="both">JPEG + PNG</option>
                                         </select>
                                     </div>
                                     <div class="field-row" id="export-quality-row">
-                                        <label class="field-label">鍝佽川: <span id="export-quality-val">95</span></label>
+                                        <label class="field-label">品质: <span id="export-quality-val">95</span></label>
                                         <input type="range" id="export-quality" class="slider-s" min="1" max="100" value="95">
                                     </div>
                                     <div class="field-row" id="export-est-row">
-                                        <span class="field-hint">棰勪及澶у皬锛?span id="export-size-est">~2.3MB</span></span>
+                                        <span class="field-hint">预估大小：<span id="export-size-est">~2.3MB</span></span>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">鑹插僵绌洪棿</label>
+                                        <label class="field-label">色彩空间</label>
                                         <select id="export-colorspace" class="panel-select">
-                                            <option value="srgb">sRGB锛堢綉缁滈€氱敤锛?/option>
-                                            <option value="adobergb">Adobe RGB锛堝嵃鍒风敤锛?/option>
-                                            <option value="prophoto">ProPhoto RGB锛堝悗鏈熺敤锛?/option>
+                                            <option value="srgb">sRGB（网络通用）</option>
+                                            <option value="adobergb">Adobe RGB（印刷用）</option>
+                                            <option value="prophoto">ProPhoto RGB（后期用）</option>
                                         </select>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">浣嶆繁</label>
+                                        <label class="field-label">位深</label>
                                         <select id="export-bitdepth" class="panel-select">
                                             <option value="8">8-bit</option>
-                                            <option value="16">16-bit (浠?PNG)</option>
+                                            <option value="16">16-bit (仅 PNG)</option>
                                         </select>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">灏哄</label>
+                                        <label class="field-label">尺寸</label>
                                         <select id="export-size" class="panel-select">
-                                            <option value="full">鍘熷灏哄</option>
-                                            <option value="2x">2x 瓒呭垎杈ㄧ巼</option>
-                                            <option value="half">1/2 缂╁皬</option>
-                                            <option value="custom">鑷畾涔夐暱杈?/option>
+                                            <option value="full">原始尺寸</option>
+                                            <option value="2x">2x 超分辨率</option>
+                                            <option value="half">1/2 缩小</option>
+                                            <option value="custom">自定义长边</option>
                                         </select>
                                     </div>
                                     <div class="field-row" id="export-size-custom-row" hidden>
-                                        <label class="field-label">闀胯竟鍍忕礌</label>
+                                        <label class="field-label">长边像素</label>
                                         <input type="number" id="export-size-custom" class="input-text size-custom" value="3000" min="100" max="20000" step="100">
                                         <span class="px-unit">px</span>
                                     </div>
@@ -1107,33 +1108,33 @@
 
                             <div class="fold-panel">
                                 <div class="fold-header" data-fold="post">
-                                    <span class="fold-title">鍚庢湡澶勭悊</span>
-                                    <span class="fold-arrow">鈻?/span>
+                                    <span class="fold-title">后期处理</span>
+                                    <span class="fold-arrow">▾</span>
                                 </div>
                                 <div class="fold-body">
                                     <div class="field-row">
-                                        <label class="field-label">瀵煎嚭鍚?/label>
+                                        <label class="field-label">导出后</label>
                                         <select id="export-after" class="panel-select">
-                                            <option value="none">鏃犳搷浣?/option>
-                                            <option value="open_folder">鎵撳紑鏂囦欢澶?/option>
-                                            <option value="open_file">鎵撳紑鏂囦欢</option>
+                                            <option value="none">无操作</option>
+                                            <option value="open_folder">打开文件夹</option>
+                                            <option value="open_file">打开文件</option>
                                         </select>
                                     </div>
                                     <div class="field-row">
-                                        <label class="field-label">姘村嵃</label>
-                                        <span class="switch-label-s">鏆傛湭瀹炵幇</span>
+                                        <label class="field-label">水印</label>
+                                        <span class="switch-label-s">暂未实现</span>
                                     </div>
                                 </div>
                             </div>
 
                             <button class="panel-action-btn-download" id="export-btn" disabled>
-                                瀵煎嚭鍗曞紶鍥剧墖
+                                导出单张图片
                             </button>
                             <button class="panel-action-btn-folder" id="export-folder-btn" disabled>
-                                涓嬭浇鍒版枃浠跺す
+                                下载到文件夹
                             </button>
-                            <button class="panel-batch-btn batch-apply-btn" disabled title="闇€瑕佸褰撳墠鍥剧墖瀹屾垚杩借壊鍚庢墠鑳芥壒閲忓簲鐢?>
-                                鎵归噺搴旂敤鍒伴€変腑鍥剧墖
+                            <button class="panel-batch-btn batch-apply-btn" disabled title="需要对当前图片完成追色后才能批量应用">
+                                批量应用到选中图片
                             </button>
                         </div>
 
@@ -1152,29 +1153,29 @@
         <div class="modal-overlay" id="batch-modal" hidden>
             <div class="modal-dialog batch-modal-card" role="dialog" aria-modal="true" aria-labelledby="batch-modal-title">
                 <div class="modal-header">
-                    <h3 class="modal-title" id="batch-modal-title">鎵归噺搴旂敤</h3>
-                    <button class="modal-close" id="batch-modal-close" type="button" aria-label="鍏抽棴">脳</button>
+                    <h3 class="modal-title" id="batch-modal-title">批量应用</h3>
+                    <button class="modal-close" id="batch-modal-close" type="button" aria-label="关闭">×</button>
                 </div>
                 <div class="modal-body">
-                    <p class="modal-desc">灏嗗綋鍓嶅浘鐗囩殑鏁堟灉搴旂敤鍒?<strong id="batch-target-count">0</strong> 寮犲凡閫夊浘鐗囥€?/p>
+                    <p class="modal-desc">将当前图片的效果应用到 <strong id="batch-target-count">0</strong> 张已选图片。</p>
                     <label class="modal-checkbox" id="batch-opt-ai-label">
                         <input id="batch-opt-ai" type="checkbox">
                         <span class="modal-checkbox-text">
-                            <strong>AI 杩借壊 / 棰勮鏁堟灉</strong>
-                            <small>澶嶅埗褰撳墠鍥剧墖宸茬敓鎴愮殑杩借壊鎴栭璁剧粨鏋?/small>
+                            <strong>AI 追色 / 预设效果</strong>
+                            <small>复制当前图片已生成的追色或预设结果</small>
                         </span>
                     </label>
                     <label class="modal-checkbox">
                         <input id="batch-opt-adjust" type="checkbox">
                         <span class="modal-checkbox-text">
-                            <strong>鍩虹璋冩暣鍙傛暟</strong>
-                            <small>鍚屾鏇濆厜銆佸奖璋冦€佽壊褰╃瓑婊戞潌璁剧疆</small>
+                            <strong>基础调整参数</strong>
+                            <small>同步曝光、影调、色彩等滑杆设置</small>
                         </span>
                     </label>
                 </div>
                 <div class="modal-footer">
-                    <button class="modal-btn-cancel" id="batch-modal-cancel" type="button">鍙栨秷</button>
-                    <button class="modal-btn-confirm" id="batch-modal-confirm" type="button">寮€濮嬪簲鐢?/button>
+                    <button class="modal-btn-cancel" id="batch-modal-cancel" type="button">取消</button>
+                    <button class="modal-btn-confirm" id="batch-modal-confirm" type="button">开始应用</button>
                 </div>
             </div>
         </div>
@@ -1183,29 +1184,29 @@
             <aside class="w-72 flex flex-col gap-3 overflow-y-auto">
                 <div class="bg-[#141c29] rounded-xl p-3 border border-gray-700">
                     <button id="video-upload-btn" class="w-full py-2 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2 shadow-lg hover:opacity-90 transition">
-                        <i class="fas fa-cloud-upload-alt"></i> 涓婁紶瑙嗛
+                        <i class="fas fa-cloud-upload-alt"></i> 上传视频
                     </button>
                     <input type="file" id="video-file-input" accept="video/*" class="hidden">
                 </div>
 
                 <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700">
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-xs font-medium text-gray-300">瑙嗛淇℃伅</h3>
+                        <h3 class="text-xs font-medium text-gray-300">视频信息</h3>
                         <i class="fas fa-info-circle text-gray-500 text-xs"></i>
                     </div>
                     <div class="space-y-1.5 text-xs" id="video-info-panel">
-                        <div class="flex justify-between"><span class="text-gray-400">鏂囦欢鍚?/span><span class="text-gray-200" id="vinfo-name">鈥?/span></div>
-                        <div class="flex justify-between"><span class="text-gray-400">鏃堕暱</span><span class="text-gray-200" id="vinfo-duration">鈥?/span></div>
-                        <div class="flex justify-between"><span class="text-gray-400">鍒嗚鲸鐜?/span><span class="text-gray-200" id="vinfo-resolution">鈥?/span></div>
-                        <div class="flex justify-between"><span class="text-gray-400">甯х巼</span><span class="text-gray-200" id="vinfo-fps">鈥?/span></div>
-                        <div class="flex justify-between"><span class="text-gray-400">澶у皬</span><span class="text-gray-200" id="vinfo-size">鈥?/span></div>
-                        <div class="flex justify-between"><span class="text-gray-400">缂栫爜</span><span class="text-gray-200" id="vinfo-codec">鈥?/span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">文件名</span><span class="text-gray-200" id="vinfo-name">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">时长</span><span class="text-gray-200" id="vinfo-duration">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">分辨率</span><span class="text-gray-200" id="vinfo-resolution">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">帧率</span><span class="text-gray-200" id="vinfo-fps">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">大小</span><span class="text-gray-200" id="vinfo-size">—</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">编码</span><span class="text-gray-200" id="vinfo-codec">—</span></div>
                     </div>
                 </div>
 
                 <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700 flex-1 overflow-y-auto" id="frame-thumbnails-container">
                     <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-xs font-medium text-gray-300">甯х缉鐣ュ浘</h3>
+                        <h3 class="text-xs font-medium text-gray-300">帧缩略图</h3>
                         <div class="flex gap-2 text-gray-500"><i class="fas fa-th-large text-xs cursor-pointer hover:text-white"></i><i class="fas fa-list text-xs cursor-pointer hover:text-white"></i></div>
                     </div>
                     <div id="frame-thumbnails-list" class="space-y-3"></div>
@@ -1217,7 +1218,7 @@
                     <video id="video-player" class="w-full h-full object-contain" controlsList="nodownload" style="display: none;"></video>
                     <div id="video-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-sm">
                         <img src="/static/assets/icon-small.png" alt="" style="width:100px;height:100px;margin-bottom:12px;">
-                        <span>涓婁紶瑙嗛鍚庡紑濮嬮瑙?/span>
+                        <span>上传视频后开始预览</span>
                     </div>
                     <div class="absolute bottom-0 w-full bg-gradient-to-t from-[#141c29]/90 to-transparent pt-20 pb-4 px-6" id="video-controls-overlay">
                         <div class="flex items-center gap-3 text-xs text-white">
@@ -1236,73 +1237,73 @@
 
                 <div class="bg-[#141c29] rounded-xl p-3 border border-gray-700">
                     <div class="flex justify-between items-center mb-2">
-                        <span class="text-[15px] text-white font-medium">鍏抽敭甯ф椂闂磋酱</span>
+                        <span class="text-[15px] text-white font-medium">关键帧时间轴</span>
                     </div>
                     <div class="relative h-[130px] border-y border-gray-700/50" id="keyframe-timeline">
                         <div class="absolute left-[10px] right-[10px] h-[1.5px] bg-[#6d7dda]" style="top: 43px"></div>
                         <div class="flex justify-between items-center w-full h-full relative z-10 px-[50px]" id="keyframe-nodes-container"></div>
                     </div>
                     <div class="flex justify-center items-center h-15 mt-1">
-                        <span class="text-[13px] text-gray-400">鈫?鍙嫋鎷借皟鏁村叧閿抚浣嶇疆 鈫?/span>
+                        <span class="text-[13px] text-gray-400">← 可拖拽调整关键帧位置 →</span>
                     </div>
                 </div>
 
                 <div class="bg-[#141c29] rounded-xl p-2 border border-gray-700 flex justify-between items-center px-2 text-white">
-                    <button class="flex-1 py-3 bg-indigo-600 rounded text-xs font-medium hover:bg-indigo-500 flex items-center justify-center gap-1 mx-1" id="btn-play"><i class="fas fa-play"></i> 鎾斁</button>
-                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-pause"><i class="fas fa-pause"></i> 鏆傚仠</button>
-                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-prev"><i class="fas fa-step-backward"></i> 涓婁竴甯?/button>
-                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-next"><i class="fas fa-step-forward"></i> 涓嬩竴甯?/button>
+                    <button class="flex-1 py-3 bg-indigo-600 rounded text-xs font-medium hover:bg-indigo-500 flex items-center justify-center gap-1 mx-1" id="btn-play"><i class="fas fa-play"></i> 播放</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-pause"><i class="fas fa-pause"></i> 暂停</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-prev"><i class="fas fa-step-backward"></i> 上一帧</button>
+                    <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-next"><i class="fas fa-step-forward"></i> 下一帧</button>
                     <button class="flex-1 py-3 bg-gray-700 rounded text-xs font-medium hover:bg-gray-600 flex items-center justify-center gap-1 mx-1" id="btn-settings"><i class="fas fa-cog"></i></button>
                 </div>
             </section>
 
             <aside class="w-80 flex flex-col gap-3 overflow-y-auto">
                 <div class="bg-[#141c29] rounded-xl p-4 border border-gray-700">
-                    <div class="flex items-center gap-2 mb-4 text-white font-medium text-sm"><i class="fas fa-microchip text-purple-400"></i> AI 杩借壊</div>
+                    <div class="flex items-center gap-2 mb-4 text-white font-medium text-sm"><i class="fas fa-microchip text-purple-400"></i> AI 追色</div>
 
                     <div class="border border-dashed border-gray-600 rounded-lg p-1 mb-3 text-center text-gray-400 cursor-pointer hover:border-purple-400 transition overflow-hidden relative" id="ref-dropzone" style="aspect-ratio: 4/3;">
                         <div id="ref-dropzone-placeholder" class="flex flex-col items-center justify-center h-full">
                             <i class="far fa-image text-2xl text-gray-500 mb-1 block"></i>
-                            <span class="text-[10px]">鐐瑰嚮鎴栨嫋鎷戒笂浼犲弬鑰冨浘鐗?/span>
+                            <span class="text-[10px]">点击或拖拽上传参考图片</span>
                         </div>
                         <img id="video-ref-preview" class="absolute inset-0 w-full h-full object-contain rounded" hidden>
                         <input type="file" id="ref-file-input" accept="image/*" class="hidden">
                     </div>
 
                     <div class="flex justify-between items-center mb-3">
-                        <span class="text-xs text-gray-300"><i class="fas fa-circle text-rose-400 text-[8px] mr-1"></i> 杩借壊妯″紡</span>
+                        <span class="text-xs text-gray-300"><i class="fas fa-circle text-rose-400 text-[8px] mr-1"></i> 追色模式</span>
                         <select id="chase-mode-select" class="bg-gray-800 rounded px-2 py-1 text-xs text-gray-300 border border-gray-600 cursor-pointer hover:bg-gray-700">
-                            <option value="reinhard">缁忓吀杩借壊-蹇€?/option>
-                            <option value="histogram">鐩存柟鍥捐拷鑹?绮剧‘</option>
-                            <option value="luminance_partition">浜害鍒嗗尯杩借壊-鑷劧</option>
-                            <option value="modflows_b0">AI鍏ㄥ眬杩借壊-B0蹇€熸ā寮?/option>
-                            <option value="modflows">AI鍏ㄥ眬杩借壊-楂樹繚鐪?/option>
-                            <option value="regional_luminance">蹇€熷垎鍖鸿拷鑹?鐨偆淇濇姢</option>
-                            <option value="regional_modflows">AI鍒嗗尯杩借壊-鐨偆淇濇姢</option>
-                            <option value="ai_portrait">AI浜哄儚杩借壊-鑲よ壊淇濇姢</option>
-                            <option value="dncm_lut">绁炵粡棰勮杩借壊-绮剧‘LUT</option>
-                            <option value="neural_preset">绁炵粡棰勮杩借壊-闇€璁粌</option>
+                            <option value="reinhard">经典追色-快速</option>
+                            <option value="histogram">直方图追色-精确</option>
+                            <option value="luminance_partition">亮度分区追色-自然</option>
+                            <option value="modflows_b0">AI全局追色-B0快速模式</option>
+                            <option value="modflows">AI全局追色-高保真</option>
+                            <option value="regional_luminance">快速分区追色-皮肤保护</option>
+                            <option value="regional_modflows">AI分区追色-皮肤保护</option>
+                            <option value="ai_portrait">AI人像追色-肤色保护</option>
+                            <option value="dncm_lut">神经预设追色-精确LUT</option>
+                            <option value="neural_preset">神经预设追色-需训练</option>
                         </select>
                     </div>
 
                     <div class="video-axes-panel mb-4">
                         <div class="video-axis-item">
                             <div class="video-axis-head">
-                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 鍏抽敭甯ч棿闅?/span>
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 关键帧间隔</span>
                                 <span class="video-axis-value" id="keyframe-interval-value">12</span>
                             </div>
                             <input type="range" id="keyframe-interval-slider" min="1" max="120" value="12" class="video-axis-range">
-                            <div class="video-axis-scale"><span>1甯?/span><span>30甯?/span><span>60甯?/span><span>90甯?/span><span>120甯?/span></div>
+                            <div class="video-axis-scale"><span>1帧</span><span>30帧</span><span>60帧</span><span>90帧</span><span>120帧</span></div>
                         </div>
 
                         <div class="video-axis-toggle">
                             <input type="checkbox" id="enable-scene-detect" checked>
-                            <label for="enable-scene-detect">鍚敤鍦烘櫙妫€娴嬶紙鑷姩鍙戠幇闀滃ご鍒囨崲锛?/label>
+                            <label for="enable-scene-detect">启用场景检测（自动发现镜头切换）</label>
                         </div>
 
                         <div class="video-axis-item">
                             <div class="video-axis-head">
-                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 铻嶅悎寮哄害</span>
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 融合强度</span>
                                 <span class="video-axis-value" id="blend-intensity-value">0.75</span>
                             </div>
                             <input type="range" id="blend-intensity-slider" min="0" max="1" step="0.01" value="0.75" class="video-axis-range">
@@ -1311,7 +1312,7 @@
 
                         <div class="video-axis-item">
                             <div class="video-axis-head">
-                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 甯ц瀺鍚堟暟閲?/span>
+                                <span class="video-axis-label"><i class="fas fa-sliders-h text-purple-400"></i> 帧融合数量</span>
                                 <span class="video-axis-value" id="frame-blend-value">15</span>
                             </div>
                             <input type="range" id="frame-blend-slider" min="1" max="30" step="1" value="15" class="video-axis-range">
@@ -1319,38 +1320,38 @@
                         </div>
                     </div>
 
-                    <button id="start-video-chase" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-blue-500 rounded-lg text-white font-medium text-sm flex items-center justify-center gap-2 hover:opacity-90 transition"><i class="fas fa-magic"></i> 寮€濮嬭拷鑹?/button>
+                    <button id="start-video-chase" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-blue-500 rounded-lg text-white font-medium text-sm flex items-center justify-center gap-2 hover:opacity-90 transition"><i class="fas fa-magic"></i> 开始追色</button>
                 </div>
 
                 <div class="video-surface-card p-3 space-y-1 -mt-2">
                     <div class="video-surface-row" id="btn-profile-panel">
-                        <div class="video-surface-title"><i class="fas fa-file-alt text-purple-400"></i> 閰嶇疆鏂囦欢</div>
+                        <div class="video-surface-title"><i class="fas fa-file-alt text-purple-400"></i> 配置文件</div>
                         <i class="fas fa-chevron-right video-surface-chevron"></i>
                     </div>
-                    <div class="video-surface-subtitle pl-8" id="video-profile-outside-status">棰勮绠＄悊 / 瀵煎叆 LUT / 淇濆瓨閰嶇疆</div>
+                    <div class="video-surface-subtitle pl-8" id="video-profile-outside-status">预设管理 / 导入 LUT / 保存配置</div>
 
                     <div class="video-surface-row video-surface-row--spaced" id="btn-export-panel">
-                        <div class="video-surface-title"><i class="fas fa-file-export text-purple-400"></i> 瀵煎嚭</div>
+                        <div class="video-surface-title"><i class="fas fa-file-export text-purple-400"></i> 导出</div>
                         <i class="fas fa-chevron-right video-surface-chevron"></i>
                     </div>
-                    <div class="video-surface-subtitle pl-8">鏍煎紡璁剧疆 / 鐮佺巼璁剧疆 / 瀵煎嚭瑙嗛</div>
+                    <div class="video-surface-subtitle pl-8">格式设置 / 码率设置 / 导出视频</div>
                 </div>
             </aside>
         </div>
         <div id="video-global-progress" class="h-16 border-t border-gray-800 bg-[#141c29] flex items-center px-6 shrink-0 w-full" style="display: none;">
             <div class="flex-grow-[2] min-w-[8px]"></div>
             <div class="flex items-center text-sm text-gray-300 font-medium whitespace-nowrap">
-                <span id="progress-status-text">閫愬抚杩借壊涓?..</span>
+                <span id="progress-status-text">逐帧追色中...</span>
             </div>
             <div class="flex-grow-[1] min-w-[4px]"></div>
             <div class="flex-[3] flex items-center gap-[3px] h-5" id="progress-bar-segments"></div>
             <div class="text-base font-medium text-purple-400 whitespace-nowrap ml-2" id="progress-percent">0%</div>
             <div class="flex-grow-[1] min-w-[4px]"></div>
-            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-time-info">宸插鐞? 00:00:00 / 00:00:00</div>
+            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-time-info">已处理: 00:00:00 / 00:00:00</div>
             <div class="flex-grow-[1] min-w-[4px]"></div>
-            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-remaining">鍓╀綑鏃堕棿: 璁＄畻涓?..</div>
+            <div class="text-base text-gray-400 whitespace-nowrap" id="progress-remaining">剩余时间: 计算中...</div>
             <div class="flex-grow-[1] min-w-[4px]"></div>
-            <button id="btn-cancel-chase" class="px-5 py-1.5 bg-rose-600 hover:bg-rose-500 rounded text-sm font-medium text-white transition">鍙栨秷</button>
+            <button id="btn-cancel-chase" class="px-5 py-1.5 bg-rose-600 hover:bg-rose-500 rounded text-sm font-medium text-white transition">取消</button>
             <div class="flex-grow-[2] min-w-[8px]"></div>
         </div>
     </div>
@@ -1359,48 +1360,48 @@
 <div id="video-profile-popup" class="video-popup" style="display:none;">
     <div class="video-popup-inner">
         <div class="video-popup-header">
-            <span><i class="fas fa-file-alt text-purple-400 mr-2"></i>閰嶇疆鏂囦欢</span>
+            <span><i class="fas fa-file-alt text-purple-400 mr-2"></i>配置文件</span>
             <button class="video-popup-close" id="close-video-profile">&times;</button>
         </div>
         <div class="video-popup-body">
             <div class="mb-3">
-                <label class="video-popup-label">棰勮</label>
+                <label class="video-popup-label">预设</label>
                 <select id="video-profile-select" class="w-full bg-transparent rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
-                    <option value="standard">鏍囧噯锛堟棤婊ら暅锛?/option>
-                    <option value="bw">榛戠櫧</option>
-                    <option value="orange_bw">姗欓暅榛戠櫧</option>
-                    <option value="warm">鏆栬壊璋?/option>
-                    <option value="cool">鍐疯壊璋?/option>
+                    <option value="standard">标准（无滤镜）</option>
+                    <option value="bw">黑白</option>
+                    <option value="orange_bw">橙镜黑白</option>
+                    <option value="warm">暖色调</option>
+                    <option value="cool">冷色调</option>
                 </select>
             </div>
             <div class="mb-3">
-                <label class="video-popup-label">鑷畾涔夐厤缃枃浠?/label>
-                <button id="btn-import-video-lut" class="video-popup-btn video-popup-btn-secondary py-1.5">瀵煎叆 LUT 鏂囦欢 (.cube/.3dl/.lut...)</button>
+                <label class="video-popup-label">自定义配置文件</label>
+                <button id="btn-import-video-lut" class="video-popup-btn video-popup-btn-secondary py-1.5">导入 LUT 文件 (.cube/.3dl/.lut...)</button>
                 <input type="file" id="video-lut-input" accept=".cube,.3dl,.csp,.spi3d,.spi1d,.lut,.pf3,.xmp" class="hidden">
-                <div class="text-xs text-purple-300 mt-1 font-medium" id="video-profile-status">鏈姞杞介厤缃枃浠?/div>
+                <div class="text-xs text-purple-300 mt-1 font-medium" id="video-profile-status">未加载配置文件</div>
             </div>
             <div class="mb-3">
-            <button id="btn-apply-video-profile" class="video-popup-btn video-popup-btn-primary py-1.5">搴旂敤閰嶇疆</button>
+            <button id="btn-apply-video-profile" class="video-popup-btn video-popup-btn-primary py-1.5">应用配置</button>
             <div class="video-preset-save-row">
-                <input type="text" id="video-preset-name" placeholder="棰勮鍚嶇О" class="video-preset-name-input panel-select">
-                <button id="btn-save-video-preset" class="video-popup-btn video-popup-btn-accent video-preset-save-btn">淇濆瓨</button>
+                <input type="text" id="video-preset-name" placeholder="预设名称" class="video-preset-name-input panel-select">
+                <button id="btn-save-video-preset" class="video-popup-btn video-popup-btn-accent video-preset-save-btn">保存</button>
             </div>
             </div>
             <div class="video-popup-divider mb-3">
-                <label class="video-popup-label">鐩告満椋庢牸閫嗗悜 (RAW + JPG)</label>
+                <label class="video-popup-label">相机风格逆向 (RAW + JPG)</label>
                 <div class="flex gap-2 mb-2">
-                    <button id="vcapture-raw-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">閫夋嫨 RAW</button>
+                    <button id="vcapture-raw-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">选择 RAW</button>
                     <input type="file" id="vcapture-raw-input" accept=".dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.raw,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz" hidden>
-                    <button id="vcapture-jpg-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">閫夋嫨 JPG</button>
+                    <button id="vcapture-jpg-btn" class="video-popup-btn video-popup-btn-secondary flex-1 py-1">选择 JPG</button>
                     <input type="file" id="vcapture-jpg-input" accept=".jpg,.jpeg" hidden>
                 </div>
-                <button id="vbtn-capture-style" class="video-popup-btn video-popup-btn-secondary w-full py-1.5" disabled>鎻愬彇鐩告満椋庢牸</button>
-                <div class="text-[10px] text-gray-500 mt-1" id="vcapture-status-text">璇烽€夋嫨 RAW 鍜?JPG 鏂囦欢</div>
+                <button id="vbtn-capture-style" class="video-popup-btn video-popup-btn-secondary w-full py-1.5" disabled>提取相机风格</button>
+                <div class="text-[10px] text-gray-500 mt-1" id="vcapture-status-text">请选择 RAW 和 JPG 文件</div>
             </div>
             <div class="mb-3">
-                <label class="text-xs text-gray-300 block mb-1">鐩告満椋庢牸搴?/label>
+                <label class="text-xs text-gray-300 block mb-1">相机风格库</label>
                 <div id="vstyle-gallery" class="style-gallery-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px; max-height:140px; overflow-y:auto;"></div>
-                <div id="vstyle-gallery-empty" class="text-[10px] text-gray-600 text-center py-2">灏氭湭鎻愬彇椋庢牸锛屽弻鍑诲彲閲嶅懡鍚?/div>
+                <div id="vstyle-gallery-empty" class="text-[10px] text-gray-600 text-center py-2">尚未提取风格，双击可重命名</div>
             </div>
         </div>
     </div>
@@ -1409,44 +1410,44 @@
 <div id="video-export-popup" class="video-popup" style="display:none;">
     <div class="video-popup-inner">
         <div class="video-popup-header">
-            <span><i class="fas fa-file-export text-purple-400 mr-2"></i>瀵煎嚭璁剧疆</span>
+            <span><i class="fas fa-file-export text-purple-400 mr-2"></i>导出设置</span>
             <button class="video-popup-close" id="close-video-export">&times;</button>
         </div>
         <div class="video-popup-body">
             <div class="mb-3">
-                <label class="video-popup-label">杈撳嚭鏍煎紡</label>
+                <label class="video-popup-label">输出格式</label>
                 <select id="video-export-format" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
                     <option value="mp4">MP4 (H.264)</option>
                     <option value="mp4_h265">MP4 (H.265/HEVC)</option>
                     <option value="mov">MOV (ProRes)</option>
-                    <option value="avi">AVI (鏃犲帇缂?</option>
+                    <option value="avi">AVI (无压缩)</option>
                 </select>
             </div>
             <div class="mb-3">
-                <label class="video-popup-label">鐮佺巼: <span class="text-purple-400 font-bold" id="video-bitrate-value">8</span> Mbps</label>
+                <label class="video-popup-label">码率: <span class="text-purple-400 font-bold" id="video-bitrate-value">8</span> Mbps</label>
                 <input type="range" id="video-bitrate-slider" min="1" max="50" value="8" class="w-full">
                 <div class="flex justify-between text-[9px] text-gray-500 px-1"><span>1</span><span>25</span><span>50</span></div>
             </div>
             <div class="mb-3">
-                <label class="video-popup-label">鍒嗚鲸鐜?/label>
+                <label class="video-popup-label">分辨率</label>
                 <select id="video-export-resolution" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
-                    <option value="original">鍘熷鍒嗚鲸鐜?/option>
-                    <option value="4k">4K (3840脳2160)</option>
-                    <option value="1080p">1080p (1920脳1080)</option>
-                    <option value="720p">720p (1280脳720)</option>
-                    <option value="480p">480p (854脳480)</option>
+                    <option value="original">原始分辨率</option>
+                    <option value="4k">4K (3840×2160)</option>
+                    <option value="1080p">1080p (1920×1080)</option>
+                    <option value="720p">720p (1280×720)</option>
+                    <option value="480p">480p (854×480)</option>
                 </select>
             </div>
             <div class="mb-3">
-                <label class="video-popup-label">甯х巼</label>
+                <label class="video-popup-label">帧率</label>
                 <select id="video-export-fps" class="w-full rounded px-2 py-1.5 text-xs cursor-pointer panel-select">
-                    <option value="original">鍘熷甯х巼</option>
+                    <option value="original">原始帧率</option>
                     <option value="24">24 fps</option>
                     <option value="30">30 fps</option>
                     <option value="60">60 fps</option>
                 </select>
             </div>
-            <button id="btn-export-video" class="w-full py-2 video-popup-btn video-popup-btn-gradient flex items-center justify-center gap-2"><i class="fas fa-download"></i> 瀵煎嚭瑙嗛</button>
+            <button id="btn-export-video" class="w-full py-2 video-popup-btn video-popup-btn-gradient flex items-center justify-center gap-2"><i class="fas fa-download"></i> 导出视频</button>
         </div>
     </div>
 </div>
@@ -1458,55 +1459,55 @@
         <div style="padding:10px;">
             <div style="background:#3a3a52; border-radius:6px; padding:8px; margin-bottom:6px;">
                 <div style="display:flex; align-items:center; gap:3px; margin-bottom:4px;">
-                    <span id="settings-username" style="color:#fff; font-size:13px; font-weight:600;">鐢ㄦ埛</span>
-                    <span id="settings-edit-name-btn" style="color:#888; cursor:pointer; font-size:10px;">鉁忥笍</span>
+                    <span id="settings-username" style="color:#fff; font-size:13px; font-weight:600;">用户</span>
+                    <span id="settings-edit-name-btn" style="color:#888; cursor:pointer; font-size:10px;">✏️</span>
                 </div>
                 <div id="settings-name-edit-area" style="display:none; margin-bottom:4px;">
-                    <input type="text" id="settings-nickname-input" class="auth-input" placeholder="杈撳叆鏄电О" style="font-size:11px; padding:4px 8px;">
+                    <input type="text" id="settings-nickname-input" class="auth-input" placeholder="输入昵称" style="font-size:11px; padding:4px 8px;">
                 </div>
                 <div style="color:#aaa; font-size:11px; line-height:1.6;">
-                    <div>璐︽埛锛?span id="settings-name-val" style="color:#ccc;"></span></div>
-                    <div>绫诲瀷锛?span id="settings-role-val" style="color:#f59e0b;"></span></div>
+                    <div>账户：<span id="settings-name-val" style="color:#ccc;"></span></div>
+                    <div>类型：<span id="settings-role-val" style="color:#f59e0b;"></span></div>
                 </div>
             </div>
 
             <div style="background:#32324a; border-radius:6px; padding:8px 10px; margin-bottom:6px;">
                 <div style="display:flex; align-items:center; justify-content:space-between;">
                     <div>
-                        <div style="color:#888; font-size:10px;">宸茶瘎鍒?/div>
+                        <div style="color:#888; font-size:10px;">已评分</div>
                         <div style="color:#fff; font-size:13px;"><span id="settings-rated-count">0</span> <span style="color:#888; font-size:11px;">/ <span id="settings-total-count">0</span></span></div>
                     </div>
-                    <button id="settings-rating-detail-btn" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:10px;">鏄庣粏</button>
+                    <button id="settings-rating-detail-btn" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:10px;">明细</button>
                 </div>
             </div>
 
-            <div class="settings-menu-item" data-action="storage" style="padding-left:12px;" onclick="showStorageSettings()">椤圭洰鍦板潃</div>
-            <div class="settings-menu-item" data-action="export" style="padding-left:12px;">瀵煎嚭鏄庣粏</div>
+            <div class="settings-menu-item" data-action="storage" style="padding-left:12px;" onclick="showStorageSettings()">项目地址</div>
+            <div class="settings-menu-item" data-action="export" style="padding-left:12px;">导出明细</div>
             <div class="settings-theme-panel">
-                <div class="settings-theme-title">鐣岄潰涓婚</div>
-                <button class="theme-switch theme-switch-settings" id="settings-theme-toggle" type="button">娴呰壊妯″紡</button>
+                <div class="settings-theme-title">界面主题</div>
+                <button class="theme-switch theme-switch-settings" id="settings-theme-toggle" type="button">浅色模式</button>
             </div>
-            <div class="settings-menu-item" id="settings-logout-btn" style="color:#e94560;padding-left:12px;">閫€鍑虹櫥褰?/div>
-            <div class="settings-menu-item" id="settings-delete-account-btn" style="color:#ff6b81;padding-left:12px;">娉ㄩ攢璐︽埛</div>
+            <div class="settings-menu-item" id="settings-logout-btn" style="color:#e94560;padding-left:12px;">退出登录</div>
+            <div class="settings-menu-item" id="settings-delete-account-btn" style="color:#ff6b81;padding-left:12px;">注销账户</div>
         </div>
     </div>
 </div>
 
 <div id="delete-account-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.68); z-index:99992; align-items:center; justify-content:center;">
     <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:420px; border:1px solid #444;">
-        <h3 style="color:#ff6b81; margin:0 0 10px 0; font-size:16px;">娉ㄩ攢璐︽埛</h3>
-        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">娉ㄩ攢鍚庡皢鍒犻櫎浣犵殑璐︽埛銆侀」鐩拰鐩稿叧鏁版嵁锛屼笖鏃犳硶鎭㈠銆?/p>
-        <div id="delete-account-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">楠岃瘉鐮佸皢鍙戦€佸埌褰撳墠缁戝畾閭銆?/div>
-        <input type="password" id="delete-account-password" class="auth-input" placeholder="璇疯緭鍏ュ綋鍓嶅瘑鐮? style="font-size:12px;">
+        <h3 style="color:#ff6b81; margin:0 0 10px 0; font-size:16px;">注销账户</h3>
+        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">注销后将删除你的账户、项目和相关数据，且无法恢复。</p>
+        <div id="delete-account-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">验证码将发送到当前绑定邮箱。</div>
+        <input type="password" id="delete-account-password" class="auth-input" placeholder="请输入当前密码" style="font-size:12px;">
         <div style="display:flex;gap:8px;align-items:center;">
-            <input type="text" id="delete-account-code" class="auth-input" placeholder="璇疯緭鍏ラ偖绠遍獙璇佺爜" style="flex:1;font-size:12px;margin-bottom:0;">
-            <button id="delete-account-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">鍙戦€侀獙璇佺爜</button>
+            <input type="text" id="delete-account-code" class="auth-input" placeholder="请输入邮箱验证码" style="flex:1;font-size:12px;margin-bottom:0;">
+            <button id="delete-account-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">发送验证码</button>
         </div>
-        <input type="text" id="delete-account-confirm" class="auth-input" placeholder="璇疯緭鍏モ€滄敞閿€璐︽埛鈥濈‘璁? style="font-size:12px;">
+        <input type="text" id="delete-account-confirm" class="auth-input" placeholder="请输入“注销账户”确认" style="font-size:12px;">
         <div id="delete-account-error" style="display:none;color:#ff6b81;font-size:12px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button id="delete-account-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">鍙栨秷</button>
-            <button id="delete-account-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;background:#ff6b81;">纭娉ㄩ攢</button>
+            <button id="delete-account-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">取消</button>
+            <button id="delete-account-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;background:#ff6b81;">确认注销</button>
         </div>
     </div>
 </div>
@@ -1514,36 +1515,36 @@
 <div id="storage-settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:99991; align-items:center; justify-content:center;">
     <div style="background:#2b2b3d; border-radius:8px; width:560px; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
         <div style="padding:20px 24px; border-bottom:1px solid #3a3a52;">
-            <h3 style="color:#e8e8f0; margin:0; font-size:16px;">椤圭洰鍦板潃璁剧疆</h3>
+            <h3 style="color:#e8e8f0; margin:0; font-size:16px;">项目地址设置</h3>
         </div>
         <div style="padding:24px;">
             <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #2ed573; padding-left:8px;">椤圭洰鏍圭洰褰?/div>
-                <div class="storage-row"><span>椤圭洰鏂囦欢</span><input type="text" id="sc-project-assets" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-project-assets">鈥?/button></div>
-                <div class="storage-row"><span>鏈湴鎺堟潈</span><input type="text" id="sc-browser-project-root" class="auth-input" style="flex:1;font-size:12px;" readonly placeholder="鏀寔鐨勬祻瑙堝櫒鍙€夋嫨鏈湴鏂囦欢澶?><button id="browser-project-root-btn" type="button" class="storage-pick-btn">鈥?/button></div>
-                <div id="browser-project-root-status" style="color:#888;font-size:11px;line-height:1.6;margin-top:6px;">涓嶉€夋嫨鏃朵娇鐢ㄤ笂鏂归」鐩枃浠惰矾寰勪繚瀛橈紱Firefox/Safari 浼氳嚜鍔ㄤ娇鐢ㄥ悗绔繚瀛樸€?/div>
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #2ed573; padding-left:8px;">项目根目录</div>
+                <div class="storage-row"><span>项目文件</span><input type="text" id="sc-project-assets" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-project-assets">…</button></div>
+                <div class="storage-row"><span>本地授权</span><input type="text" id="sc-browser-project-root" class="auth-input" style="flex:1;font-size:12px;" readonly placeholder="支持的浏览器可选择本地文件夹"><button id="browser-project-root-btn" type="button" class="storage-pick-btn">…</button></div>
+                <div id="browser-project-root-status" style="color:#888;font-size:11px;line-height:1.6;margin-top:6px;">不选择时使用上方项目文件路径保存；Firefox/Safari 会自动使用后端保存。</div>
             </div>
-            <!-- 鍥剧墖杩借壊 -->
+            <!-- 图片追色 -->
             <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #e94560; padding-left:8px;">馃摲 鍥剧墖杩借壊</div>
-                <div class="storage-row"><span>鍥剧墖缂撳瓨</span><input type="text" id="sc-image-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-uploads">鈥?/button></div>
-                <div class="storage-row"><span>LUT缂撳瓨</span><input type="text" id="sc-image-luts" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-luts">鈥?/button></div>
-                <div class="storage-row"><span>璋冭瘯鎴浘</span><input type="text" id="sc-image-debug" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-debug">鈥?/button></div>
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #e94560; padding-left:8px;">📷 图片追色</div>
+                <div class="storage-row"><span>图片缓存</span><input type="text" id="sc-image-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-uploads">…</button></div>
+                <div class="storage-row"><span>LUT缓存</span><input type="text" id="sc-image-luts" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-luts">…</button></div>
+                <div class="storage-row"><span>调试截图</span><input type="text" id="sc-image-debug" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-debug">…</button></div>
             </div>
-            <!-- 瑙嗛杩借壊 -->
+            <!-- 视频追色 -->
             <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #6ba4e0; padding-left:8px;">馃幀 瑙嗛杩借壊</div>
-                <div class="storage-row"><span>瑙嗛缂撳瓨</span><input type="text" id="sc-video-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-uploads">鈥?/button></div>
-                <div class="storage-row"><span>瑙嗛缁撴灉</span><input type="text" id="sc-video-results" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-results">鈥?/button></div>
-                <div class="storage-row"><span>甯х紦瀛?/span><input type="text" id="sc-video-frames" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-frames">鈥?/button></div>
+                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #6ba4e0; padding-left:8px;">🎬 视频追色</div>
+                <div class="storage-row"><span>视频缓存</span><input type="text" id="sc-video-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-uploads">…</button></div>
+                <div class="storage-row"><span>视频结果</span><input type="text" id="sc-video-results" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-results">…</button></div>
+                <div class="storage-row"><span>帧缓存</span><input type="text" id="sc-video-frames" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-frames">…</button></div>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                <span style="color:#888; font-size:12px;">纾佺洏鍙敤锛?span id="storage-disk-space" style="color:#2ed573;">--</span></span>
-                <button id="storage-reset-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:6px 12px;font-size:11px;">閲嶇疆榛樿</button>
+                <span style="color:#888; font-size:12px;">磁盘可用：<span id="storage-disk-space" style="color:#2ed573;">--</span></span>
+                <button id="storage-reset-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:6px 12px;font-size:11px;">重置默认</button>
             </div>
             <div style="display:flex; gap:8px; justify-content:flex-end;">
-                <button id="storage-cancel-btn" class="auth-btn" style="background:transparent; border:1px solid #555; width:auto; padding:8px 20px; font-size:12px;">鍙栨秷</button>
-                <button id="storage-save-btn" class="auth-btn" style="width:auto; padding:8px 20px; font-size:12px;">淇濆瓨</button>
+                <button id="storage-cancel-btn" class="auth-btn" style="background:transparent; border:1px solid #555; width:auto; padding:8px 20px; font-size:12px;">取消</button>
+                <button id="storage-save-btn" class="auth-btn" style="width:auto; padding:8px 20px; font-size:12px;">保存</button>
             </div>
         </div>
     </div>
@@ -1553,31 +1554,31 @@
         <div class="top-modal-header">
             <div>
                 <div class="top-modal-kicker">NOTICE</div>
-                <h3 id="notice-modal-title">鏇存柊鏃ュ織</h3>
+                <h3 id="notice-modal-title">更新日志</h3>
             </div>
-            <button id="notice-modal-close" class="top-modal-close" type="button" aria-label="鍏抽棴">脳</button>
+            <button id="notice-modal-close" class="top-modal-close" type="button" aria-label="关闭">×</button>
         </div>
         <div class="top-modal-body">
             <div id="notice-modal-view"></div>
             <div id="notice-modal-admin" class="portal-admin-editor" style="display:none;">
-                <label class="portal-admin-label" for="notice-admin-title">閫氱煡鏍囬</label>
-                <input id="notice-admin-title" class="portal-admin-input" type="text" maxlength="80" placeholder="杈撳叆閫氱煡鏍囬" autocomplete="off">
-                <label class="portal-admin-label" for="notice-admin-body">閫氱煡鍐呭</label>
-                <textarea id="notice-admin-body" class="portal-admin-textarea" rows="6" placeholder="杈撳叆灏嗗彂甯冪粰鐢ㄦ埛鐨勬柊娑堟伅"></textarea>
+                <label class="portal-admin-label" for="notice-admin-title">通知标题</label>
+                <input id="notice-admin-title" class="portal-admin-input" type="text" maxlength="80" placeholder="输入通知标题" autocomplete="off">
+                <label class="portal-admin-label" for="notice-admin-body">通知内容</label>
+                <textarea id="notice-admin-body" class="portal-admin-textarea" rows="6" placeholder="输入将发布给用户的新消息"></textarea>
                 <div class="portal-admin-actions">
-                    <button id="notice-admin-save" class="portal-admin-btn" type="button">鍙戝竷閫氱煡</button>
+                    <button id="notice-admin-save" class="portal-admin-btn" type="button">发布通知</button>
                 </div>
                 <div class="portal-admin-history">
                     <div class="portal-admin-history-head">
-                        <span class="portal-admin-history-title">鍘嗗彶鏇存柊鏃ュ織</span>
+                        <span class="portal-admin-history-title">历史更新日志</span>
                         <label class="portal-admin-check-all">
                             <input id="notice-admin-select-all" type="checkbox">
-                            <span>鍏ㄩ€?/span>
+                            <span>全选</span>
                         </label>
                     </div>
                     <div id="notice-admin-history-list" class="portal-admin-history-list"></div>
                     <div class="portal-admin-actions">
-                        <button id="notice-admin-delete-selected" class="portal-admin-btn portal-admin-btn-danger" type="button">鍒犻櫎閫変腑</button>
+                        <button id="notice-admin-delete-selected" class="portal-admin-btn portal-admin-btn-danger" type="button">删除选中</button>
                     </div>
                 </div>
             </div>
@@ -1587,20 +1588,20 @@
 
 <div id="change-password-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.68); z-index:99992; align-items:center; justify-content:center;">
     <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:440px; border:1px solid #444;">
-        <h3 style="color:#e8e8f0; margin:0 0 10px 0; font-size:16px;">淇敼瀵嗙爜</h3>
-        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">璇疯緭鍏ュ綋鍓嶅瘑鐮侊紝骞堕€氳繃閭楠岃瘉鐮佺‘璁ゅ悗璁剧疆鏂板瘑鐮併€?/p>
-        <div id="change-password-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">楠岃瘉鐮佸皢鍙戦€佸埌褰撳墠缁戝畾閭銆?/div>
-        <input type="password" id="change-password-old" class="auth-input" placeholder="璇疯緭鍏ュ綋鍓嶅瘑鐮? style="font-size:12px;">
+        <h3 style="color:#e8e8f0; margin:0 0 10px 0; font-size:16px;">修改密码</h3>
+        <p style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 14px 0;">请输入当前密码，并通过邮箱验证码确认后设置新密码。</p>
+        <div id="change-password-email-tip" style="color:#8f96aa;font-size:12px;line-height:1.7;margin:0 0 12px 0;">验证码将发送到当前绑定邮箱。</div>
+        <input type="password" id="change-password-old" class="auth-input" placeholder="请输入当前密码" style="font-size:12px;">
         <div style="display:flex;gap:8px;align-items:center;">
-            <input type="text" id="change-password-code" class="auth-input" placeholder="璇疯緭鍏ラ偖绠遍獙璇佺爜" style="flex:1;font-size:12px;margin-bottom:0;">
-            <button id="change-password-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">鍙戦€侀獙璇佺爜</button>
+            <input type="text" id="change-password-code" class="auth-input" placeholder="请输入邮箱验证码" style="flex:1;font-size:12px;margin-bottom:0;">
+            <button id="change-password-send-code-btn" class="auth-btn" style="width:auto;padding:10px 12px;font-size:12px;white-space:nowrap;flex-shrink:0;">发送验证码</button>
         </div>
-        <input type="password" id="change-password-new" class="auth-input" placeholder="璇疯緭鍏ユ柊瀵嗙爜锛堣嚦灏?6 浣嶏級" style="font-size:12px;">
-        <input type="password" id="change-password-confirm" class="auth-input" placeholder="璇峰啀娆¤緭鍏ユ柊瀵嗙爜" style="font-size:12px;">
+        <input type="password" id="change-password-new" class="auth-input" placeholder="请输入新密码（至少 6 位）" style="font-size:12px;">
+        <input type="password" id="change-password-confirm" class="auth-input" placeholder="请再次输入新密码" style="font-size:12px;">
         <div id="change-password-error" style="display:none;color:#ff6b81;font-size:12px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button id="change-password-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">鍙栨秷</button>
-            <button id="change-password-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;">纭淇敼</button>
+            <button id="change-password-cancel-btn" class="auth-btn" style="background:transparent;border:1px solid #555;width:auto;padding:8px 18px;font-size:12px;">取消</button>
+            <button id="change-password-confirm-btn" class="auth-btn" style="width:auto;padding:8px 18px;font-size:12px;">确认修改</button>
         </div>
     </div>
 </div>
@@ -1610,19 +1611,19 @@
         <div class="top-modal-header">
             <div>
                 <div class="top-modal-kicker">CONTACT</div>
-                <h3 id="contact-modal-title">鑱旂郴鏂瑰紡</h3>
+                <h3 id="contact-modal-title">联系方式</h3>
             </div>
-            <button id="contact-modal-close" class="top-modal-close" type="button" aria-label="鍏抽棴">脳</button>
+            <button id="contact-modal-close" class="top-modal-close" type="button" aria-label="关闭">×</button>
         </div>
         <div class="top-modal-body">
             <div id="contact-modal-view"></div>
             <div id="contact-modal-admin" class="portal-admin-editor" style="display:none;">
-                <label class="portal-admin-label" for="contact-admin-qq">QQ缇?/label>
-                <input id="contact-admin-qq" class="portal-admin-input" type="text" maxlength="40" placeholder="杈撳叆QQ缇ゅ彿" autocomplete="off">
-                <label class="portal-admin-label" for="contact-admin-notes">璇存槑</label>
-                <textarea id="contact-admin-notes" class="portal-admin-textarea" rows="4" placeholder="杈撳叆鑱旂郴鏂瑰紡璇存槑"></textarea>
+                <label class="portal-admin-label" for="contact-admin-qq">QQ群</label>
+                <input id="contact-admin-qq" class="portal-admin-input" type="text" maxlength="40" placeholder="输入QQ群号" autocomplete="off">
+                <label class="portal-admin-label" for="contact-admin-notes">说明</label>
+                <textarea id="contact-admin-notes" class="portal-admin-textarea" rows="4" placeholder="输入联系方式说明"></textarea>
                 <div class="portal-admin-actions">
-                    <button id="contact-admin-save" class="portal-admin-btn" type="button">鏇存柊鑱旂郴鏂瑰紡</button>
+                    <button id="contact-admin-save" class="portal-admin-btn" type="button">更新联系方式</button>
                 </div>
             </div>
         </div>
@@ -1637,55 +1638,55 @@
 </style>
 
 <div id="project-context-menu" style="display:none; position:fixed; z-index:10001; background:#252545; border:1px solid #3a3a52; border-radius:6px; padding:4px 0; min-width:120px; box-shadow:0 4px 16px rgba(0,0,0,0.5);">
-    <div class="context-menu-item" onclick="startInlineRename(contextMenuTargetId)">閲嶅懡鍚?/div>
-    <div class="context-menu-item" onclick="confirmMoveToTrash()" style="color:#ffa502;">绉诲叆鍥炴敹绔?/div>
-    <div class="context-menu-item" onclick="confirmPermanentDeleteFromMenu()" style="color:#e94560;">姘镐箙鍒犻櫎</div>
+    <div class="context-menu-item" onclick="startInlineRename(contextMenuTargetId)">重命名</div>
+    <div class="context-menu-item" onclick="confirmMoveToTrash()" style="color:#ffa502;">移入回收站</div>
+    <div class="context-menu-item" onclick="confirmPermanentDeleteFromMenu()" style="color:#e94560;">永久删除</div>
 </div>
 
 <div id="trash-context-menu" style="display:none; position:fixed; z-index:10001; background:#252545; border:1px solid #3a3a52; border-radius:6px; padding:4px 0; min-width:120px; box-shadow:0 4px 16px rgba(0,0,0,0.5);">
-    <div class="context-menu-item" onclick="restoreProject(getTrashMenuTargetId())">鎭㈠椤圭洰</div>
-    <div class="context-menu-item" onclick="permanentlyDeleteProject(getTrashMenuTargetId())" style="color:#e94560;">姘镐箙鍒犻櫎</div>
+    <div class="context-menu-item" onclick="restoreProject(getTrashMenuTargetId())">恢复项目</div>
+    <div class="context-menu-item" onclick="permanentlyDeleteProject(getTrashMenuTargetId())" style="color:#e94560;">永久删除</div>
 </div>
 
 <div id="rating-intercept-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:99999; align-items:center; justify-content:center;">
     <div style="background:#1a1a2e; padding:30px; border-radius:8px; width:450px; border:1px solid #d32f2f; text-align:center;">
-        <h3 style="color:#d32f2f; margin-top:0;">鈿狅笍 瀵煎嚭鎷︽埅锛氬瓨鍦ㄦ湭璇勫垎椤圭洰</h3>
-        <p style="color:#e8e8f0; font-size:14px; line-height:1.6;">鎮ㄧ殑璇勫垎灏嗕細璁″叆妯″瀷璁粌锛屼负浠婂悗鏇翠紭绉€鐨勪娇鐢ㄨ璁ょ湡璇勫垎鍚庡鍑恒€?/p>
-        <button id="rating-intercept-confirm-btn" class="auth-btn" style="background:#d32f2f; margin-top:20px;">鎴戠煡閬撲簡锛屽幓璇勫垎</button>
+        <h3 style="color:#d32f2f; margin-top:0;">⚠️ 导出拦截：存在未评分项目</h3>
+        <p style="color:#e8e8f0; font-size:14px; line-height:1.6;">您的评分将会计入模型训练，为今后更优秀的使用请认真评分后导出。</p>
+        <button id="rating-intercept-confirm-btn" class="auth-btn" style="background:#d32f2f; margin-top:20px;">我知道了，去评分</button>
     </div>
 </div>
 
 <div id="create-project-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
     <div class="create-project-dialog">
-        <h3 class="create-project-title">鍒涘缓椤圭洰</h3>
+        <h3 class="create-project-title">创建项目</h3>
         <input type="hidden" id="project-type-input" value="image">
-        <input type="text" id="project-name-input" class="auth-input" placeholder="椤圭洰鍚嶇О" style="font-size:13px;">
+        <input type="text" id="project-name-input" class="auth-input" placeholder="项目名称" style="font-size:13px;">
         <div class="create-project-actions">
-            <button id="create-project-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">鍙栨秷</button>
-            <button id="create-project-confirm-btn" class="auth-btn project-modal-btn project-modal-btn-primary">鍒涘缓</button>
+            <button id="create-project-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">取消</button>
+            <button id="create-project-confirm-btn" class="auth-btn project-modal-btn project-modal-btn-primary">创建</button>
         </div>
     </div>
 </div>
 
 <div id="type-select-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
     <div class="create-project-dialog type-select-dialog">
-        <h3 class="create-project-title">閫夋嫨椤圭洰绫诲瀷</h3>
+        <h3 class="create-project-title">选择项目类型</h3>
         <div class="project-type-grid">
             <div id="select-type-image" class="project-type-choice project-type-choice-image">
                 <div class="project-type-icon project-type-icon-image">
                     <svg class="project-type-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-8.5c0-.83-.67-1.5-1.5-1.5S7 10.67 7 11.5 7.67 13 8.5 13s1.5-.67 1.5-1.5zm7 0c-.83 0-1.5.67-1.5 1.5S16.17 13 17 13s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm-4-7c-.83 0-1.5.67-1.5 1.5S12.17 7 13 7s1.5-.67 1.5-1.5S13.83 4 13 4z"/></svg>
                 </div>
-                <div class="project-type-label">鍥剧墖杩借壊</div>
+                <div class="project-type-label">图片追色</div>
             </div>
             <div id="select-type-video" class="project-type-choice project-type-choice-video">
                 <div class="project-type-icon project-type-icon-video">
                     <svg class="project-type-svg" viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4z"/><path d="M10 9l5 3-5 3V9z"/></svg>
                 </div>
-                <div class="project-type-label">瑙嗛杩借壊</div>
+                <div class="project-type-label">视频追色</div>
             </div>
         </div>
         <div class="create-project-actions">
-            <button id="type-select-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">鍙栨秷</button>
+            <button id="type-select-cancel-btn" class="auth-btn project-modal-btn project-modal-btn-secondary">取消</button>
         </div>
     </div>
 </div>
@@ -1693,8 +1694,8 @@
 <div id="projects-list-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10001; align-items:center; justify-content:center;">
     <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:480px; max-height:80vh; overflow-y:auto; border:1px solid #333;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <h3 style="color:#e8e8f0; margin:0; font-size:15px;">鎴戠殑椤圭洰</h3>
-            <button id="projects-list-close-btn" style="background:none; border:none; color:#888; cursor:pointer; font-size:18px;">鉁?/button>
+            <h3 style="color:#e8e8f0; margin:0; font-size:15px;">我的项目</h3>
+            <button id="projects-list-close-btn" style="background:none; border:none; color:#888; cursor:pointer; font-size:18px;">✕</button>
         </div>
         <div id="projects-list-container"></div>
     </div>
@@ -1703,7 +1704,7 @@
 <div class="lightbox" id="lightbox" hidden>
     <div class="lightbox-overlay" onclick="closeLightbox()"></div>
     <div class="lightbox-content">
-        <button class="lightbox-close" onclick="closeLightbox()">鉁?/button>
+        <button class="lightbox-close" onclick="closeLightbox()">✕</button>
         <img id="lightbox-img" class="lightbox-img">
     </div>
 </div>
@@ -1715,5 +1716,3 @@
 
 </body>
 </html>
-
-

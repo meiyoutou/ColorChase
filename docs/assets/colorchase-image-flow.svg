@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="Image color transfer flow">
+  <defs>
+    <linearGradient id="card" x1="0" x2="1"><stop offset="0" stop-color="#eff6ff"/><stop offset="1" stop-color="#f5f3ff"/></linearGradient>
+    <linearGradient id="line" x1="0" x2="1"><stop offset="0" stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="#f8fafc"/>
+  <text x="60" y="62" fill="#0f172a" font-family="Segoe UI, Arial" font-size="30" font-weight="800">Image Transfer Pipeline</text>
+  <g font-family="Segoe UI, Arial">
+    <g transform="translate(60 112)">
+      <rect width="170" height="150" rx="22" fill="url(#card)" stroke="#cbd5e1"/>
+      <text x="30" y="52" font-size="20" font-weight="800" fill="#0f172a">1. Target</text>
+      <text x="30" y="84" font-size="15" fill="#475569">Upload image</text>
+      <text x="30" y="112" font-size="15" fill="#475569">or batch list</text>
+    </g>
+    <path d="M250 187 H338" stroke="url(#line)" stroke-width="8" stroke-linecap="round"/>
+    <g transform="translate(360 112)">
+      <rect width="170" height="150" rx="22" fill="url(#card)" stroke="#cbd5e1"/>
+      <text x="30" y="52" font-size="20" font-weight="800" fill="#0f172a">2. Style</text>
+      <text x="30" y="84" font-size="15" fill="#475569">Reference image</text>
+      <text x="30" y="112" font-size="15" fill="#475569">Preset / LUT</text>
+    </g>
+    <path d="M550 187 H638" stroke="url(#line)" stroke-width="8" stroke-linecap="round"/>
+    <g transform="translate(660 112)">
+      <rect width="170" height="150" rx="22" fill="url(#card)" stroke="#cbd5e1"/>
+      <text x="30" y="52" font-size="20" font-weight="800" fill="#0f172a">3. AI</text>
+      <text x="30" y="84" font-size="15" fill="#475569">Transfer</text>
+      <text x="30" y="112" font-size="15" fill="#475569">Mask / Depth</text>
+    </g>
+    <path d="M850 187 H938" stroke="url(#line)" stroke-width="8" stroke-linecap="round"/>
+    <g transform="translate(960 112)">
+      <rect width="170" height="150" rx="22" fill="url(#card)" stroke="#cbd5e1"/>
+      <text x="30" y="52" font-size="20" font-weight="800" fill="#0f172a">4. Export</text>
+      <text x="30" y="84" font-size="15" fill="#475569">Preview</text>
+      <text x="30" y="112" font-size="15" fill="#475569">Full render</text>
+    </g>
+  </g>
+</svg>

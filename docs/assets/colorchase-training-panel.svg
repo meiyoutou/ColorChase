@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-label="Training dataset panel">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#09090b"/><stop offset="1" stop-color="#172033"/></linearGradient>
+    <linearGradient id="purple" x1="0" x2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+  </defs>
+  <rect width="1200" height="520" rx="32" fill="url(#bg)"/>
+  <rect x="70" y="70" width="1060" height="380" rx="28" fill="#111827" stroke="#263248"/>
+  <circle cx="610" cy="30" r="170" fill="#818cf8" opacity="0.18"/>
+  <text x="110" y="130" fill="#f4f4f5" font-family="Segoe UI, Arial" font-size="32" font-weight="850">Training Dataset</text>
+  <circle cx="114" cy="166" r="7" fill="#22c55e"/>
+  <text x="134" y="172" fill="#a1a1aa" font-family="Segoe UI, Arial" font-size="15" font-weight="800">DATASET STATUS</text>
+  <text x="300" y="172" fill="#f8fafc" font-family="Segoe UI, Arial" font-size="18" font-weight="800">142 images / 860.4 MB</text>
+  <rect x="850" y="102" width="120" height="44" rx="14" fill="#1f2937" stroke="#3b4660"/>
+  <text x="882" y="130" fill="#e5e7eb" font-family="Segoe UI, Arial" font-size="15" font-weight="700">Refresh</text>
+  <rect x="988" y="102" width="112" height="44" rx="14" fill="#2a171c" stroke="#7f1d1d"/>
+  <text x="1023" y="130" fill="#fecaca" font-family="Segoe UI, Arial" font-size="15" font-weight="700">Clear</text>
+  <rect x="110" y="208" width="990" height="54" rx="18" fill="#0f172a" stroke="#334155"/>
+  <text x="138" y="242" fill="#94a3b8" font-family="Segoe UI, Arial" font-size="14" font-weight="800">DIRECTORY</text>
+  <text x="300" y="242" fill="#e5e7eb" font-family="Segoe UI, Arial" font-size="16">storage/training/corpus</text>
+  <rect x="110" y="300" width="475" height="104" rx="22" fill="#151b2b" stroke="#4f46e5" stroke-dasharray="8 8"/>
+  <text x="164" y="344" fill="#f8fafc" font-family="Segoe UI, Arial" font-size="22" font-weight="800">Upload Images</text>
+  <text x="164" y="374" fill="#94a3b8" font-family="Segoe UI, Arial" font-size="15">Single or multi-image import</text>
+  <rect x="625" y="300" width="475" height="104" rx="22" fill="#10231f" stroke="#34d399" stroke-dasharray="8 8"/>
+  <text x="679" y="344" fill="#f8fafc" font-family="Segoe UI, Arial" font-size="22" font-weight="800">Upload Folder</text>
+  <text x="679" y="374" fill="#94a3b8" font-family="Segoe UI, Arial" font-size="15">Recursive subfolder import</text>
+  <rect x="128" y="328" width="22" height="22" rx="6" fill="url(#purple)"/>
+  <rect x="643" y="328" width="22" height="22" rx="6" fill="#34d399"/>
+</svg>

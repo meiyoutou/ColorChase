@@ -97,7 +97,7 @@
   <rect x="276" y="1282" width="144" height="82" rx="20" fill="#ecfdf5" stroke="#34d399" stroke-dasharray="7 7"/>
   <text x="300" y="1328" class="label">Folder</text>
   <rect x="110" y="1400" width="310" height="42" rx="21" fill="url(#green)"/>
-  <text x="206" y="1428" class="chip">Train & Refresh</text>
+  <text x="206" y="1428" class="chip">Train &amp; Refresh</text>
 
   <rect x="505" y="1100" width="390" height="390" rx="34" fill="#fff" filter="url(#shadow)"/>
   <text x="545" y="1154" class="section">User Space</text>

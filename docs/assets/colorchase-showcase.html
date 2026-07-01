@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ColorChase Showcase</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --panel: #111827;
+      --line: rgba(255,255,255,.12);
+      --text: #f8fafc;
+      --muted: #a1a1aa;
+      --cyan: #22d3ee;
+      --violet: #818cf8;
+      --green: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 78% 0%, rgba(129,140,248,.24), transparent 32rem),
+        radial-gradient(circle at 12% 85%, rgba(34,211,238,.16), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      padding: 48px;
+    }
+    .shell { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
+    .hero {
+      min-height: 320px;
+      border: 1px solid var(--line);
+      border-radius: 32px;
+      padding: 42px;
+      background: linear-gradient(145deg, rgba(17,24,39,.94), rgba(35,22,58,.88));
+      box-shadow: 0 28px 80px rgba(0,0,0,.34);
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 32px;
+      overflow: hidden;
+    }
+    h1 { margin: 0 0 16px; font-size: 64px; letter-spacing: 0; }
+    .hero p { margin: 0; color: var(--muted); font-size: 20px; line-height: 1.7; }
+    .chips { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; }
+    .chip { padding: 10px 16px; border-radius: 999px; background: rgba(255,255,255,.08); border:1px solid var(--line); font-weight:800; }
+    .preview {
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      background: #0f172a;
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+    }
+    .preview-top { height: 34px; border-radius: 17px; background: linear-gradient(90deg,var(--cyan),var(--violet)); }
+    .preview-grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+    .photo { height: 178px; border-radius: 20px; background: linear-gradient(145deg,#1f2937,#312e81); position:relative; overflow:hidden; }
+    .photo:after { content:""; position:absolute; inset:42px 24px; border-radius:50%; border:10px solid rgba(255,255,255,.22); transform: rotate(-22deg); }
+    .side { display:grid; gap:10px; }
+    .row { height: 44px; border-radius: 14px; background: rgba(255,255,255,.08); border:1px solid var(--line); }
+    .cards { display:grid; grid-template-columns: repeat(3, 1fr); gap:22px; }
+    .card { border:1px solid var(--line); border-radius:26px; background: rgba(17,24,39,.86); padding:24px; min-height:210px; }
+    .card b { display:block; font-size:22px; margin-bottom:14px; }
+    .card span { color:var(--muted); line-height:1.6; }
+    .bar { height:12px; border-radius:6px; background:rgba(255,255,255,.09); margin-top:20px; overflow:hidden; }
+    .bar i { display:block; height:100%; width:72%; background:linear-gradient(90deg,var(--cyan),var(--violet)); }
+    @media (max-width: 900px) {
+      body { padding: 20px; }
+      .hero { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      h1 { font-size: 46px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <h1>ColorChase</h1>
+        <p>面向图片、视频、风格预设和训练数据的 AI 追色工作台。上传目标素材，选择参考风格，完成预览、微调、导出和项目归档。</p>
+        <div class="chips">
+          <div class="chip">Image Transfer</div>
+          <div class="chip">Video Transfer</div>
+          <div class="chip">LUT Session</div>
+          <div class="chip">Training Dataset</div>
+        </div>
+      </div>
+      <div class="preview" aria-label="workspace mockup">
+        <div class="preview-top"></div>
+        <div class="preview-grid">
+          <div class="photo"></div>
+          <div class="photo" style="background:linear-gradient(145deg,#312e81,#7c2d12)"></div>
+        </div>
+        <div class="side">
+          <div class="row"></div>
+          <div class="row"></div>
+          <div class="row"></div>
+        </div>
+      </div>
+    </section>
+    <section class="cards">
+      <article class="card"><b>图片追色</b><span>目标图、参考图、算法、预览、微调、导出形成完整闭环。</span><div class="bar"><i></i></div></article>
+      <article class="card"><b>视频追色</b><span>视频上传后抽帧处理，再合成为可导出的结果视频。</span><div class="bar"><i style="width:64%"></i></div></article>
+      <article class="card"><b>个人空间</b><span>集中查看项目、任务、资源、模型偏好和存储使用。</span><div class="bar"><i style="width:82%"></i></div></article>
+    </section>
+  </main>
+</body>
+</html>

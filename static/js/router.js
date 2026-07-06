@@ -172,11 +172,16 @@ function renderPortalMessages() {
         }).join('') + '</div>';
     }
     if (contactView) {
+        var contactNotes = escapeHtml(contact.notes || '').replace(/\s*提交建议/, '<br>提交建议').replace(/\s*问题反馈/, '<br>问题反馈');
         contactView.innerHTML = '<div class="contact-info-line">' +
             '<span class="contact-info-label">沟通QQ群</span>' +
             '<strong>' + escapeHtml(contact.qq || '955749464') + '</strong>' +
         '</div>' +
-        '<div class="portal-meta-line">' + escapeHtml(contact.notes || '') + '</div>';
+        '<div class="contact-info-line">' +
+            '<span class="contact-info-label">问题反馈</span>' +
+            '<a href="https://github.com/meiyoutou/ColorChase/issues" target="_blank" rel="noopener noreferrer">https://github.com/meiyoutou/<br>ColorChase/issues</a>' +
+        '</div>' +
+        '<div class="portal-meta-line">' + contactNotes + '</div>';
     }
 }
 
@@ -692,6 +697,10 @@ function renderAdminSpaceDashboard() {
         if (!item) return '--';
         if (item.delta_text !== undefined && item.delta_text !== null && item.delta_text !== '') {
             return item.delta_text;
+        }
+        // 没有上周数据时不显示 +0，直接占位
+        if (item.delta_text === '') {
+            return '暂无上周';
         }
         return formatCompactDelta(item.delta, item.unit || '');
     }
@@ -1297,13 +1306,17 @@ function buildUserSpaceTrendBars(items) {
 
 function fetchUserVisibleModelStatus() {
     return fetch('/api/model_status', { method: 'GET', cache: 'no-store' })
-    .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+    .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, status: resp.status, data: data }; }); })
     .then(function(result) {
-        if (!result.ok) throw new Error((result.data && result.data.detail) || '读取模型状态失败');
+        if (!result.ok) {
+            console.warn('[ColorChase] 模型状态接口返回异常:', result.status, result.data);
+            throw new Error((result.data && result.data.detail) || '读取模型状态失败');
+        }
         renderUserSpaceModelStatus(result.data || {});
         return result.data || {};
     })
-    .catch(function() {
+    .catch(function(err) {
+        console.warn('[ColorChase] 读取模型状态失败:', err && err.message ? err.message : err);
         renderUserSpaceModelStatus(null);
         return null;
     });
@@ -1352,11 +1365,35 @@ function renderUserSpaceModelStatus(data) {
     }).join('');
 }
 
-function openUserSpaceProject(projectId, projectType) {
+function openUserSpaceProject(projectId, projectType, projectName) {
     if (!projectId) return;
     window.currentProjectId = Number(projectId);
+    window.currentProjectName = projectName || '';
     window._pendingProjectType = projectType === 'video' ? 'video' : 'image';
     rNavigate('workspace');
+}
+
+// 方案 A：前端异步更新“存储使用”为本地项目地址大小
+async function updateUserSpaceLocalStorageSize() {
+    var el = $r('#user-space-local-storage-size');
+    if (!el) return;
+    var valueEl = el.querySelector('strong');
+    var metaEl = el.querySelector('em');
+    if (!valueEl) return;
+    try {
+        if (typeof getLocalProjectStorageSize !== 'function') {
+            throw new Error('本地存储统计工具未加载');
+        }
+        var stats = await getLocalProjectStorageSize();
+        var mb = (stats.size_bytes / 1024 / 1024).toFixed(1);
+        valueEl.textContent = mb + ' MB';
+        if (metaEl) metaEl.textContent = (stats.file_count || 0) + ' 个文件';
+    } catch (e) {
+        // 还没配置本地路径或浏览器不支持，显示友好提示
+        console.log('[ColorChase] 本地存储统计失败:', e.message || e);
+        valueEl.textContent = '未配置';
+        if (metaEl) metaEl.textContent = '请先设置本地项目地址';
+    }
 }
 
 function renderUserSpaceShell(dashboardData) {
@@ -1411,7 +1448,12 @@ function renderUserSpaceShell(dashboardData) {
     }
     html += '</div></section><section class="admin-surface-card user-space-resource-card"><div class="admin-card-head"><div><div class="admin-card-title">我的资源与资产</div><div class="admin-card-subtitle">原图、参考图、导出占用和项目总存储</div></div></div><div class="user-space-resource-grid">';
     resources.forEach(function(item) {
-        html += '<div class="user-space-resource-item"><span class="user-space-resource-label">' + escapeHtml(item.label || '--') + '</span><strong>' + escapeHtml(item.value || '--') + '</strong><em>' + escapeHtml(item.size || '') + '</em></div>';
+        var itemId = '';
+        // 方案 A：普通用户的“存储使用”改为前端统计本地项目地址大小
+        if (!isAdminUser() && item.label === '存储使用') {
+            itemId = 'user-space-local-storage-size';
+        }
+        html += '<div class="user-space-resource-item"' + (itemId ? ' id="' + itemId + '"' : '') + '><span class="user-space-resource-label">' + escapeHtml(item.label || '--') + '</span><strong>' + escapeHtml(item.value || '--') + '</strong><em>' + escapeHtml(item.size || '') + '</em></div>';
     });
     html += '</div></section></div></div>';
     html += '<div class="user-space-bottom-grid"><section class="admin-surface-card user-space-task-card"><div class="admin-card-head"><div><div class="admin-card-title">我的任务中心</div><div class="admin-card-subtitle">最近任务状态、失败原因摘要与快捷操作</div></div><span class="admin-chip">Tasks</span></div>';
@@ -1424,11 +1466,11 @@ function renderUserSpaceShell(dashboardData) {
     } else {
         html += '<div class="admin-empty-state">当前还没有任务记录，完成一次追色、训练或导出后，这里会自动出现。</div>';
     }
-    html += '</section><section class="admin-surface-card user-space-model-card"><div class="admin-card-head"><div><div class="admin-card-title">我的模型与偏好</div><div class="admin-card-subtitle">常用模型、最近模型、导出默认项和预设偏好</div></div></div><div class="user-space-preference-grid"><div class="user-space-preference-item"><span>常用模型</span><strong>' + escapeHtml(preferences.common_model || '--') + '</strong></div><div class="user-space-preference-item"><span>最近使用模型</span><strong>' + escapeHtml(preferences.recent_model || '--') + '</strong></div><div class="user-space-preference-item"><span>自定义参数预设</span><strong>' + escapeHtml(String(preferences.preset_count || 0) + ' 个') + '</strong></div><div class="user-space-preference-item"><span>默认导出格式</span><strong>' + escapeHtml(preferences.default_export_format || '--') + '</strong></div><div class="user-space-preference-item"><span>默认尺寸 / 画质</span><strong>' + escapeHtml(preferences.default_size_quality || '--') + '</strong></div><div class="user-space-preference-item"><span>常用参考风格</span><strong>' + escapeHtml(preferences.reference_style || '--') + '</strong></div></div><div class="user-space-model-status-panel"><div class="user-space-model-status-head"><div><strong>当前模型状态</strong><span id="user-space-model-status-summary">正在读取模型状态...</span></div><em id="user-space-model-status-device">unknown</em></div><div class="user-space-model-status-list" id="user-space-model-status-list"><div class="user-space-model-empty">正在准备模型状态...</div></div></div></section></div>';
+    html += '</section><section class="admin-surface-card user-space-model-card"><div class="admin-card-head"><div><div class="admin-card-title">我的模型与偏好</div><div class="admin-card-subtitle">常用模型、最近模型、导出默认项和预设偏好</div></div></div><div class="user-space-preference-grid"><div class="user-space-preference-item"><span>常用模型</span><strong>' + escapeHtml(preferences.common_model || '--') + '</strong></div><div class="user-space-preference-item"><span>最近使用模型</span><strong>' + escapeHtml(preferences.recent_model || '--') + '</strong></div><div class="user-space-preference-item"><span>自定义参数预设</span><strong>' + escapeHtml(String(preferences.preset_count || 0) + ' 个') + '</strong></div><div class="user-space-preference-item"><span>默认导出格式</span><strong>' + escapeHtml(preferences.default_export_format || '--') + '</strong></div><div class="user-space-preference-item"><span>默认尺寸 / 画质</span><strong>' + escapeHtml(preferences.default_size_quality || '--') + '</strong></div><div class="user-space-preference-item"><span>常用参考风格</span><strong>' + escapeHtml(preferences.reference_style || '--') + '</strong></div></div><div class="user-space-model-status-panel"><div class="user-space-model-status-head" id="user-space-model-status-head" style="cursor:pointer;" title="点击展开/折叠"><div><strong>当前模型状态</strong><span id="user-space-model-status-summary">正在读取模型状态...</span></div><div class="user-space-model-status-toggle"><span id="user-space-model-status-toggle-text">展开</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div></div><div class="user-space-model-status-list" id="user-space-model-status-list" style="display:none;"><div class="user-space-model-empty">正在准备模型状态...</div></div></div></section></div>';
     html += '<div class="user-space-bottom-grid"><section class="admin-surface-card user-space-history-card"><div class="admin-card-head"><div><div class="admin-card-title">我的项目与历史记录</div><div class="admin-card-subtitle">最近打开项目、最近导出记录、最近训练/调用记录</div></div></div><div class="user-space-history-columns"><div class="user-space-history-group"><h4>最近项目</h4>';
     if (recentProjects.length) {
         recentProjects.forEach(function(item) {
-            html += '<button class="user-space-history-entry user-space-project-entry" type="button" data-project-id="' + Number(item.id || 0) + '" data-project-type="' + escapeAttr(item.type || 'image') + '"><span>' + escapeHtml(item.name || '--') + '</span><em>' + escapeHtml(item.created_at || '--') + '</em></button>';
+            html += '<button class="user-space-history-entry user-space-project-entry" type="button" data-project-id="' + Number(item.id || 0) + '" data-project-name="' + escapeAttr(item.name || '') + '" data-project-type="' + escapeAttr(item.type || 'image') + '"><span>' + escapeHtml(item.name || '--') + '</span><em>' + escapeHtml(item.created_at || '--') + '</em></button>';
         });
     } else {
         html += '<div class="user-space-history-empty">暂无项目记录</div>';
@@ -1463,7 +1505,28 @@ function renderUserSpaceShell(dashboardData) {
     }
     html += '</div>';
     container.innerHTML = html;
+
+    // 模型状态面板默认折叠，点击头部展开/折叠
+    var modelStatusHead = $r('#user-space-model-status-head');
+    var modelStatusList = $r('#user-space-model-status-list');
+    var modelStatusToggleText = $r('#user-space-model-status-toggle-text');
+    var modelStatusToggleIcon = modelStatusHead ? modelStatusHead.querySelector('.user-space-model-status-toggle svg') : null;
+    if (modelStatusHead && modelStatusList) {
+        modelStatusHead.addEventListener('click', function() {
+            var isHidden = modelStatusList.style.display === 'none';
+            modelStatusList.style.display = isHidden ? '' : 'none';
+            modelStatusHead.title = isHidden ? '点击折叠' : '点击展开';
+            if (modelStatusToggleText) modelStatusToggleText.textContent = isHidden ? '折叠' : '展开';
+            if (modelStatusToggleIcon) modelStatusToggleIcon.style.transform = isHidden ? 'rotate(180deg)' : '';
+        });
+    }
+
     fetchUserVisibleModelStatus();
+
+    // 方案 A：普通用户“存储使用”走前端本地统计
+    if (!isAdminUser()) {
+        updateUserSpaceLocalStorageSize();
+    }
 
     var refreshBtn = $r('#user-space-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', function() { fetchUserSpaceDashboard(true); });
@@ -1497,6 +1560,13 @@ function renderUserSpaceShell(dashboardData) {
                 if (!result.ok) throw new Error((result.data && result.data.detail) || '昵称保存失败');
                 if (typeof showToast === 'function') showToast('昵称已保存');
                 fetchUserSpaceDashboard(true);
+                // 同时把用户资料同步到本地授权根目录的 profile/ 下
+                if (typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle) {
+                    writeBrowserUserProfile({
+                        nickname: nicknameInput.value || '',
+                        updated_at: new Date().toISOString()
+                    });
+                }
             })
             .catch(function(err) {
                 if (typeof showToast === 'function') showToast(err.message || '昵称保存失败');
@@ -1524,6 +1594,16 @@ function renderUserSpaceShell(dashboardData) {
                 if (!result.ok) throw new Error((result.data && result.data.detail) || '头像上传失败');
                 if (typeof showToast === 'function') showToast('头像已更新');
                 fetchUserSpaceDashboard(true);
+                // 同时把头像同步保存到本地授权根目录的 profile/avatar/ 下
+                if (typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle && result.data && result.data.avatar_url) {
+                    var avatarExt = (file.name.match(/\.[^.]+$/) || ['.jpg'])[0];
+                    fetch(result.data.avatar_url, { headers: getAuthHeaders() })
+                        .then(function(r) { return r.blob(); })
+                        .then(function(blob) {
+                            writeBrowserUserAvatar('avatar' + avatarExt, blob);
+                        })
+                        .catch(function() {});
+                }
             })
             .catch(function(err) {
                 if (typeof showToast === 'function') showToast(err.message || '头像上传失败');
@@ -1555,7 +1635,7 @@ function renderUserSpaceShell(dashboardData) {
     });
     container.querySelectorAll('.user-space-project-entry').forEach(function(btn) {
         btn.addEventListener('click', function() {
-            openUserSpaceProject(btn.getAttribute('data-project-id'), btn.getAttribute('data-project-type'));
+            openUserSpaceProject(btn.getAttribute('data-project-id'), btn.getAttribute('data-project-type'), btn.getAttribute('data-project-name') || '');
         });
     });
 }
@@ -1922,7 +2002,7 @@ function syncTrainingSummaries() {
     setTextIfExists('#training-summary-target', targetMap[target] || 'NeuralPreset');
     setTextIfExists('#training-summary-stage', stageMap[stage] || '完整训练');
     setTextIfExists('#training-stage-desc', stageDescMap[stage] || '归一化 + 风格阶段同时执行');
-    setTextIfExists('#training-summary-dir', ($r('#training-image-dir') || {}).value || 'temp_train_data');
+    setTextIfExists('#training-summary-dir', ($r('#training-image-dir') || {}).value || 'storage/training/corpus');
     setTextIfExists('#training-summary-validation', validationEnabled ? '启用' : '关闭');
     setTextIfExists('#training-summary-mode', '同步执行');
     setTextIfExists('#training-mode-pill', '同步训练');
@@ -2260,7 +2340,7 @@ function toggleTrainingButtons(running) {
 function startTrainingTask() {
     var form = new FormData();
     form.append('stage', (($r('#training-stage') || {}).value || 'both'));
-    form.append('image_dir', (($r('#training-image-dir') || {}).value || 'temp_train_data'));
+    form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
     form.append('epochs', (($r('#training-epoch') || {}).value || '100'));
     form.append('batch_size', (($r('#training-batch') || {}).value || '4'));
     form.append('lr', (($r('#training-lr') || {}).value || '0.0001'));
@@ -2483,7 +2563,7 @@ function startTrainingProgressPolling() {
 function startTrainingTask() {
     var form = new FormData();
     form.append('stage', (($r('#training-stage') || {}).value || 'both'));
-    form.append('image_dir', (($r('#training-image-dir') || {}).value || 'temp_train_data'));
+    form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
     form.append('epochs', (($r('#training-epoch') || {}).value || '100'));
     form.append('batch_size', (($r('#training-batch') || {}).value || '4'));
     form.append('lr', (($r('#training-lr') || {}).value || '0.0001'));
@@ -2618,7 +2698,7 @@ function initTrainingWorkbench() {
             Array.prototype.forEach.call(uploadInput.files, function(file) {
                 form.append('files', file);
             });
-            form.append('image_dir', (($r('#training-image-dir') || {}).value || 'temp_train_data'));
+            form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
             fetch('/api/train/upload', {
                 method: 'POST',
                 body: form
@@ -2668,7 +2748,7 @@ function initTrainingWorkbench() {
                 return;
             }
             // 2. 分批上传，每批 50 张，避免单请求过大
-            var imageDir = (($r('#training-image-dir') || {}).value || 'temp_train_data');
+            var imageDir = (($r('#training-image-dir') || {}).value || 'storage/training/corpus');
             var batchSize = 50;
             var uploaded = 0;
             var failed = 0;
@@ -2893,17 +2973,20 @@ function updateTopBarAuth() {
     var loginBtn = $r('#nav-login-btn');
     var settingsBtn = $r('#nav-settings-btn');
     var noticeBtn = $r('#nav-notice-btn');
+    var storageNoticeBtn = $r('#nav-storage-notice-btn');
     var contactBtn = $r('#nav-contact-btn');
     if (loginBtn && settingsBtn) {
         if (token) {
             loginBtn.style.display = 'none';
             settingsBtn.style.display = '';
             if (noticeBtn) noticeBtn.style.display = '';
+            if (storageNoticeBtn) storageNoticeBtn.style.display = '';
             if (contactBtn) contactBtn.style.display = '';
         } else {
             loginBtn.style.display = '';
             settingsBtn.style.display = 'none';
             if (noticeBtn) noticeBtn.style.display = 'none';
+            if (storageNoticeBtn) storageNoticeBtn.style.display = 'none';
             if (contactBtn) contactBtn.style.display = 'none';
         }
     }
@@ -3332,6 +3415,14 @@ function showStorageSettingsModal() {
     if (!modal) return;
     var pathInput = $r('#storage-path-input');
     if (pathInput) pathInput.value = localStorage.getItem('cc_storage_path') || '';
+    // 同步本地代理存储配置（若代理在线且本地未设置，则用代理返回值回填）
+    if (typeof localAgentGetConfig === 'function') {
+        localAgentGetConfig().then(function(cfg) {
+            if (cfg && cfg.project_path && pathInput && !pathInput.value) {
+                pathInput.value = cfg.project_path;
+            }
+        }).catch(function() { /* 代理不在线则忽略 */ });
+    }
     refreshDiskSpace();
     modal.style.display = 'flex';
 }
@@ -3405,6 +3496,7 @@ function showProjectsListModal() {
                 var ptype = btn.getAttribute('data-project-type') || 'image';
                 var doEnter = function() {
                     window.currentProjectId = pid;
+                    window.currentProjectName = btn.getAttribute('data-project-name') || '';
                     window._pendingProjectType = ptype;
                     if (modal) modal.style.display = 'none';
                     rNavigate('workspace');
@@ -3487,6 +3579,7 @@ function loadHomeProjectsGrid() {
                 var pid = parseInt(card.getAttribute('data-project-id'));
                 if (!pid) return;
                 window.currentProjectId = pid;
+                window.currentProjectName = card.getAttribute('data-project-name') || '';
                 window._pendingProjectType = card.classList.contains('project-type-video') ? 'video' : 'image';
                 rNavigate('workspace');
             });
@@ -3997,6 +4090,13 @@ function initRouter() {
         });
     }
 
+    var navStorageNoticeBtn = $r('#nav-storage-notice-btn');
+    if (navStorageNoticeBtn) {
+        navStorageNoticeBtn.addEventListener('click', function() {
+            if (typeof showStorageNotice === 'function') showStorageNotice(true);
+        });
+    }
+
     var workspaceSettingsBtn = $r('#workspace-settings-btn');
     if (workspaceSettingsBtn) {
         workspaceSettingsBtn.addEventListener('click', function() {
@@ -4015,6 +4115,13 @@ function initRouter() {
     if (workspaceContactBtn) {
         workspaceContactBtn.addEventListener('click', function() {
             showContactModal();
+        });
+    }
+
+    var workspaceStorageNoticeBtn = $r('#workspace-storage-notice-btn');
+    if (workspaceStorageNoticeBtn) {
+        workspaceStorageNoticeBtn.addEventListener('click', function() {
+            if (typeof showStorageNotice === 'function') showStorageNotice(true);
         });
     }
 
@@ -4312,6 +4419,10 @@ function initRouter() {
             var pathInput = $r('#storage-path-input');
             if (pathInput && pathInput.value) {
                 localStorage.setItem('cc_storage_path', pathInput.value);
+                // 同步保存到本地代理
+                if (typeof localAgentSetConfig === 'function') {
+                    localAgentSetConfig(pathInput.value).catch(function() { /* 代理不在线则忽略 */ });
+                }
             }
             hideStorageSettingsModal();
         });
@@ -4443,6 +4554,7 @@ function initRouter() {
                     var pid = parseInt(card.getAttribute('data-project-id'));
                     if (!pid) return;
                     window.currentProjectId = pid;
+                    window.currentProjectName = card.getAttribute('data-project-name') || '';
                     window._pendingProjectType = card.classList.contains('project-type-video') ? 'video' : 'image';
                     rNavigate('workspace');
                 });
@@ -4499,6 +4611,9 @@ function submitLogin() {
             role: result.data.role
         });
         rNavigate('home');
+        if (typeof maybeShowStorageNotice === 'function') {
+            setTimeout(maybeShowStorageNotice, 400);
+        }
     })
     .catch(function(err) {
         if (errorEl) { errorEl.textContent = '网络错误，请重试'; errorEl.style.display = ''; }
@@ -4711,7 +4826,7 @@ document.addEventListener('DOMContentLoaded', function() {
 (function() {
     function getTrainingImageDirValue() {
         var input = $r('#training-image-dir');
-        return ((input && input.value) || 'temp_train_data').trim() || 'temp_train_data';
+        return ((input && input.value) || 'storage/training/corpus').trim() || 'storage/training/corpus';
     }
 
     function syncTrainingDataStatsToView(fileCount, sizeMb, imageDir) {
@@ -4787,10 +4902,10 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, status: resp.status, data: data }; }); });
         }
-        return postClearTrainingUploads('/api/train/clear_uploads')
+        return Promise.reject(new Error('训练数据清理只能由服务器手动执行'))
         .then(function(result) {
             if (result.status === 404) {
-                return postClearTrainingUploads('/api/train/data_clear');
+                return result;
             }
             return result;
         })
@@ -4845,10 +4960,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var dataClearBtn = $r('#training-data-clear');
         if (dataClearBtn && !dataClearBtn.dataset.statsBound) {
-            var clearClone = dataClearBtn.cloneNode(true);
-            dataClearBtn.parentNode.replaceChild(clearClone, dataClearBtn);
-            clearClone.dataset.statsBound = '1';
-            clearClone.addEventListener('click', clearTrainingUploads);
+            dataClearBtn.dataset.statsBound = '1';
+            dataClearBtn.disabled = true;
+            dataClearBtn.title = '训练数据清理只能由服务器手动执行';
         }
 
         var dirInput = $r('#training-image-dir');
@@ -4887,8 +5001,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 requestUrl.indexOf('/api/train') !== -1 &&
                 requestUrl.indexOf('/api/train/upload') === -1 &&
                 requestUrl.indexOf('/api/train/data_stats') === -1 &&
-                requestUrl.indexOf('/api/train/clear_uploads') === -1 &&
-                requestUrl.indexOf('/api/train/data_clear') === -1 &&
                 init &&
                 init.body instanceof FormData &&
                 !init.body.get('target')
@@ -4933,6 +5045,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (typeof showToast === 'function') showToast('昵称已保存');
             if (editArea) editArea.style.display = 'none';
+            // 同时把用户资料同步到本地授权根目录的 profile/ 下
+            if (typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle) {
+                writeBrowserUserProfile({
+                    nickname: val,
+                    updated_at: new Date().toISOString()
+                });
+            }
         })
         .catch(function(err) {
             if (typeof showToast === 'function') showToast(err.message || '昵称保存失败');
@@ -5078,6 +5197,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     var pid = parseInt(card.getAttribute('data-project-id'));
                     if (!pid) return;
                     window.currentProjectId = pid;
+                    window.currentProjectName = card.getAttribute('data-project-name') || '';
                     window._pendingProjectType = card.classList.contains('project-type-video') ? 'video' : 'image';
                     rNavigate('workspace');
                 });

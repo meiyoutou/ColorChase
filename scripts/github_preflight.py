@@ -29,6 +29,7 @@ BLOCKED_PATTERNS = [
     re.compile(r"(^|/)temp_train_data/"),
     re.compile(r"(^|/)training_corpus/"),
     re.compile(r"(^|/)\.trae/"),
+    re.compile(r"(^|/)\.reasonux/"),
     re.compile(r"(^|/)\.reasonix/"),
 ]
 
@@ -40,6 +41,8 @@ def run_git(args, input_text=None):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if result.returncode != 0:

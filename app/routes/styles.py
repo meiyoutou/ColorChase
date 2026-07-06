@@ -13,7 +13,14 @@ from fastapi.responses import JSONResponse
 from admin_runtime_metrics import record_model_call, record_task_log, record_user_usage
 from app.routes.projects import _user_profile_record
 from app.services.auth_utils import _get_request_user_id, _get_request_user_role
-from app.services.paths import _iter_style_extracted_roots, _resolve_style_dir, _runtime_temp_lut_dir, _safe_session_dir
+from app.services.paths import (
+    _is_admin_request,
+    _iter_style_extracted_roots,
+    _resolve_local_file_path,
+    _resolve_style_dir,
+    _runtime_temp_lut_dir,
+    _safe_session_dir,
+)
 from app.services.task_logging import create_task_log_writer
 from config import BASE_DIR
 from core.io.image_utils import _cv2_imread, _img_to_base64
@@ -77,7 +84,10 @@ async def api_get_style(style_id: str):
 async def api_rename_style(
     style_id: str = Form(...),
     new_name: str = Form(...),
+    authorization: Optional[str] = Header(None),
 ):
+    if not _is_admin_request(authorization):
+        raise HTTPException(status_code=403, detail="风格重命名仅限管理员")
     resolved_style_dir = _resolve_style_dir(style_id)
     if not resolved_style_dir:
         raise HTTPException(status_code=404, detail="风格不存在")
@@ -121,6 +131,10 @@ async def api_apply_style(
         raise HTTPException(status_code=404, detail="风格 LUT 不存在")
 
     style_lut = await asyncio.to_thread(np.load, style_lut_path)
+    resolved_target_path = _resolve_local_file_path(target_path)
+    if not resolved_target_path:
+        raise HTTPException(status_code=400, detail="目标图片不存在或路径无效")
+    target_path = str(resolved_target_path)
 
     if session_id:
         _safe_session_dir(session_id)

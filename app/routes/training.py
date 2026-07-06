@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.security import DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, ensure_upload_file_size, get_upload_file_size
 from app.settings import int_env
+from app.services.paths import _is_admin_request
 from config import get_training_corpus_dir
 
 
@@ -59,6 +60,9 @@ def create_training_router(
     ):
         request_user_id = get_request_user_id(authorization)
         request_user_role = get_request_user_role(authorization)
+        # 训练任务使用服务器语料库，仅管理员可启动
+        if request_user_role != "admin":
+            raise HTTPException(status_code=403, detail="模型训练仅限管理员")
         if target not in ("neuralpreset", "modflows_b0", "modflows_b6"):
             raise HTTPException(status_code=400, detail="不支持的训练目标")
 
@@ -113,7 +117,12 @@ def create_training_router(
         files: List[UploadFile] = File(...),
         image_dir: str = Form(str(get_training_corpus_dir())),
         relative_paths: str = Form(""),
+        authorization: Optional[str] = Header(None),
     ):
+        # 训练语料库属于服务器数据，仅管理员可上传；普通用户数据不落盘
+        if not _is_admin_request(authorization):
+            raise HTTPException(status_code=403, detail="训练语料上传仅限管理员")
+
         training_path = resolve_training_dir(image_dir)
         training_path.mkdir(parents=True, exist_ok=True)
         # 解析前端传来的相对路径数组（来自 webkitRelativePath）
@@ -194,33 +203,15 @@ def create_training_router(
         })
 
     @router.get("/api/train/data_stats")
-    async def api_train_data_stats(image_dir: str = str(get_training_corpus_dir())):
+    async def api_train_data_stats(
+        image_dir: str = str(get_training_corpus_dir()),
+        authorization: Optional[str] = Header(None),
+    ):
+        if not _is_admin_request(authorization):
+            raise HTTPException(status_code=403, detail="训练数据统计仅限管理员")
         return JSONResponse({
             "success": True,
             **get_training_data_stats_payload(image_dir),
-        })
-
-    @router.post("/api/train/clear_uploads")
-    @router.post("/api/train/data_clear", include_in_schema=False)
-    async def api_train_clear_uploads(image_dir: str = Form(str(get_training_corpus_dir()))):
-        training_path = resolve_training_dir(image_dir)
-        deleted = 0
-        if training_path.exists() and training_path.is_dir():
-            for path in training_path.rglob("*"):
-                if path.is_file() and path.suffix.lower() in training_image_extensions:
-                    path.unlink()
-                    deleted += 1
-            index_path = training_path / "upload_index.json"
-            if index_path.exists() and index_path.is_file():
-                index_path.unlink()
-
-        stats = get_training_data_stats_payload(str(training_path))
-        return JSONResponse({
-            "success": True,
-            "deleted_count": deleted,
-            "training_file_count": stats["training_file_count"],
-            "training_size_mb": stats["training_size_mb"],
-            "image_dir": stats["image_dir"],
         })
 
     return router

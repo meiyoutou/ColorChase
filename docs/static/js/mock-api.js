@@ -308,7 +308,6 @@
 
         if (path === '/api/train/data_stats') return json({ file_count: 128, size_mb: 742.6, image_dir: 'storage/training/uploads/preview' });
         if (path === '/api/train/upload') return json({ success: true, uploaded: 12, failed: 0, file_count: 140, size_mb: 780.2 });
-        if (path === '/api/train/clear_uploads' || path === '/api/train/data_clear') return json({ success: true, file_count: 0, size_mb: 0 });
         if (path === '/api/train') return json({ success: true, task_id: 'training-preview-task', message: '静态预览训练任务已启动' });
 
         if (path === '/api/mask/subject') return json({ success: true, mask_path: 'mock://mask/subject.png', preview_b64: SAMPLE_RESULT });

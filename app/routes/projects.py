@@ -17,6 +17,15 @@ from models import User, Project, Asset
 from app.routes.auth import get_current_user
 from app.settings import USER_SPACE_TZ
 from app.security import ensure_upload_file_size
+from app.services.paths import (
+    _project_assets_root_for_label,
+    _runtime_user_temp_url,
+    _safe_project_asset_file,
+    _safe_user_asset_file,
+    _save_to_runtime_user_temp,
+    _user_assets_root_for_label,
+)
+from app.services.user_identity import resolve_user_storage_label
 from config import (
     BASE_DIR,
     get_project_assets_dir,
@@ -67,9 +76,11 @@ def _project_assets_root() -> Path:
     return get_project_assets_dir()
 
 
-def _project_asset_roots():
+def _project_asset_roots(storage_label: str = ""):
     roots = []
     seen = set()
+    if storage_label:
+        roots.append(_project_assets_root_for_label(storage_label))
     for root in list(iter_known_project_asset_dirs()) + [_project_assets_root()]:
         try:
             resolved = root.resolve()
@@ -83,10 +94,21 @@ def _project_asset_roots():
     return roots
 
 
-def _project_storage_roots(project_id: int):
+def _project_storage_roots_after_access_check(project_id: int, storage_label: str = ""):
+    """只在调用方已经确认当前用户可访问该项目后使用。"""
     roots = []
     seen = set()
-    for root in _project_asset_roots():
+    candidate_roots = list(_project_asset_roots(storage_label=storage_label))
+    base_root = _project_assets_root()
+    try:
+        if base_root.exists():
+            for user_root in base_root.iterdir():
+                if user_root.is_dir() and user_root.name.startswith("user_"):
+                    candidate_roots.append(user_root)
+    except OSError:
+        pass
+
+    for root in candidate_roots:
         candidate = root / str(project_id)
         try:
             resolved = candidate.resolve()
@@ -98,6 +120,11 @@ def _project_storage_roots(project_id: int):
         seen.add(key)
         roots.append(resolved)
     return roots
+
+
+def _project_storage_roots(project_id: int, storage_label: str = ""):
+    """兼容旧调用名；新代码优先用权限语义更明确的包装。"""
+    return _project_storage_roots_after_access_check(project_id, storage_label=storage_label)
 
 
 def _safe_project_asset_url(project_id: int, *parts: str) -> str:
@@ -135,11 +162,11 @@ def normalize_legacy_user_asset_url(value):
     return raw
 
 
-def _user_avatar_url(record: dict) -> str:
+def _user_avatar_url(record: dict, storage_label: str = "", user_id: int | None = None) -> str:
     avatar_path = str(record.get("avatar_path") or "").strip()
     if not avatar_path:
         return ""
-    resolved = _resolve_existing_path(avatar_path)
+    resolved = _resolve_existing_path(avatar_path, storage_label=storage_label, user_id=user_id)
     if not resolved or not resolved.exists():
         return ""
     updated_at = str(record.get("updated_at") or "").strip()
@@ -288,7 +315,7 @@ def _read_project_snapshot(raw_snapshot: str):
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _resolve_existing_path(value):
+def _resolve_existing_path(value, storage_label: str = "", user_id: int | None = None):
     if not value:
         return None
     raw = str(value).strip()
@@ -298,41 +325,41 @@ def _resolve_existing_path(value):
     if raw.startswith("/api/project_assets/"):
         parts = raw[len("/api/project_assets/"):].split("/", 1)
         if len(parts) == 2 and parts[0].isdigit():
-            relative = Path(parts[1].replace("\\", "/"))
-            if not relative.is_absolute() and not any(part in ("", ".", "..") for part in relative.parts):
-                for root in _project_asset_roots():
-                    candidate = (root / parts[0] / relative).resolve()
-                    project_root = (root / parts[0]).resolve()
-                    if (candidate == project_root or project_root in candidate.parents) and candidate.exists():
-                        return candidate
+            try:
+                return _safe_project_asset_file(
+                    int(parts[0]),
+                    parts[1],
+                    storage_label=storage_label,
+                    scan_legacy_user_dirs=True,
+                )
+            except HTTPException:
+                return None
         return None
     if raw.startswith("/assets/projects/"):
         parts = raw[len("/assets/projects/"):].split("/", 1)
         if len(parts) == 2 and parts[0].isdigit():
             relative = Path(parts[1].replace("\\", "/"))
             if not relative.is_absolute() and not any(part in ("", ".", "..") for part in relative.parts):
-                for root in _project_asset_roots():
+                for root in _project_asset_roots(storage_label=storage_label):
                     candidate = (root / parts[0] / relative).resolve()
                     project_root = (root / parts[0]).resolve()
                     if (candidate == project_root or project_root in candidate.parents) and candidate.exists():
                         return candidate
     if raw.startswith("/api/user_assets/"):
         parts = raw[len("/api/user_assets/"):].split("/", 1)
-        user_roots = {
-            "images": USER_LOCAL_IMAGE_DIR,
-            "references": USER_LOCAL_REFERENCE_DIR,
-            "profiles": USER_LOCAL_PROFILE_DIR,
-        }
-        if len(parts) == 2 and parts[0] in user_roots:
-            relative = Path(parts[1].replace("\\", "/"))
-            if not relative.is_absolute() and not any(part in ("", ".", "..") for part in relative.parts):
-                root = user_roots[parts[0]].resolve()
-                candidate = (root / relative).resolve()
-                if (candidate == root or root in candidate.parents) and candidate.exists():
-                    return candidate
+        if len(parts) == 2:
+            try:
+                return _safe_user_asset_file(
+                    parts[0],
+                    parts[1],
+                    storage_label=storage_label,
+                    user_id=user_id,
+                )
+            except HTTPException:
+                return None
     if raw.startswith("/assets/"):
         candidate = get_user_assets_dir() / raw[len("/assets/"):]
-    elif raw.startswith("/videos/") or raw.startswith("/styles/") or raw.startswith("/uploaded/"):
+    elif raw.startswith("/styles/") or raw.startswith("/uploaded/"):
         candidate = BASE_DIR / raw.lstrip("/")
     else:
         candidate = Path(raw)
@@ -470,7 +497,7 @@ def _build_user_project_inventory(projects, asset_rows):
                 export_size_files.add(video_result)
                 export_size += _safe_file_size(video_result)
 
-        for root in _project_storage_roots(project.id):
+        for root in _project_storage_roots_after_access_check(project.id):
             if not root.exists():
                 continue
             for file_path in root.rglob("*"):
@@ -560,7 +587,7 @@ def _format_runtime_dt(value) -> str:
 def _scan_project_storage(project_ids):
     total_size = 0
     for project_id in project_ids:
-        for project_dir in _project_storage_roots(project_id):
+        for project_dir in _project_storage_roots_after_access_check(project_id):
             if not project_dir.exists():
                 continue
             for item in project_dir.rglob("*"):
@@ -574,7 +601,7 @@ def _scan_project_storage(project_ids):
 
 
 def _remove_project_storage(project_id: int):
-    for project_dir in _project_storage_roots(project_id):
+    for project_dir in _project_storage_roots_after_access_check(project_id):
         if not project_dir.exists():
             continue
         try:
@@ -731,7 +758,7 @@ def _count_unique_exported_photos(projects, asset_rows):
             has_export = any(_looks_like_export_name(asset.file_name) for asset in project_assets)
 
         if not has_export:
-            for root in _project_storage_roots(project.id):
+            for root in _project_storage_roots_after_access_check(project.id):
                 if not root.exists():
                     continue
                 for file_path in root.rglob("*"):
@@ -1112,6 +1139,33 @@ async def list_projects(
         }
         for p in projects
     ]
+
+
+@router.get("/{project_id}/detail")
+async def get_project_detail(
+    project_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == user.id,
+            Project.deleted_at == None,
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    return {
+        "id": project.id,
+        "name": project.name,
+        "type": project.type,
+        "owner_id": project.owner_id,
+        "created_at": str(project.created_at) if project.created_at else "",
+        "snapshot": project.workspace_snapshot or "",
+    }
 
 
 @router.get("/space_dashboard")
@@ -1511,6 +1565,7 @@ async def user_space_dashboard_v2(
     recent_exports = _recent_export_records(user_logs, limit=5)
     recent_model_records = _recent_model_activity(user_logs, limit=5)
     recent_logs = _recent_user_logs(user_logs, limit=4)
+    storage_label = await resolve_user_storage_label(user.id)
 
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
@@ -1526,7 +1581,11 @@ async def user_space_dashboard_v2(
         "profile": {
             "display_name": display_name,
             "avatar_text": display_name[:1].upper(),
-            "avatar_url": _user_avatar_url(_user_profile_record(user.id)),
+            "avatar_url": _user_avatar_url(
+                _user_profile_record(user.id),
+                storage_label=storage_label,
+                user_id=user.id,
+            ),
             "account_type": _account_type_label(user.role),
             "role": user.role,
             "account_id": user.email or user.phone or f"用户{user.id}",
@@ -1710,9 +1769,10 @@ async def update_user_space_profile(
     record["updated_at"] = datetime.utcnow().isoformat() + "Z"
     store[key] = record
     _write_user_profile_store(store)
+    storage_label = await resolve_user_storage_label(user.id)
     return {
         "nickname": nickname,
-        "avatar_url": _user_avatar_url(record),
+        "avatar_url": _user_avatar_url(record, storage_label=storage_label, user_id=user.id),
         "updated_at": record["updated_at"],
     }
 
@@ -1741,9 +1801,11 @@ async def upload_user_space_avatar(
     if len(content) > USER_PROFILE_MAX_AVATAR_BYTES:
         raise HTTPException(status_code=400, detail="头像大小不能超过 2MB")
 
-    USER_PROFILE_AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    storage_label = await resolve_user_storage_label(user.id)
+    avatar_dir = _user_assets_root_for_label(storage_label) / "profiles" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
     avatar_name = f"user_{user.id}_{uuid.uuid4().hex}{ext}"
-    avatar_path = USER_PROFILE_AVATAR_DIR / avatar_name
+    avatar_path = avatar_dir / avatar_name
     avatar_path.write_bytes(content)
 
     store = _read_user_profile_store()
@@ -1761,7 +1823,7 @@ async def upload_user_space_avatar(
     store[key] = record
     _write_user_profile_store(store)
     return {
-        "avatar_url": _user_avatar_url(record),
+        "avatar_url": _user_avatar_url(record, storage_label=storage_label, user_id=user.id),
         "updated_at": record["updated_at"],
     }
 
@@ -1997,7 +2059,7 @@ async def delete_project_assets(
     if not normalized_paths:
         return {"deleted": [], "missing": []}
 
-    project_roots = list(_project_storage_roots(project_id))
+    project_roots = list(_project_storage_roots_after_access_check(project_id))
 
     deleted = []
     missing = []
@@ -2056,15 +2118,25 @@ async def upload_project_asset(
 
     safe_bucket = re.sub(r"[^A-Za-z0-9._-]+", "_", str(bucket or "source")).strip("._-") or "source"
     ensure_upload_file_size(file, 300 * 1024 * 1024 if safe_bucket.startswith("video") else 10 * 1024 * 1024, label="项目文件")
-    proj_dir = _project_assets_root() / str(project_id) / safe_bucket
-    proj_dir.mkdir(parents=True, exist_ok=True)
     ext = os.path.splitext(file.filename)[1] if file.filename else ""
     fname = f"{uuid.uuid4().hex}{ext}"
-    fpath = proj_dir / fname
-    with open(fpath, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    storage_label = await resolve_user_storage_label(user.id)
 
-    asset_url = f"/api/project_assets/{project_id}/{safe_bucket}/{fname}"
+    # 普通用户数据不落盘到服务器 project 目录，改走临时目录
+    if getattr(user, "role", None) == "admin":
+        proj_dir = _project_assets_root_for_label(storage_label) / str(project_id) / safe_bucket
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        fpath = proj_dir / fname
+        with open(fpath, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        asset_url = f"/api/project_assets/{project_id}/{safe_bucket}/{fname}"
+    else:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="文件为空")
+        fpath = _save_to_runtime_user_temp(content, user.id, fname, storage_label=storage_label)
+        asset_url = _runtime_user_temp_url(user.id, fname)
+
     return {
         "path": str(fpath).replace("\\", "/"),
         "asset_url": asset_url,

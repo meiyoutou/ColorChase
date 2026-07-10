@@ -151,7 +151,31 @@ def _normalize_path(value) -> Path:
 
 def _path(key: str, user_id: Optional[int] = None) -> Path:
     cfg = get_user_config(user_id)
-    return _normalize_path(cfg.get(key, DEFAULT_PATHS[key]))
+    configured = cfg.get(key, DEFAULT_PATHS[key])
+    resolved = _normalize_path(configured)
+    resolved_user_id = _resolve_user_id(user_id)
+    # 按用户隔离：如果使用的是默认路径（没自定义过），且当前有 user_id，
+    # 就在默认路径下加 user_{邮箱} 子目录，避免多个管理员/用户的数据混在一起。
+    # 用户自定义路径不加，尊重用户的自定义配置。
+    if resolved_user_id is not None:
+        default_resolved = _normalize_path(DEFAULT_PATHS[key])
+        if resolved == default_resolved:
+            return default_resolved / _resolve_user_label(resolved_user_id)
+    return resolved
+
+
+def _resolve_user_email(user_id: int) -> Optional[str]:
+    """兼容旧调用：路径配置层不再查询数据库。"""
+    return None
+            # 优先用邮箱，邮箱为空时用手机号
+
+
+    """把邮箱转成安全的目录名，加上 user_ 前缀。"""
+
+
+def _resolve_user_label(user_id: int) -> str:
+    """路径配置层只使用 user_id，不查询数据库。"""
+    return f"user_{user_id}"
 
 
 def get_runtime_paths(user_id: Optional[int] = None):
@@ -253,6 +277,18 @@ def ensure_runtime_dirs(user_id: Optional[int] = None):
     return paths
 
 
+def _iter_user_subdirs(parent: Path):
+    """扫描某个父目录下所有 user_{id} 子目录（按用户隔离后的新结构）。"""
+    try:
+        if not parent.exists():
+            return
+        for item in parent.iterdir():
+            if item.is_dir() and item.name.startswith("user_"):
+                yield item
+    except Exception:
+        return
+
+
 def iter_known_video_dirs():
     seen = set()
 
@@ -267,10 +303,15 @@ def iter_known_video_dirs():
         seen.add(key)
         yield resolved
 
+    # 旧全局目录（兼容历史数据）
     for item in _append(DEFAULT_PATHS["video_results"]):
         yield item
     for item in _append(LEGACY_DEFAULT_PATHS["video_results"]):
         yield item
+    # 新按用户子目录
+    for user_dir in _iter_user_subdirs(_normalize_path(DEFAULT_PATHS["video_results"])):
+        for item in _append(user_dir):
+            yield item
 
     for config_path in [USER_CONFIG_PATH] + sorted(USER_CONFIG_DIR.glob("*.json")) if USER_CONFIG_DIR.exists() else [USER_CONFIG_PATH]:
         if not config_path.exists():
@@ -301,11 +342,8 @@ def iter_known_training_dirs():
         seen.add(key)
         yield resolved
 
+    # 只保留统一目录，旧目录已在启动时迁移并删除
     for item in _append(STORAGE_TRAINING_CORPUS_DIR):
-        yield item
-    for item in _append(BASE_DIR / "temp_train_data"):
-        yield item
-    for item in _append(BASE_DIR / "training_corpus"):
         yield item
 
 
@@ -323,12 +361,17 @@ def iter_known_project_asset_dirs():
         seen.add(key)
         yield resolved
 
+    # 旧全局目录（兼容历史数据）
     for item in _append(DEFAULT_PATHS["project_assets"]):
         yield item
     for item in _append(LEGACY_DEFAULT_PATHS["project_assets"]):
         yield item
     for item in _append(BASE_DIR / "uploaded" / "projects"):
         yield item
+    # 新按用户子目录
+    for user_dir in _iter_user_subdirs(_normalize_path(DEFAULT_PATHS["project_assets"])):
+        for item in _append(user_dir):
+            yield item
 
     config_paths = [USER_CONFIG_PATH]
     if USER_CONFIG_DIR.exists():

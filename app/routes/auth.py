@@ -585,7 +585,6 @@ def _resolve_virtual_asset_path(value):
         return None
     route_roots = {
         "/assets/": USER_ASSET_DIR,
-        "/videos/": _runtime_video_result_dir(),
     }
     for prefix, root in route_roots.items():
         if not route_path.startswith(prefix):
@@ -640,6 +639,8 @@ def _add_session_cleanup(session_id, bucket):
         _runtime_temp_lut_dir() / f"{sid}.npy",
         _runtime_temp_lut_dir() / f"{sid}_result_preview.jpg",
         _runtime_temp_lut_dir() / f"{sid}_orig_preview.jpg",
+        _runtime_temp_lut_dir() / f"result_preview_{sid}.jpg",
+        _runtime_temp_lut_dir() / f"orig_preview_{sid}.jpg",
     ):
         resolved = _resolve_within_cleanup_roots(candidate)
         if resolved is not None:

@@ -15,10 +15,12 @@ from app.security import ensure_upload_file_size
 from app.services.auth_utils import _get_request_user_id, _get_request_user_role
 from app.services.paths import (
     _ensure_project_access,
+    _is_admin_request,
     _resolve_local_file_path,
-    _runtime_video_dir,
     _safe_project_bucket_dir,
+    _save_to_runtime_user_temp,
 )
+from app.services.user_identity import resolve_user_storage_label
 from app.services.task_logging import create_task_log_writer
 from config import BASE_DIR
 
@@ -38,9 +40,19 @@ async def api_export_video(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    is_admin = request_user_role == "admin"
+    if request_user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
     project_id = await _ensure_project_access(project_id, request_user_id)
-    source_resolved = _resolve_local_file_path(source_url)
-    source_path = str(source_resolved) if source_resolved else os.path.join(str(_runtime_video_dir()), os.path.basename(source_url))
+    storage_label = await resolve_user_storage_label(request_user_id)
+    if project_id <= 0:
+        raise HTTPException(status_code=400, detail="请先创建或选择项目后再导出视频")
+    source_resolved = _resolve_local_file_path(
+        source_url,
+        request_user_id=request_user_id,
+        request_storage_label=storage_label,
+    )
+    source_path = str(source_resolved) if source_resolved else ""
     if not os.path.exists(source_path):
         raise HTTPException(status_code=404, detail="源视频文件不存在")
 
@@ -48,10 +60,23 @@ async def api_export_video(
 
     ext_map = {"mp4": ".mp4", "mp4_h265": ".mp4", "mov": ".mov", "avi": ".avi"}
     export_filename = f"export_{uuid.uuid4().hex}{ext_map.get(format, '.mp4')}"
-    if project_id > 0:
-        export_path = str(_safe_project_bucket_dir(project_id, "video_exports") / export_filename)
+    if is_admin and project_id > 0:
+        export_path = str(
+            _safe_project_bucket_dir(
+                project_id,
+                "video_exports",
+                storage_label=storage_label,
+            ) / export_filename
+        )
     else:
-        export_path = os.path.join(str(_runtime_video_dir()), export_filename)
+        export_path = str(
+            _save_to_runtime_user_temp(
+                b"",
+                request_user_id,
+                export_filename,
+                storage_label=storage_label,
+            )
+        )
 
     cmd = [ffmpeg, "-y", "-i", source_path]
 

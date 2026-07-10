@@ -61,7 +61,9 @@ from database import async_session
 from models import User, Project
 from app.settings import IS_PRODUCTION, USER_SPACE_TZ, allowed_hosts, allowed_origins, int_env
 from app.security import (
+    DEFAULT_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES,
     DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES as IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
+    DEFAULT_VIDEO_UPLOAD_MAX_BYTES as VIDEO_UPLOAD_MAX_BYTES,
     begin_request_limits,
     ensure_upload_file_size,
 )
@@ -95,6 +97,7 @@ from app.services.model_management import (
     _resolve_semantic_model_choice,
     _resolve_transfer_model_runtime,
 )
+from app.services.user_identity import resolve_user_storage_label
 from app.services.paths import (
     _ensure_project_access,
     _is_admin_request,
@@ -111,6 +114,7 @@ from app.services.paths import (
     _safe_user_asset_file,
     _save_project_image,
     _save_to_runtime_user_temp,
+    _user_assets_root_for_label,
     cleanup_runtime_user_temp,
     cleanup_temp_luts,
     cleanup_misc_temp,
@@ -118,6 +122,14 @@ from app.services.paths import (
 from app.services.task_logging import create_task_log_writer
 from app.routes.training import create_training_router
 from app.routes.task import create_task_router
+
+
+async def _require_storage_label_for_user(user_id: Optional[int]) -> str:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    return await resolve_user_storage_label(user_id)
+
+
 async def _require_local_storage(request: Request):
     """强制要求客户端具备本地存储能力（fsa 或 agent 模式）。
     管理员账号直接放行，不需要本地存储。
@@ -316,7 +328,13 @@ async def serve_user_asset(
     request_user_id = _resolve_runtime_user_id_from_request(request)
     if request_user_id is None and IS_PRODUCTION:
         raise HTTPException(status_code=401, detail="Authentication required")
-    target = _safe_user_asset_file(asset_group, file_path)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+    target = _safe_user_asset_file(
+        asset_group,
+        file_path,
+        storage_label=request_storage_label,
+        user_id=request_user_id,
+    )
     suffix = target.suffix.lower()
     media_type = {
         ".jpg": "image/jpeg",
@@ -840,6 +858,7 @@ async def api_upload_batch(
     request_user_id = _get_request_user_id(authorization)
     project_id = await _ensure_project_access(project_id, request_user_id)
     is_admin = _is_admin_request(authorization)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     results = []
     for file in files:
         if not file.filename:
@@ -852,17 +871,24 @@ async def api_upload_batch(
         save_name = f"{uid}{ext}"
         # 普通用户强制走临时目录，不落盘到 project/user 目录；管理员保持原逻辑
         if is_admin and project_id > 0:
-            save_dir = _safe_project_bucket_dir(project_id, "source")
-            thumb_dir = _safe_project_bucket_dir(project_id, "thumbs")
+            save_dir = _safe_project_bucket_dir(project_id, "source", storage_label=request_storage_label)
+            thumb_dir = _safe_project_bucket_dir(project_id, "thumbs", storage_label=request_storage_label)
             save_path = save_dir / save_name
             asset_url = f"/api/project_assets/{project_id}/source/{save_name}"
         elif is_admin:
-            save_path = Path(USER_IMAGES_DIR) / save_name
-            thumb_dir = Path(USER_IMAGES_DIR)
+            user_images_dir = _user_assets_root_for_label(request_storage_label) / "images"
+            user_images_dir.mkdir(parents=True, exist_ok=True)
+            save_path = user_images_dir / save_name
+            thumb_dir = user_images_dir
             asset_url = f"/api/user_assets/images/{save_name}?t={uid}"
         else:
-            save_path = _save_to_runtime_user_temp(b"", request_user_id, save_name)
-            thumb_dir = _runtime_user_temp_dir(request_user_id)
+            save_path = _save_to_runtime_user_temp(
+                b"",
+                request_user_id,
+                save_name,
+                storage_label=request_storage_label,
+            )
+            thumb_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
             asset_url = _runtime_user_temp_url(request_user_id, save_name)
 
         content = await file.read()
@@ -932,11 +958,16 @@ async def api_apply_profile(
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
     is_admin = request_user_role == "admin"
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
     if request_user_id is not None:
         record_user_usage(request_user_id)
     project_id = await _ensure_project_access(project_id, request_user_id)
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标图片不存在")
     target_path = str(resolved_target_path)
@@ -953,7 +984,11 @@ async def api_apply_profile(
         record_model_call("neural_preset")
         lut_3d = await asyncio.to_thread(_generate_builtin_profile, profile_builtin)
     elif profile_file and profile_file.filename:
-        ensure_upload_file_size(profile_file, 10 * 1024 * 1024, label="风格文件")
+        ensure_upload_file_size(
+            profile_file,
+            int_env("COLORCHASE_UPLOAD_MAX_BYTES", UPLOAD_MAX_BYTES),
+            label="风格文件",
+        )
         record_model_call("neural_preset")
         lut_ext = os.path.splitext(profile_file.filename)[1].lower()
         lut_bytes = await profile_file.read()
@@ -1005,7 +1040,10 @@ async def api_apply_profile(
     # 普通用户：把 LUT 中间产物暴露为临时 URL，方便前端拉回本地
     if not is_admin and os.path.exists(result_lut_path):
         lut_name = f"{os.path.basename(session_dir)}_lut_global.npy"
-        shutil.copy(result_lut_path, _runtime_user_temp_dir(request_user_id) / lut_name)
+        shutil.copy(
+            result_lut_path,
+            _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label) / lut_name,
+        )
         response["intermediate_urls"] = {"lut": _runtime_user_temp_url(request_user_id, lut_name)}
 
     return JSONResponse(response)
@@ -1066,6 +1104,7 @@ async def api_transfer(
     request_user_role = _get_request_user_role(authorization)
     is_admin = request_user_role == "admin"
     project_id = await _ensure_project_access(project_id, request_user_id)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
     trace_started_at = time.perf_counter()
     trace_last_at = trace_started_at
@@ -1157,8 +1196,6 @@ async def api_transfer(
     has_progress = task_id is not None
     if has_progress:
         pm.register_task(task_id)
-    request_user_id = _get_request_user_id(authorization)
-
     async def prog(stage, progress, message=""):
         if has_progress:
             await pm.send(task_id, stage, progress, message)
@@ -1181,7 +1218,11 @@ async def api_transfer(
     if algorithm == "dncm_lut" and str(lut_mode or "").lower() == "fast":
         target_load_size = 1024
 
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_target_path and resolved_target_path.exists():
         target_path = str(resolved_target_path)
         target_img = await trace_to_thread("load_target", _cv2_imread, target_path, target_size=target_load_size)
@@ -1190,8 +1231,19 @@ async def api_transfer(
     elif target is not None and target.filename:
         if getattr(target, "size", None) == 0:
             raise_task_http_error(400, "目标文件为空")
-        ensure_upload_file_size(target, 300 * 1024 * 1024, label="追色原图")
-        target_path = _save_upload(target, project_id=project_id, bucket="source", user_id=request_user_id, is_admin=is_admin)
+        ensure_upload_file_size(
+            target,
+            int_env("COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES", IMAGE_ORIGINAL_UPLOAD_MAX_BYTES),
+            label="追色原图",
+        )
+        target_path = _save_upload(
+            target,
+            project_id=project_id,
+            bucket="source",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
         if is_admin:
             await _ensure_training_target_sample(
                 _resolve_local_file_path,
@@ -1206,7 +1258,11 @@ async def api_transfer(
         raise_task_http_error(400, "请提供目标图片")
 
     reference_img = None
-    resolved_reference_path = _resolve_local_file_path(reference_path)
+    resolved_reference_path = _resolve_local_file_path(
+        reference_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
@@ -1214,7 +1270,14 @@ async def api_transfer(
         if getattr(reference, "size", None) == 0:
             raise_task_http_error(400, "参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
-        reference_path = _save_upload(reference, project_id=project_id, bucket="reference", user_id=request_user_id, is_admin=is_admin)
+        reference_path = _save_upload(
+            reference,
+            project_id=project_id,
+            bucket="reference",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
 
     if reference_img is None and (profile_file is None or not profile_file.filename) and not generate_lut_only:
@@ -2058,6 +2121,7 @@ async def api_transfer(
                     _display_preview(result_img),
                     ".jpg",
                     [cv2.IMWRITE_JPEG_QUALITY, 90],
+                    storage_label=request_storage_label,
                 )
             else:
                 preview_path = os.path.join(str(_runtime_temp_lut_dir()), result_preview_name)
@@ -2073,7 +2137,7 @@ async def api_transfer(
             # 普通用户：结果预览和原图预览都存 user_uploads/（24h 自动清理）
             # 不再落盘到 luts/，避免无清理机制导致磁盘堆积
             trace_mark("preview_result_encode_start")
-            user_temp_dir = _runtime_user_temp_dir(request_user_id)
+            user_temp_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
             result_preview_path = user_temp_dir / result_preview_name
             cv2.imencode('.jpg', _display_preview(result_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(str(result_preview_path))
             trace_mark("preview_result_encode_done")
@@ -2168,7 +2232,7 @@ async def api_transfer(
     # 普通用户：把 LUT / 深度图 / 遮罩图等中间产物暴露为临时 URL，方便前端拉回本地
     if not is_admin:
         intermediate_urls = {}
-        user_temp_dir = _runtime_user_temp_dir(request_user_id)
+        user_temp_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
         if os.path.exists(lut_path):
             lut_name = f"{session_id}_lut_global.npy"
             shutil.copy(lut_path, user_temp_dir / lut_name)
@@ -2225,6 +2289,7 @@ async def api_video_transfer(
     request_user_role = _get_request_user_role(authorization)
     is_admin = request_user_role == "admin"
     project_id = await _ensure_project_access(project_id, request_user_id)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     if _normalize_project_id(project_id) <= 0:
         raise HTTPException(status_code=400, detail="请先创建或选择项目后再进行视频追色")
     if request_user_id is not None:
@@ -2235,25 +2300,51 @@ async def api_video_transfer(
     pm = progress_manager
     pm.register_task(task_id)
 
-    resolved_video_path = _resolve_local_file_path(video_path)
+    resolved_video_path = _resolve_local_file_path(
+        video_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_video_path and resolved_video_path.exists():
         video_path = str(resolved_video_path)
     elif video is not None and video.filename:
         if getattr(video, "size", None) == 0:
             raise HTTPException(status_code=400, detail="视频文件为空")
-        ensure_upload_file_size(video, 300 * 1024 * 1024, label="视频文件")
-        video_path = _save_upload(video, project_id=project_id, bucket="video_source", user_id=request_user_id, is_admin=is_admin)
+        ensure_upload_file_size(
+            video,
+            int_env("COLORCHASE_VIDEO_UPLOAD_MAX_BYTES", VIDEO_UPLOAD_MAX_BYTES),
+            label="视频文件",
+        )
+        video_path = _save_upload(
+            video,
+            project_id=project_id,
+            bucket="video_source",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
     else:
         raise HTTPException(status_code=400, detail="请提供视频文件")
 
-    resolved_reference_path = _resolve_local_file_path(reference_path)
+    resolved_reference_path = _resolve_local_file_path(
+        reference_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
     elif reference is not None and reference.filename:
         if getattr(reference, "size", None) == 0:
             raise HTTPException(status_code=400, detail="参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
-        reference_path = _save_upload(reference, project_id=project_id, bucket="video_reference", user_id=request_user_id, is_admin=is_admin)
+        reference_path = _save_upload(
+            reference,
+            project_id=project_id,
+            bucket="video_reference",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
     else:
         reference_path = None
 
@@ -2261,13 +2352,30 @@ async def api_video_transfer(
     if profile_file is not None and profile_file.filename:
         if getattr(profile_file, "size", None) == 0:
             raise HTTPException(status_code=400, detail="风格文件为空")
-        ensure_upload_file_size(profile_file, 10 * 1024 * 1024, label="风格文件")
+        ensure_upload_file_size(
+            profile_file,
+            int_env("COLORCHASE_UPLOAD_MAX_BYTES", UPLOAD_MAX_BYTES),
+            label="风格文件",
+        )
         profile_ext = os.path.splitext(profile_file.filename)[1].lower()
         profile_name = f"profile_{uuid.uuid4().hex}{profile_ext}"
         if is_admin and _normalize_project_id(project_id) > 0:
-            profile_path = str(_safe_project_bucket_dir(project_id, "video_profile") / profile_name)
+            profile_path = str(
+                _safe_project_bucket_dir(
+                    project_id,
+                    "video_profile",
+                    storage_label=request_storage_label,
+                ) / profile_name
+            )
         else:
-            profile_path = str(_save_to_runtime_user_temp(b"", request_user_id, profile_name))
+            profile_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    profile_name,
+                    storage_label=request_storage_label,
+                )
+            )
         profile_content = await profile_file.read()
         with open(profile_path, "wb") as f:
             f.write(profile_content)
@@ -2282,6 +2390,7 @@ async def api_video_transfer(
         request_user_role,
         model_runtime,
         project_id,
+        request_storage_label,
     ))
 
     _write_task_log(
@@ -2317,6 +2426,7 @@ async def _background_video_transfer(
     request_user_id=None, user_role="",
     model_runtime=None,
     project_id=0,
+    request_storage_label=None,
 ):
     pm = progress_manager
     frames_dir = None
@@ -2398,11 +2508,24 @@ async def _background_video_transfer(
             await prog("error", 0, "未关联项目，无法保存视频结果")
             mark_video_task_failure()
             return
-        if request_user_role == "admin":
-            output_path = str(_safe_project_bucket_dir(project_id, "video_results") / output_filename)
+        if user_role == "admin":
+            output_path = str(
+                _safe_project_bucket_dir(
+                    project_id,
+                    "video_results",
+                    storage_label=request_storage_label,
+                ) / output_filename
+            )
             result_url = f"/api/project_assets/{_normalize_project_id(project_id)}/video_results/{output_filename}"
         else:
-            output_path = str(_save_to_runtime_user_temp(b"", request_user_id, output_filename))
+            output_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    output_filename,
+                    storage_label=request_storage_label,
+                )
+            )
             result_url = _runtime_user_temp_url(request_user_id, output_filename)
 
         from algorithms.video.processor import extract_frames, assemble_video
@@ -2711,6 +2834,7 @@ async def api_preview_upload(
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
     is_admin = request_user_role == "admin"
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
 
     preview_upload_max_bytes = int_env(
         "COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES",
@@ -2730,8 +2854,15 @@ async def api_preview_upload(
         with open(filepath, "wb") as f:
             f.write(content)
     else:
-        filepath = str(_save_to_runtime_user_temp(content, request_user_id, filename))
-        base_dir = _runtime_user_temp_dir(request_user_id)
+        filepath = str(
+            _save_to_runtime_user_temp(
+                content,
+                request_user_id,
+                filename,
+                storage_label=request_storage_label,
+            )
+        )
+        base_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
 
     raw_exts = {'.dng', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.rw2', '.raw', '.rwl', '.orf', '.pef', '.ptx', '.3fr', '.fff', '.iiq', '.cap', '.eip', '.mef', '.mos', '.mfw', '.x3f', '.dcr', '.kdc', '.k25', '.dcs', '.srw', '.erf', '.cs1', '.cs4', '.cs16', '.sti', '.bay', '.pxn', '.braw', '.r3d', '.ari', '.cine', '.lfp', '.rwz'}
     if ext in raw_exts:
@@ -2860,6 +2991,7 @@ async def api_download_full(
     has_progress = task_id is not None
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     recorded_export_event = False
     export_size_bytes = 0
     if has_progress:
@@ -2924,7 +3056,11 @@ async def api_download_full(
     if has_merged and not os.path.exists(merged_lut_path):
         raise HTTPException(status_code=404, detail="合并 LUT 数据已过期，请重新追色")
 
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标文件不存在")
     target_path = str(resolved_target_path)
@@ -3065,7 +3201,14 @@ async def api_download_full(
         if is_admin_download:
             output_path = os.path.join(str(_runtime_upload_dir()), output_filename)
         else:
-            output_path = str(_save_to_runtime_user_temp(b"", request_user_id, output_filename))
+            output_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    output_filename,
+                    storage_label=request_storage_label,
+                )
+            )
         ok, buf = await asyncio.to_thread(cv2.imencode, '.png', result_img)
         if ok:
             buf.tofile(output_path)
@@ -3124,7 +3267,12 @@ async def api_render_single(
 
     request_user_id = _get_request_user_id(authorization)
     project_id = await _ensure_project_access(project_id, request_user_id)
-    resolved_target_path = _resolve_local_file_path(target_path)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标文件不存在")
     target_path = str(resolved_target_path)

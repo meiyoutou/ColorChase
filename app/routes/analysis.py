@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
 from app.services.auth_utils import _get_request_user_id
+from app.services.user_identity import resolve_user_storage_label
 
 
 def create_analysis_router(
@@ -28,6 +29,7 @@ def create_analysis_router(
     build_semantic_cache_key,
     summarize_semantic_matches,
     save_upload,
+    get_request_user_role,
 ):
     router = APIRouter()
 
@@ -40,8 +42,13 @@ def create_analysis_router(
         user_id = _get_request_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=401, detail="请先登录")
+        storage_label = await resolve_user_storage_label(user_id)
         depth_choice = resolve_depth_model_choice(depth_model)
-        resolved_target_path = resolve_local_file_path(target_path)
+        resolved_target_path = resolve_local_file_path(
+            target_path,
+            request_user_id=user_id,
+            request_storage_label=storage_label,
+        )
         if not resolved_target_path:
             raise HTTPException(status_code=400, detail="目标图片不存在")
         target_path = str(resolved_target_path)
@@ -102,15 +109,37 @@ def create_analysis_router(
         user_id = _get_request_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=401, detail="请先登录")
+        storage_label = await resolve_user_storage_label(user_id)
+        request_user_role = get_request_user_role(authorization)
+        is_admin = request_user_role == "admin"
         semantic_choice = resolve_semantic_model_choice(semantic_model)
-        resolved_target_path = resolve_local_file_path(target_path)
+        resolved_target_path = resolve_local_file_path(
+            target_path,
+            request_user_id=user_id,
+            request_storage_label=storage_label,
+        )
         if not resolved_target_path:
             raise HTTPException(status_code=400, detail="目标图片不存在")
         target_path = str(resolved_target_path)
+        reference_from_upload = False
         if reference is not None and reference.filename:
             ensure_upload_file_size(reference, 10 * 1024 * 1024, label="参考图")
-            reference_path = await asyncio.to_thread(save_upload, reference)
-        resolved_reference_path = resolve_local_file_path(reference_path)
+            reference_path = await asyncio.to_thread(
+                save_upload,
+                reference,
+                0,
+                "reference",
+                user_id,
+                is_admin,
+                storage_label,
+            )
+            reference_from_upload = True
+        resolved_reference_path = resolve_local_file_path(
+            reference_path,
+            request_user_id=user_id,
+            request_storage_label=storage_label,
+            allow_workspace_path=reference_from_upload,
+        )
         if not resolved_reference_path:
             raise HTTPException(status_code=400, detail="参考图片不存在")
         reference_path = str(resolved_reference_path)
@@ -147,9 +176,14 @@ def create_analysis_router(
         user_id = _get_request_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=401, detail="请先登录")
+        storage_label = await resolve_user_storage_label(user_id)
         mask_choice = resolve_mask_model_choice(mask_model)
         prefer_birefnet = bool(mask_choice.get("prefer_birefnet"))
-        resolved_target_path = resolve_local_file_path(target_path)
+        resolved_target_path = resolve_local_file_path(
+            target_path,
+            request_user_id=user_id,
+            request_storage_label=storage_label,
+        )
         if not resolved_target_path:
             raise HTTPException(status_code=400, detail="目标图片不存在")
         target_path = str(resolved_target_path)

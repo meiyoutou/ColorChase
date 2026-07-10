@@ -534,7 +534,7 @@ function normalizeProjectAssetUrl(value, projectId) {
             return '/api/project_assets/' + parts[0] + '/' + parts.slice(1).map(encodeURIComponent).join('/');
         }
     }
-    // 识别迁移后的 storage/projects/assets/{pid}/... 本地绝对路径，转成 HTTP URL
+    // 识别 storage/projects/assets/{pid}/... 或 {storage_label}/{pid}/...，URL 不带目录名
     var marker2 = '/storage/projects/assets/';
     var marker2Index = normalized.toLowerCase().indexOf(marker2);
     if (marker2Index >= 0) {
@@ -542,8 +542,12 @@ function normalizeProjectAssetUrl(value, projectId) {
         var parts2 = rest2.split('/');
         if (parts2.length >= 2) {
             var pathPid = Number(parts2[0]);
-            if (!pid || pathPid === pid) {
+            if (!isNaN(pathPid) && (!pid || pathPid === pid)) {
                 return '/api/project_assets/' + parts2[0] + '/' + parts2.slice(1).map(encodeURIComponent).join('/');
+            }
+            var labelPathPid = Number(parts2[1]);
+            if (parts2.length >= 3 && !isNaN(labelPathPid) && (!pid || labelPathPid === pid)) {
+                return '/api/project_assets/' + parts2[1] + '/' + parts2.slice(2).map(encodeURIComponent).join('/');
             }
         }
     }
@@ -3169,7 +3173,11 @@ async function applyStyle(styleId, styleName) {
         var sid = img.sessionId || img.mergedSessionId || _lastSessionId;
         if (sid) fd.append('session_id', sid);
 
-        var resp = await fetch('/api/apply_style', { method: 'POST', body: fd });
+        var resp = await fetch('/api/apply_style', {
+            method: 'POST',
+            body: fd,
+            headers: getAuthHeaders()
+        });
         var data = await resp.json();
         if (!resp.ok) {
             showToast('风格应用失败: ' + (data.detail || '未知错误'));
@@ -3538,7 +3546,7 @@ function openBatchModal() {
                     if (_profileBuiltin) formData.append('profile_builtin', _profileBuiltin);
                     else if (_profileSessionId) formData.append('profile_session_id', _profileSessionId);
 
-                    var resp = await fetch(API_BASE + '/api/merge_luts', { method: 'POST', body: formData });
+                    var resp = await fetch(API_BASE + '/api/merge_luts', { method: 'POST', body: formData, headers: getAuthHeaders() });
                     if (!resp.ok) {
                         console.error('Batch merge failed for', img.name);
                         img.status = 'pending';

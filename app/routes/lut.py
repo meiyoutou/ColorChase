@@ -1,3 +1,5 @@
+from typing import Optional
+
 import asyncio
 import io
 import os
@@ -7,10 +9,12 @@ import zipfile
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.services.paths import _resolve_local_file_path, _runtime_temp_lut_dir
+from app.services.auth_utils import _get_request_user_id
+from app.services.user_identity import resolve_user_storage_label
 from app.security import ensure_upload_file_size
 from core.color.lut_ops import _build_identity_lut, _generate_builtin_profile, _trilinear_lookup
 from core.io.image_utils import _cv2_imread, _img_to_base64
@@ -107,7 +111,10 @@ async def api_merge_luts(
     profile_session_id: str = Form(None),
     profile_builtin: str = Form(None),
     target_path: str = Form(None),
+    authorization: Optional[str] = Header(None),
 ):
+    request_user_id = _get_request_user_id(authorization)
+    request_storage_label = await resolve_user_storage_label(request_user_id) if request_user_id else None
     lut_ai = None
     lut_profile = None
 
@@ -148,7 +155,11 @@ async def api_merge_luts(
     await asyncio.to_thread(np.save, merged_path, lut_merged)
 
     result_b64 = None
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_target_path:
         target_path = str(resolved_target_path)
         target_img = await asyncio.to_thread(_cv2_imread, target_path, target_size=1024)

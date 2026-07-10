@@ -12,7 +12,9 @@ from app.services.paths import (
     _is_admin_request,
     _runtime_user_temp_url,
     _save_to_runtime_user_temp,
+    _training_corpus_dir_for_label,
 )
+from app.services.user_identity import resolve_user_storage_label
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
@@ -26,7 +28,6 @@ STORAGE_DIR = Path(__file__).resolve().parent / "storage"
 # 存储根目录
 STORAGE_DIR = Path(__file__).resolve().parent / "storage"
 DETECTION_DIR = STORAGE_DIR / "detection"
-TRAINING_CORPUS_DIR = STORAGE_DIR / "training" / "corpus"
 
 
 def _sanitize_email(email: str) -> str:
@@ -83,6 +84,8 @@ async def api_detection_upload(
     from app.services.auth_utils import _get_request_user_id
     request_user_id = _get_request_user_id(authorization)
     is_admin = _is_admin_request(authorization)
+    if request_user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
 
     content = await file.read()
     if not content:
@@ -103,7 +106,13 @@ async def api_detection_upload(
 
     # 普通用户：只写入临时目录，返回临时 URL，后续由清理任务回收
     save_name = f"{fid}{ext}"
-    temp_path = _save_to_runtime_user_temp(content, request_user_id, save_name)
+    storage_label = await resolve_user_storage_label(request_user_id)
+    temp_path = _save_to_runtime_user_temp(
+        content,
+        request_user_id,
+        save_name,
+        storage_label=storage_label,
+    )
     return JSONResponse({
         "ok": True,
         "path": str(temp_path),
@@ -144,8 +153,11 @@ async def api_training_upload(
     if not _is_admin_request(authorization):
         return JSONResponse({"ok": True, "skipped": "non_admin_no_server_storage"})
 
+    request_user_id = _get_request_user_id(authorization)
+    if request_user_id is None:
+        raise HTTPException(status_code=401, detail="璇峰厛鐧诲綍")
     email = await _get_user_email(authorization)
-    user_folder = _sanitize_email(email)
+    storage_label = await resolve_user_storage_label(request_user_id)
 
     # 按评分分档
     if rating >= 3:
@@ -157,7 +169,7 @@ async def api_training_upload(
     export_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     sample_id = sample_uuid or uuid.uuid4().hex
 
-    sample_dir = TRAINING_CORPUS_DIR / tier / user_folder / export_time / sample_id
+    sample_dir = _training_corpus_dir_for_label(storage_label) / sample_id
     sample_dir.mkdir(parents=True, exist_ok=True)
 
     # 保存 target
@@ -182,7 +194,12 @@ async def api_training_upload(
     # 保存 meta
     meta_data["archived_at"] = datetime.now().isoformat()
     meta_data["user_email"] = email
+    meta_data["user_id"] = request_user_id
+    meta_data["user_folder"] = storage_label
+    meta_data["storage_label"] = storage_label
     meta_data["rating"] = rating
+    meta_data["tier"] = tier
+    meta_data["export_time"] = export_time
     with open(sample_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(meta_data, f, ensure_ascii=False, indent=2)
 

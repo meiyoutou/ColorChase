@@ -21,6 +21,7 @@ from app.services.paths import (
     _runtime_temp_lut_dir,
     _safe_session_dir,
 )
+from app.services.user_identity import resolve_user_storage_label
 from app.services.task_logging import create_task_log_writer
 from config import BASE_DIR
 from core.io.image_utils import _cv2_imread, _img_to_base64
@@ -117,10 +118,13 @@ async def api_apply_style(
     authorization: Optional[str] = Header(None),
 ):
     request_user_id = _get_request_user_id(authorization)
+    if request_user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
     request_user_role = _get_request_user_role(authorization)
     request_started_at = time.time()
     if request_user_id is not None:
         record_user_usage(request_user_id)
+    request_storage_label = await resolve_user_storage_label(request_user_id)
     record_model_call("neural_preset")
     resolved_style_dir = _resolve_style_dir(style_id)
     if not resolved_style_dir:
@@ -131,7 +135,11 @@ async def api_apply_style(
         raise HTTPException(status_code=404, detail="风格 LUT 不存在")
 
     style_lut = await asyncio.to_thread(np.load, style_lut_path)
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标图片不存在或路径无效")
     target_path = str(resolved_target_path)

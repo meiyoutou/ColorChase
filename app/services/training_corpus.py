@@ -12,9 +12,11 @@ from sqlalchemy import select
 
 from app.routes.projects import _read_project_snapshot
 from app.settings import USER_SPACE_TZ
+from app.services.user_identity import resolve_user_storage_label
+from app.services.paths import _project_assets_root_for_label
 from config import BASE_DIR, get_project_assets_dir, get_training_corpus_dir
 from database import async_session
-from models import Asset, Project, User
+from models import Asset, Project
 
 TRAINING_CORPUS_DIR = get_training_corpus_dir()
 TRAINING_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
@@ -59,8 +61,19 @@ def _safe_training_name(value: str, fallback: str) -> str:
     return cleaned or fallback
 
 
-def _resolve_training_source_path(resolve_local_file_path, value: str) -> Optional[Path]:
-    resolved = resolve_local_file_path(value)
+def _resolve_training_source_path(
+    resolve_local_file_path,
+    value: str,
+    request_user_id: Optional[int] = None,
+    request_storage_label: Optional[str] = None,
+    allow_workspace_path: bool = False,
+) -> Optional[Path]:
+    resolved = resolve_local_file_path(
+        value,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+        allow_workspace_path=allow_workspace_path,
+    )
     if not resolved or not resolved.is_file():
         return None
     return resolved
@@ -70,12 +83,7 @@ async def _training_user_folder_name(user_id: Optional[int]) -> str:
     if not user_id:
         return "anonymous"
     try:
-        async with async_session() as session:
-            result = await session.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if user:
-                identity = user.email or user.phone or f"user_{user.id}"
-                return _safe_training_name(identity, f"user_{user.id}")
+        return await resolve_user_storage_label(user_id)
     except Exception as exc:
         print(f"[Training Corpus] resolve user failed: {exc}")
     return f"user_{user_id}"
@@ -90,8 +98,20 @@ def _copy_training_file(src: Optional[Path], dst_dir: Path, label: str) -> str:
     return str(dst)
 
 
-def _training_sample_id_for_target(resolve_local_file_path, target_path: str) -> str:
-    src = _resolve_training_source_path(resolve_local_file_path, target_path)
+def _training_sample_id_for_target(
+    resolve_local_file_path,
+    target_path: str,
+    request_user_id: Optional[int] = None,
+    request_storage_label: Optional[str] = None,
+    allow_workspace_path: bool = False,
+) -> str:
+    src = _resolve_training_source_path(
+        resolve_local_file_path,
+        target_path,
+        request_user_id,
+        request_storage_label=request_storage_label,
+        allow_workspace_path=allow_workspace_path,
+    )
     if src:
         try:
             stat = src.stat()
@@ -122,12 +142,24 @@ async def _ensure_training_target_sample(
     project_id: int = 0,
     asset_name: str = "",
 ) -> Optional[Path]:
-    target_src = _resolve_training_source_path(resolve_local_file_path, target_path)
+    user_folder = await _training_user_folder_name(user_id)
+    target_src = _resolve_training_source_path(
+        resolve_local_file_path,
+        target_path,
+        user_id,
+        request_storage_label=user_folder,
+        allow_workspace_path=True,
+    )
     if not target_src:
         return None
 
-    user_folder = await _training_user_folder_name(user_id)
-    sample_id = _training_sample_id_for_target(resolve_local_file_path, target_path)
+    sample_id = _training_sample_id_for_target(
+        resolve_local_file_path,
+        target_path,
+        user_id,
+        request_storage_label=user_folder,
+        allow_workspace_path=True,
+    )
     sample_dir = TRAINING_CORPUS_DIR / user_folder / sample_id
     sample_dir.mkdir(parents=True, exist_ok=True)
 
@@ -190,7 +222,16 @@ def _find_sample_file(sample_dir: Path, label: str) -> str:
     return ""
 
 
-def _find_project_snapshot_image(resolve_local_file_path, snapshot: dict, item: dict, *, kind: str, project_id: int) -> str:
+def _find_project_snapshot_image(
+    resolve_local_file_path,
+    snapshot: dict,
+    item: dict,
+    *,
+    kind: str,
+    project_id: int,
+    request_user_id: Optional[int] = None,
+    request_storage_label: Optional[str] = None,
+) -> str:
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     item = item if isinstance(item, dict) else {}
     candidates = []
@@ -212,26 +253,48 @@ def _find_project_snapshot_image(resolve_local_file_path, snapshot: dict, item: 
             snapshot.get("resultDataUrl"),
         ])
     for candidate in candidates:
-        resolved = _resolve_training_source_path(resolve_local_file_path, candidate)
+        resolved = _resolve_training_source_path(
+            resolve_local_file_path,
+            candidate,
+            request_user_id,
+            request_storage_label=request_storage_label,
+            allow_workspace_path=True,
+        )
         if resolved and resolved.is_file():
             return str(resolved)
     if project_id > 0:
-        project_root = get_project_assets_dir() / str(project_id)
-        for folder in ("reference", "result", "exports"):
-            folder_dir = project_root / folder
-            if not folder_dir.exists():
+        project_roots = []
+        if request_storage_label:
+            try:
+                project_roots.append(_project_assets_root_for_label(request_storage_label) / str(project_id))
+            except ValueError:
+                pass
+        project_roots.append(get_project_assets_dir() / str(project_id))
+        seen_roots = set()
+        for project_root in project_roots:
+            try:
+                resolved_root = project_root.resolve()
+            except Exception:
                 continue
-            for file_path in sorted(folder_dir.rglob("*")):
-                if not file_path.is_file():
+            root_key = str(resolved_root)
+            if root_key in seen_roots:
+                continue
+            seen_roots.add(root_key)
+            for folder in ("reference", "result", "exports"):
+                folder_dir = resolved_root / folder
+                if not folder_dir.exists():
                     continue
-                if kind == "reference" and "reference" in file_path.parent.name.lower():
-                    return str(file_path)
-                if kind == "result" and (
-                    "result" in file_path.parent.name.lower()
-                    or "export" in file_path.parent.name.lower()
-                    or "result" in file_path.name.lower()
-                ):
-                    return str(file_path)
+                for file_path in sorted(folder_dir.rglob("*")):
+                    if not file_path.is_file():
+                        continue
+                    if kind == "reference" and "reference" in file_path.parent.name.lower():
+                        return str(file_path)
+                    if kind == "result" and (
+                        "result" in file_path.parent.name.lower()
+                        or "export" in file_path.parent.name.lower()
+                        or "result" in file_path.name.lower()
+                    ):
+                        return str(file_path)
     return ""
 
 
@@ -280,6 +343,8 @@ async def _backfill_training_sample(resolve_local_file_path, sample_dir: Path) -
 
     files_meta = meta.get("files") if isinstance(meta.get("files"), dict) else {}
     project_id = int(meta.get("project_id") or 0)
+    request_user_id = int(meta.get("user_id") or 0) or None
+    request_storage_label = await _training_user_folder_name(request_user_id)
     snapshot = await _load_project_snapshot(project_id)
     snapshot_item = _find_snapshot_target_item(snapshot, meta)
 
@@ -291,7 +356,18 @@ async def _backfill_training_sample(resolve_local_file_path, sample_dir: Path) -
     if not reference_copy:
         reference_src = _resolve_training_source_path(
             resolve_local_file_path,
-            _find_project_snapshot_image(resolve_local_file_path, snapshot, snapshot_item, kind="reference", project_id=project_id),
+            _find_project_snapshot_image(
+                resolve_local_file_path,
+                snapshot,
+                snapshot_item,
+                kind="reference",
+                project_id=project_id,
+                request_user_id=request_user_id,
+                request_storage_label=request_storage_label,
+            ),
+            request_user_id,
+            request_storage_label=request_storage_label,
+            allow_workspace_path=True,
         )
         if reference_src:
             reference_copy = _copy_training_file(reference_src, sample_dir, "reference")
@@ -300,7 +376,18 @@ async def _backfill_training_sample(resolve_local_file_path, sample_dir: Path) -
     if not result_copy:
         result_src = _resolve_training_source_path(
             resolve_local_file_path,
-            _find_project_snapshot_image(resolve_local_file_path, snapshot, snapshot_item, kind="result", project_id=project_id),
+            _find_project_snapshot_image(
+                resolve_local_file_path,
+                snapshot,
+                snapshot_item,
+                kind="result",
+                project_id=project_id,
+                request_user_id=request_user_id,
+                request_storage_label=request_storage_label,
+            ),
+            request_user_id,
+            request_storage_label=request_storage_label,
+            allow_workspace_path=True,
         )
         if result_src:
             result_copy = _copy_training_file(result_src, sample_dir, "result")
@@ -394,12 +481,35 @@ async def _archive_training_sample(
     sample_id = meta.get("sample_id") or sample_dir.name
     user_folder = meta.get("user_folder") or sample_dir.parent.name
 
-    target_src = _resolve_training_source_path(resolve_local_file_path, target_path)
-    reference_src = _resolve_training_source_path(resolve_local_file_path, reference_path)
+    target_src = _resolve_training_source_path(
+        resolve_local_file_path,
+        target_path,
+        user_id,
+        request_storage_label=user_folder,
+        allow_workspace_path=True,
+    )
+    reference_src = _resolve_training_source_path(
+        resolve_local_file_path,
+        reference_path,
+        user_id,
+        request_storage_label=user_folder,
+        allow_workspace_path=True,
+    )
     if not reference_src:
         reference_src = _resolve_training_source_path(
             resolve_local_file_path,
-            _find_project_snapshot_image(resolve_local_file_path, meta, {}, kind="reference", project_id=project_id),
+            _find_project_snapshot_image(
+                resolve_local_file_path,
+                meta,
+                {},
+                kind="reference",
+                project_id=project_id,
+                request_user_id=user_id,
+                request_storage_label=user_folder,
+            ),
+            user_id,
+            request_storage_label=user_folder,
+            allow_workspace_path=True,
         )
     files_meta = meta.get("files") if isinstance(meta.get("files"), dict) else {}
     target_copy = files_meta.get("target") or ""

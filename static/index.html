@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -40,6 +40,14 @@
                 <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
                     <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
+                </svg>
+            </button>
+            <button id="nav-storage-notice-btn" class="top-icon-btn" type="button" title="存储提醒" style="display:none;">
+                <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"></path>
+                    <path d="M12 6v7"></path>
+                    <path d="M9 9h6"></path>
                 </svg>
             </button>
             <button id="nav-contact-btn" class="top-icon-btn" type="button" title="联系方式" style="display:none;">
@@ -180,7 +188,7 @@
                                         </div>
                                         <div class="training-summary-item">
                                             <span>数据目录</span>
-                                            <strong id="training-summary-dir">temp_train_data</strong>
+                                            <strong id="training-summary-dir">storage/training/corpus</strong>
                                         </div>
                                         <div class="training-summary-item">
                                             <span>验证集</span>
@@ -408,7 +416,7 @@
 
                                 <div class="training-data-path-panel">
                                     <span class="training-data-path-label">DIRECTORY</span>
-                                    <input id="training-image-dir" type="text" value="temp_train_data" aria-label="训练数据目录">
+                                    <input id="training-image-dir" type="text" value="storage/training/corpus" aria-label="训练数据目录">
                                 </div>
 
                                 <div class="training-upload-grid">
@@ -555,6 +563,14 @@
                     <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .9-.3 1.8-.9 2.5l-1.3 1.6c-.5.6-.1 1.5.7 1.5h11c.8 0 1.2-.9.7-1.5l-1.3-1.6c-.6-.7-.9-1.6-.9-2.5V8a4 4 0 0 0-4-4Z"></path>
                         <path d="M9.5 18a2.5 2.5 0 0 0 5 0"></path>
+                    </svg>
+                </button>
+                <button id="workspace-storage-notice-btn" class="top-icon-btn" type="button" title="存储提醒">
+                    <svg class="top-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"></path>
+                        <path d="M12 6v7"></path>
+                        <path d="M9 9h6"></path>
                     </svg>
                 </button>
                 <button id="workspace-contact-btn" class="top-icon-btn" type="button" title="联系方式">
@@ -1559,24 +1575,10 @@
         </div>
         <div style="padding:24px;">
             <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #2ed573; padding-left:8px;">项目根目录</div>
-                <div class="storage-row"><span>项目文件</span><input type="text" id="sc-project-assets" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-project-assets">…</button></div>
+                <div id="admin-storage-row" class="storage-row"><span>项目文件</span><input type="text" id="sc-project-assets" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-project-assets">…</button></div>
                 <div class="storage-row"><span>本地授权</span><input type="text" id="sc-browser-project-root" class="auth-input" style="flex:1;font-size:12px;" readonly placeholder="支持的浏览器可选择本地文件夹"><button id="browser-project-root-btn" type="button" class="storage-pick-btn">…</button></div>
-                <div id="browser-project-root-status" style="color:#888;font-size:11px;line-height:1.6;margin-top:6px;">不选择时使用上方项目文件路径保存；Firefox/Safari 会自动使用后端保存。</div>
-            </div>
-            <!-- 图片追色 -->
-            <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #e94560; padding-left:8px;">📷 图片追色</div>
-                <div class="storage-row"><span>图片缓存</span><input type="text" id="sc-image-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-uploads">…</button></div>
-                <div class="storage-row"><span>LUT缓存</span><input type="text" id="sc-image-luts" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-luts">…</button></div>
-                <div class="storage-row"><span>调试截图</span><input type="text" id="sc-image-debug" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-image-debug">…</button></div>
-            </div>
-            <!-- 视频追色 -->
-            <div style="margin-bottom:20px;">
-                <div style="color:#e8e8f0; font-size:14px; margin-bottom:12px; border-left:3px solid #6ba4e0; padding-left:8px;">🎬 视频追色</div>
-                <div class="storage-row"><span>视频缓存</span><input type="text" id="sc-video-uploads" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-uploads">…</button></div>
-                <div class="storage-row"><span>视频结果</span><input type="text" id="sc-video-results" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-results">…</button></div>
-                <div class="storage-row"><span>帧缓存</span><input type="text" id="sc-video-frames" class="auth-input" style="flex:1;font-size:12px;"><button class="storage-pick-btn" data-target="sc-video-frames">…</button></div>
+                <div id="browser-project-root-status" style="color:#888;font-size:11px;line-height:1.6;margin-top:6px;">选择本地文件夹后，项目数据会同时保存到该目录；支持的浏览器为 Chrome / Edge。</div>
+                <div id="non-admin-storage-notice" style="display:none;color:#f5a623;font-size:12px;line-height:1.6;margin-top:10px;padding:8px 10px;background:rgba(245,166,35,0.1);border-radius:4px;">普通用户数据当前仅保存到临时目录，请通过“本地授权”选择本地保存位置；未选择时服务器 24h 后自动清理。</div>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <span style="color:#888; font-size:12px;">磁盘可用：<span id="storage-disk-space" style="color:#2ed573;">--</span></span>
@@ -1625,7 +1627,16 @@
         </div>
     </div>
 </div>
-
+<div id="storage-notice-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:99993; align-items:center; justify-content:center;">
+    <div style="background:#1a1a2e; padding:24px; border-radius:10px; width:460px; max-width:90%; border:1px solid #333; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+        <h3 id="storage-notice-title" style="color:#e8e8f0; margin:0 0 12px 0; font-size:17px;">存储提醒</h3>
+        <p id="storage-notice-body" style="color:#cfd3e1; font-size:13px; line-height:1.7; margin:0 0 18px 0;"></p>
+        <div id="storage-notice-actions" style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+            <button id="storage-notice-action-btn" type="button" style="background:#27ae60; color:#fff; border:none; padding:9px 18px; border-radius:6px; font-size:13px; cursor:pointer;"></button>
+            <button id="storage-notice-close-btn" type="button" style="background:transparent; color:#cfd3e1; border:1px solid #555; padding:9px 18px; border-radius:6px; font-size:13px; cursor:pointer;">知道了</button>
+        </div>
+    </div>
+</div>
 <div id="change-password-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.68); z-index:99992; align-items:center; justify-content:center;">
     <div style="background:#1a1a2e; padding:24px; border-radius:8px; width:440px; border:1px solid #444;">
         <h3 style="color:#e8e8f0; margin:0 0 10px 0; font-size:16px;">修改密码</h3>

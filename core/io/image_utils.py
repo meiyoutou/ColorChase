@@ -7,27 +7,44 @@ import cv2
 import numpy as np
 from fastapi import HTTPException, UploadFile
 
-from app.services.paths import _normalize_project_id, _runtime_upload_dir, _safe_project_bucket_dir
+from app.services.paths import (
+    _normalize_project_id,
+    _runtime_upload_dir,
+    _save_to_runtime_user_temp,
+    _safe_project_bucket_dir,
+)
 from core.io.loaders import load_image_bgr
 
 PREVIEW_MAX_SIZE = 1024
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".mp4", ".mov", ".avi"}
 
 
-def _save_upload(file: UploadFile, project_id: int = 0, bucket: str = "uploads") -> str:
+def _save_upload(
+    file: UploadFile,
+    project_id: int = 0,
+    bucket: str = "uploads",
+    user_id: int = None,
+    is_admin: bool = True,
+    storage_label: Optional[str] = None,
+) -> str:
+    """保存上传文件。管理员写入 project bucket 或上传目录；普通用户写入临时目录，不落盘。"""
     ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
     if ext.lower() not in ALLOWED_EXTS:
         raise HTTPException(status_code=400, detail="不支持的文件类型")
     filename = f"{uuid.uuid4().hex}{ext}"
-    if _normalize_project_id(project_id) > 0:
-        filepath = _safe_project_bucket_dir(project_id, bucket) / filename
-    else:
-        filepath = os.path.join(str(_runtime_upload_dir()), filename)
     content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail=f"上传文件为空: {file.filename or '未命名文件'}")
-    with open(filepath, "wb") as f:
-        f.write(content)
+    if is_admin and _normalize_project_id(project_id) > 0:
+        filepath = _safe_project_bucket_dir(project_id, bucket, storage_label=storage_label) / filename
+        with open(filepath, "wb") as f:
+            f.write(content)
+    elif is_admin:
+        filepath = os.path.join(str(_runtime_upload_dir()), filename)
+        with open(filepath, "wb") as f:
+            f.write(content)
+    else:
+        filepath = _save_to_runtime_user_temp(content, user_id, filename, storage_label=storage_label)
     return str(filepath)
 
 

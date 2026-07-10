@@ -364,6 +364,17 @@ body {
     border: 1px solid rgba(118, 134, 168, 0.2);
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.02);
+    margin-bottom: 10px;
+}
+.contact-info-line:last-of-type {
+    margin-bottom: 0;
+}
+.contact-info-line a {
+    display: block;
+    text-align: right;
+    color: #27ae60;
+    font-size: 14px;
+    word-break: break-all;
 }
 .portal-admin-editor {
     display: grid;
@@ -3043,6 +3054,12 @@ input[type="range"]::-webkit-slider-thumb {
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity .15s ease;
+}
+.user-space-model-status-head:hover {
+    opacity: .8;
 }
 .user-space-model-status-head strong {
     display: block;
@@ -3058,7 +3075,8 @@ input[type="range"]::-webkit-slider-thumb {
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
-.user-space-model-status-head em {
+.user-space-model-status-head em,
+.user-space-model-status-toggle {
     flex: 0 0 auto;
     padding: 6px 10px;
     border-radius: 999px;
@@ -3067,6 +3085,21 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 11px;
     font-style: normal;
     font-weight: 800;
+}
+.user-space-model-status-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+}
+.user-space-model-status-toggle svg {
+    transition: transform .2s ease;
+    width: 12px;
+    height: 12px;
+}
+html[data-theme="dark"] .user-space-model-status-toggle {
+    background: rgba(123, 134, 255, 0.12) !important;
+    color: #a6b0ff !important;
 }
 .user-space-model-status-list {
     display: grid;
@@ -5590,6 +5623,34 @@ html[data-theme="dark"] .training-control-note {
 html[data-theme="light"] .contact-info-line {
   background: #f8fafc;
   border-color: rgba(148, 163, 184, 0.2);
+}
+
+html[data-theme="light"] .contact-info-line a {
+  color: #16a34a;
+}
+
+html[data-theme="light"] #storage-notice-modal > div {
+  background: #ffffff !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.16) !important;
+}
+
+html[data-theme="light"] #storage-notice-title {
+  color: #111827 !important;
+}
+
+html[data-theme="light"] #storage-notice-body {
+  color: #475569 !important;
+}
+
+html[data-theme="light"] #storage-notice-action-btn {
+  background: #16a34a !important;
+  color: #ffffff !important;
+}
+
+html[data-theme="light"] #storage-notice-close-btn {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
 }
 
 html[data-theme="light"] .lightbox {

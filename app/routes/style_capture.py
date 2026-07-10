@@ -6,10 +6,15 @@ import tempfile
 import asyncio
 import numpy as np
 import cv2
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, UploadFile, File, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
+from app.services.auth_utils import _get_request_user_id, _get_request_user_role
+from app.services.paths import _runtime_user_temp_dir, _runtime_user_temp_url, _save_to_runtime_user_temp
+from app.services.user_identity import resolve_user_storage_label
 from config import STORAGE_STYLES_EXTRACTED_DIR
 
 router = APIRouter()
@@ -82,7 +87,15 @@ def _extract_camera_from_exif(filepath):
 async def api_capture_style(
     raw_file: UploadFile = File(...),
     camera_jpg: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
 ):
+    request_user_id = _get_request_user_id(authorization)
+    request_user_role = _get_request_user_role(authorization)
+    is_admin = request_user_role == "admin"
+    if request_user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    storage_label = await resolve_user_storage_label(request_user_id)
+
     ensure_upload_file_size(raw_file, 300 * 1024 * 1024, label="RAW 文件")
     ensure_upload_file_size(camera_jpg, 10 * 1024 * 1024, label="相机 JPG")
     raw_ext = os.path.splitext(raw_file.filename)[1].lower() if raw_file.filename else ""
@@ -141,8 +154,13 @@ async def api_capture_style(
 
     from core.style.style_schema import create_style_dict, save_style_dict, save_lut_as_npy, save_lut_as_cube
 
-    style_dir = os.path.join(STYLES_DIR, style_name)
-    os.makedirs(style_dir, exist_ok=True)
+    # 管理员：风格保存到服务器风格库；普通用户：保存到临时目录，由前端拉回本地
+    if is_admin:
+        style_dir = os.path.join(STYLES_DIR, style_name)
+        os.makedirs(style_dir, exist_ok=True)
+    else:
+        style_dir = str(_runtime_user_temp_dir(request_user_id, storage_label=storage_label) / style_name)
+        os.makedirs(style_dir, exist_ok=True)
 
     npy_path = await asyncio.to_thread(save_lut_as_npy, lut_3d, style_dir)
     cube_path = await asyncio.to_thread(save_lut_as_cube, lut_3d, style_dir)
@@ -167,10 +185,22 @@ async def api_capture_style(
     except Exception:
         pass
 
+    if is_admin:
+        return JSONResponse({
+            "success": True,
+            "style": style,
+            "npy_path": npy_path,
+            "cube_path": cube_path,
+            "ccs_path": ccs_path,
+        })
+
+    # 普通用户：把绝对路径转成临时 URL，方便前端拉回本地
+    rel_dir = os.path.basename(style_dir)
     return JSONResponse({
         "success": True,
         "style": style,
-        "npy_path": npy_path,
-        "cube_path": cube_path,
-        "ccs_path": ccs_path,
+        "npy_path": _runtime_user_temp_url(request_user_id, os.path.join(rel_dir, os.path.basename(npy_path)).replace("\\", "/")),
+        "cube_path": _runtime_user_temp_url(request_user_id, os.path.join(rel_dir, os.path.basename(cube_path)).replace("\\", "/")),
+        "ccs_path": _runtime_user_temp_url(request_user_id, os.path.join(rel_dir, os.path.basename(ccs_path)).replace("\\", "/")),
+        "thumbnail_path": _runtime_user_temp_url(request_user_id, os.path.join(rel_dir, "thumbnail.jpg").replace("\\", "/")),
     })

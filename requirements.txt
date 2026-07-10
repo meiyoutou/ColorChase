@@ -1,5 +1,7 @@
 fastapi
 uvicorn
+aiomysql
+cryptography
 python-multipart
 opencv-python
 opencv-contrib-python

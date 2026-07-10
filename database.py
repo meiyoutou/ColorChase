@@ -1,33 +1,50 @@
-"""数据库配置 - 支持 SQLite（开发）和 MySQL（生产）"""
-import os
-from pathlib import Path
+"""Database configuration.
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+ColorChase requires MySQL in every environment. Set
+COLORCHASE_DATABASE_URL explicitly; SQLite fallback is intentionally not
+supported.
+"""
+import os
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-BASE_DIR = Path(__file__).resolve().parent
 
-# 优先从环境变量读取 MySQL 配置
-MYSQL_HOST = os.environ.get("MYSQL_HOST", "127.0.0.1")
-MYSQL_PORT = os.environ.get("MYSQL_PORT", "3306")
-MYSQL_USER = os.environ.get("MYSQL_USER", "colorchase")
-MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "")
-MYSQL_DATABASE = os.environ.get("MYSQL_DATABASE", "colorchase")
+def _load_database_url() -> str:
+    url = os.environ.get("COLORCHASE_DATABASE_URL", "").strip()
+    if not url:
+        raise RuntimeError("必须配置 COLORCHASE_DATABASE_URL，本地和生产都必须使用 MySQL")
+    if not url.startswith(("mysql+aiomysql://", "mysql+pymysql://")):
+        raise RuntimeError("COLORCHASE_DATABASE_URL 必须使用 mysql+aiomysql:// 或 mysql+pymysql://")
+    return url
 
-# 如果设置了完整的数据库 URL，直接使用
-if "DATABASE_URL" in os.environ:
-    DATABASE_URL = os.environ["DATABASE_URL"]
-elif MYSQL_PASSWORD:
-    # 生产环境：使用 MySQL + aiomysql
-    DATABASE_URL = (
-        f"mysql+aiomysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
-    )
-else:
-    # 开发环境：回退到 SQLite
-    DATABASE_URL = f"sqlite+aiosqlite:///{(BASE_DIR / 'colorchase.db').as_posix()}"
 
-engine = create_async_engine(DATABASE_URL, echo=False)
-async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+DATABASE_URL = _load_database_url()
+
+engine = None
+_session_factory = None
+
+
+def get_engine():
+    global engine
+    if engine is None:
+        engine = create_async_engine(DATABASE_URL, echo=False)
+    return engine
+
+
+def _get_session_factory():
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(get_engine(), class_=AsyncSession, expire_on_commit=False)
+    return _session_factory
+
+
+class _LazyAsyncSession:
+    def __call__(self, *args, **kwargs):
+        return _get_session_factory()(*args, **kwargs)
+
+
+async_session = _LazyAsyncSession()
 Base = declarative_base()
 
 
@@ -37,5 +54,5 @@ async def get_db():
 
 
 async def init_db():
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

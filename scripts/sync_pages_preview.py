@@ -58,6 +58,8 @@ def sync_static_assets() -> None:
     copy_tree(STATIC_DIR / "css", DOCS_STATIC_DIR / "css")
     copy_tree(STATIC_DIR / "js", DOCS_STATIC_DIR / "js")
     copy_tree(STATIC_DIR / "assets", DOCS_STATIC_DIR / "assets")
+    if (STATIC_DIR / "download").exists():
+        copy_tree(STATIC_DIR / "download", DOCS_STATIC_DIR / "download")
 
     if mock_api:
         MOCK_API_PATH.write_text(mock_api.rstrip() + "\n", encoding="utf-8")

@@ -29,7 +29,6 @@ BLOCKED_PATTERNS = [
     re.compile(r"(^|/)temp_train_data/"),
     re.compile(r"(^|/)training_corpus/"),
     re.compile(r"(^|/)\.trae/"),
-    re.compile(r"(^|/)\.reasonux/"),
     re.compile(r"(^|/)\.reasonix/"),
 ]
 

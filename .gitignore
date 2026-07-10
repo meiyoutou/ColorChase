@@ -65,7 +65,6 @@ Thumbs.db
 
 # IDE caches (与 github_preflight.py 对齐)
 .trae/
-.reasonux/
 .reasonix/
 
 # Uvicorn 临时输出

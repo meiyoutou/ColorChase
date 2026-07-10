@@ -4,6 +4,8 @@ from app.routes.admin import _scan_training_corpus
 
 
 def test_scan_training_corpus_counts_files_once(tmp_path):
+    (tmp_path / "11").mkdir()
+    (tmp_path / "empty_user").mkdir()
     sample_dir = tmp_path / "user_1" / "sample_1"
     sample_dir.mkdir(parents=True)
 

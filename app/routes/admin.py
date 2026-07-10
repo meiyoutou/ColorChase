@@ -131,13 +131,14 @@ def _scan_training_corpus(path: Path):
         return stats
 
     user_dirs = [item for item in path.iterdir() if item.is_dir()]
-    stats["user_count"] = len(user_dirs)
     for user_dir in user_dirs:
-        for sample_dir in user_dir.iterdir():
-            if not sample_dir.is_dir():
-                continue
+        sample_dirs = [item for item in user_dir.iterdir() if item.is_dir()]
+        if sample_dirs:
+            stats["user_count"] += 1
+        for sample_dir in sample_dirs:
             stats["sample_count"] += 1
-            for item in sample_dir.iterdir():
+            # 递归扫描样本目录，避免嵌套子目录里的文件被漏掉
+            for item in sample_dir.rglob("*"):
                 if not item.is_file():
                     continue
                 lower_name = item.name.lower()

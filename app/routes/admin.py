@@ -20,6 +20,10 @@ from config import (
     MODEL_DIR,
     iter_known_model_dirs,
     iter_known_video_dirs,
+    iter_known_project_asset_dirs,
+    iter_known_user_asset_dirs,
+    iter_known_style_dirs,
+    iter_known_style_extracted_dirs,
     MODFLOWS_B0_CHECKPOINT,
     MODFLOWS_B6_CHECKPOINT,
     STORAGE_CACHE_DIR,
@@ -28,14 +32,13 @@ from config import (
     STORAGE_LOGS_DIR,
     STORAGE_DIR,
     STORAGE_PROJECTS_DIR,
-    iter_known_style_dirs,
+    STORAGE_TEMP_DIR,
     iter_known_training_dirs,
     WEIGHTS_DIR,
     STORAGE_TRAINING_CORPUS_DIR,
     STORAGE_USERS_DIR,
     STORAGE_VIDEO_FRAMES_DIR,
     STORAGE_VIDEO_UPLOADS_DIR,
-    STORAGE_VIDEOS_DIR,
     get_neuralpreset_weight_status,
 )
 from database import get_db
@@ -283,7 +286,12 @@ def _write_admin_snapshot(metrics, weekly_context=None):
 
 def _delta(current, previous):
     if previous is None:
-        return None
+        # 没有上周数据时，把当前值当作「从 0 增长上来」的增量，
+        # 避免整页都显示 +0 或「暂无上周」。
+        try:
+            return round(float(current), 1)
+        except (TypeError, ValueError):
+            return None
     try:
         return round(float(current) - float(previous), 1)
     except (TypeError, ValueError):
@@ -349,8 +357,9 @@ def _metric_card(key, label, value, unit, previous, spark_seed=None, series=None
     prev = previous.get(key) if isinstance(previous, dict) else None
     delta = _delta(value, prev)
     delta_text = _format_delta_text(delta, unit)
+    # 没有上周数据时不硬塞 +0，前端会显示「暂无上周」占位。
     if delta_text is None:
-        delta_text = f"+0{unit or ''}"
+        delta_text = ""
     return {
         "key": key,
         "label": label,
@@ -368,36 +377,56 @@ def _runtime_task_stats(runtime_stats):
     tasks = runtime_stats.get("tasks", {})
     exports = runtime_stats.get("exports", {})
     model_calls = runtime_stats.get("model_calls", {})
-    # 从 task_logs 按任务类型统计图片/视频任务的完成情况。
-    # task_logs 记录的是所有用户的任务结果日志（admin 视角天然聚合全用户），
-    # status=success/failed 标识任务成败。
+    # 所有 dashboard 任务指标统一从 task_logs 统计，和任务日志列表保持一致。
+    # 之前用独立计数器 + 磁盘扫描，导致配置应用、风格应用、图片导出等都被漏掉。
     task_logs = runtime_stats.get("task_logs", []) or []
+    completed_tasks = 0
+    failed_tasks = 0
     image_success = 0
     image_failed = 0
     video_success = 0
     video_failed = 0
+    export_events = 0
+    export_files = 0
+    export_size_bytes = 0
     for entry in task_logs:
         if not isinstance(entry, dict):
             continue
         ttype = str(entry.get("task_type") or "")
         status = str(entry.get("status") or "").lower()
+        # 任务控制（暂停/恢复/取消）不算真正任务，不计入完成/失败
+        if ttype != "任务控制":
+            if status == "ok":
+                completed_tasks += 1
+            elif status == "fail":
+                failed_tasks += 1
         if ttype == "图片追色":
-            if status == "success":
+            if status == "ok":
                 image_success += 1
-            elif status == "failed":
+            elif status == "fail":
                 image_failed += 1
         elif ttype == "视频追色":
-            if status == "success":
+            if status == "ok":
                 video_success += 1
-            elif status == "failed":
+            elif status == "fail":
                 video_failed += 1
+        elif ttype == "导出" and status == "ok":
+            export_events += 1
+            meta = entry.get("meta") or entry.get("meta_raw") or {}
+            export_files += int(meta.get("export_file_count") or 1)
+            try:
+                export_size_bytes += int(meta.get("export_size_bytes") or 0)
+            except (TypeError, ValueError):
+                pass
     image_total = image_success + image_failed
     video_total = video_success + video_failed
     return {
-        "completed_tasks": int(tasks.get("success", 0)),
-        "failed_tasks": int(tasks.get("failed", 0)),
+        "completed_tasks": completed_tasks,
+        "failed_tasks": failed_tasks,
         "active_tasks": int(progress_manager.active_task_count()),
-        "total_export_events": int(exports.get("count", 0)),
+        "total_export_events": export_events,
+        "total_export_files": export_files,
+        "export_size_mb": _mb(export_size_bytes),
         "model_calls_total": int(model_calls.get("total", 0)),
         "model_calls_breakdown": {
             "neural_preset": int(model_calls.get("neural_preset", 0)),
@@ -838,7 +867,8 @@ def _overview_to_metrics(data):
         "failed_tasks": data["task_stats"]["failed_tasks"],
         "exports": data["task_stats"]["total_export_files"],
         "export_events": data["task_stats"]["total_export_events"],
-        "export_mb": data["task_stats"]["export_size_mb"],
+        "export_mb": data["task_stats"]["export_storage_mb"],
+        "export_storage_file_count": data["task_stats"]["export_storage_file_count"],
         "task_total": data["task_stats"]["task_total"],
         "task_success": data["task_stats"]["task_success"],
         "task_completion_rate": data["task_stats"]["task_completion_rate"],
@@ -881,25 +911,33 @@ async def _collect_overview(db: AsyncSession):
     train_stats = _scan_paths_unique(training_dirs)
     legacy_training_stats = _scan_paths_unique(training_dirs)
     training_corpus_stats = _scan_training_corpus(TRAINING_CORPUS_ROOT)
-    export_stats = _scan_paths_unique(
-        list(iter_known_video_dirs()),
-        extensions={
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".tif",
-            ".tiff",
-            ".webp",
-            ".mp4",
-            ".mov",
-            ".avi",
-            ".mkv",
-        },
-    )
+    # 导出存储 = 管理员永久目录 + 普通用户临时目录的当前实际占用
+    export_storage_paths = [
+        *iter_known_project_asset_dirs(),
+        *iter_known_user_asset_dirs(),
+        *iter_known_video_dirs(),
+        STORAGE_IMAGE_UPLOADS_DIR,
+        STORAGE_VIDEO_UPLOADS_DIR,
+        STORAGE_TEMP_DIR / "user_uploads",
+    ]
+    export_storage_stats = _scan_paths_unique(export_storage_paths)
     upload_stats = _scan_dir(STORAGE_IMAGE_UPLOADS_DIR)
     style_stats = _scan_paths_unique(list(iter_known_style_dirs()))
     asset_storage_stats = _scan_dir(STORAGE_USERS_DIR)
-    storage_stats = _scan_paths_unique([STORAGE_DIR])
+    # 存储使用统计的是整个项目所占用的存储，不只是 storage/ 目录。
+    # 这里把所有已知的项目数据目录都扫进来（会自动去重）。
+    project_storage_paths = [
+        STORAGE_DIR,
+        *iter_known_model_dirs(),
+        *iter_known_video_dirs(),
+        *iter_known_training_dirs(),
+        *iter_known_project_asset_dirs(),
+        *iter_known_user_asset_dirs(),
+        *iter_known_style_dirs(),
+        *iter_known_style_extracted_dirs(),
+        *_hf_model_cache_roots(),
+    ]
+    storage_stats = _scan_paths_unique(project_storage_paths)
     runtime_stats = load_runtime_stats()
     monthly_usage = get_monthly_user_usage(runtime_stats)
     monthly_power_users = sum(1 for count in monthly_usage.values() if count > 100)
@@ -1026,9 +1064,11 @@ async def _collect_overview(db: AsyncSession):
             "video_task_failed": runtime_task_stats["video_task_failed"],
             "video_task_total": runtime_task_stats["video_task_total"],
             "video_task_completion_rate": video_task_completion_rate,
-            "total_export_files": export_stats["file_count"],
+            "total_export_files": runtime_task_stats["total_export_files"],
             "total_export_events": runtime_task_stats["total_export_events"],
-            "export_size_mb": _mb(export_stats["size_bytes"]),
+            "export_size_mb": runtime_task_stats["export_size_mb"],
+            "export_storage_file_count": export_storage_stats["file_count"],
+            "export_storage_mb": _mb(export_storage_stats["size_bytes"]),
             "model_calls_total": runtime_task_stats["model_calls_total"],
             "model_calls_breakdown": runtime_task_stats["model_calls_breakdown"],
             "daily": daily_stats,
@@ -1211,46 +1251,8 @@ async def admin_dashboard(
             "color": "#4658f5",
         },
         {
-            "label": "训练数据",
-            "value": f"{current['training_files']} 张 / {current['training_mb']:.1f} MB",
-            "delta": _delta(
-                current["training_files"],
-                previous.get("training_files") if "training_files" in previous else None,
-            ),
-            "delta_text": _format_delta_text(
-                _delta(
-                    current["training_files"],
-                    previous.get("training_files")
-                    if "training_files" in previous
-                    else None,
-                ),
-                " 张",
-            ),
-            "color": "#26b86f",
-        },
-        {
-            "label": "训练样本副本",
-            "value": f"{current['training_corpus_samples']} 组 / {current['training_corpus_mb']:.1f} MB",
-            "delta": _delta(
-                current["training_corpus_samples"],
-                previous.get("training_corpus_samples")
-                if "training_corpus_samples" in previous
-                else None,
-            ),
-            "delta_text": _format_delta_text(
-                _delta(
-                    current["training_corpus_samples"],
-                    previous.get("training_corpus_samples")
-                    if "training_corpus_samples" in previous
-                    else None,
-                ),
-                " 组",
-            ),
-            "color": "#18a999",
-        },
-        {
             "label": "导出存储",
-            "value": f"{current['exports']} 个 / {current['export_mb']:.1f} MB",
+            "value": f"{current['export_storage_file_count']} 个 / {current['export_mb']:.1f} MB",
             "delta": _delta(
                 current["export_mb"],
                 previous.get("export_mb") if "export_mb" in previous else None,

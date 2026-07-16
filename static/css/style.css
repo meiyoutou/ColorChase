@@ -1319,6 +1319,7 @@ input[type="range"]::-webkit-slider-thumb {
 @media (max-width: 1024px) {
     .left-sidebar { width: 180px; min-width: 180px; max-width: 180px; }
     .right-sidebar { width: 300px; min-width: 300px; max-width: 300px; }
+    .training-upload-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
     .main-layout { flex-direction: column; }
@@ -6766,12 +6767,15 @@ html[data-theme="light"] .training-stage-card select {
 
   .training-config-grid,
   .training-data-path-panel,
-  .training-upload-grid,
   .training-params-grid,
   .training-control-actions,
   .training-summary-grid,
   .training-param-summary-grid,
   .training-status-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .training-upload-grid {
     grid-template-columns: 1fr;
   }
 
@@ -7028,19 +7032,19 @@ html[data-theme="dark"] #training-stage {
 
 .training-upload-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin-top: 14px;
 }
 
 .training-upload-card {
-  min-height: 128px;
+  min-height: 108px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 24px 20px;
+  gap: 12px;
+  padding: 20px 14px;
   border: 1px dashed rgba(255, 255, 255, 0.16);
   border-radius: 18px;
   background:
@@ -7079,9 +7083,9 @@ html[data-theme="dark"] #training-stage {
 }
 
 .training-upload-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7110,9 +7114,19 @@ html[data-theme="dark"] #training-stage {
   box-shadow: 0 0 22px rgba(52, 211, 153, 0.42);
 }
 
+.training-upload-card--server .training-upload-icon {
+  color: #fbbf24;
+}
+
+.training-upload-card--server:hover .training-upload-icon {
+  background: #fbbf24;
+  color: #09090b;
+  box-shadow: 0 0 22px rgba(251, 191, 36, 0.42);
+}
+
 .training-upload-icon svg {
-  width: 23px;
-  height: 23px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -7122,23 +7136,25 @@ html[data-theme="dark"] #training-stage {
 
 .training-upload-copy {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   justify-items: center;
 }
 
 .training-upload-copy strong {
   color: #f4f4f5;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.2;
   font-weight: 900;
 }
 
 .training-upload-copy small {
   color: #a1a1aa;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.3;
   font-weight: 700;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .training-form-stack {
@@ -7358,6 +7374,180 @@ html[data-theme="light"] .training-upload-copy strong {
   color: #17131f;
 }
 
-html[data-theme="light"] .training-upload-copy small {
-  color: #777083;
+html[data-theme="light"] .training-upload-copy small { color: #777083; }
+
+/* ===== 训练样本库弹窗（左右分栏） ===== */
+.ts-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; overflow: auto; }
+.ts-modal {
+    display: flex; flex-direction: column;
+    width: 92vw; max-width: 1400px; height: 88vh;
+    margin: 40px auto; background: var(--bg-card); border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5); overflow: hidden;
+}
+.ts-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.ts-modal-header h3 { margin: 0; font-size: 18px; color: var(--text-primary); font-weight: 600; }
+.ts-modal-header small { display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
+.ts-modal-close { background: none; border: none; color: var(--text-secondary); font-size: 24px; cursor: pointer; line-height: 1; }
+.ts-modal-close:hover { color: var(--text-primary); }
+
+.ts-toolbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 12px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    font-size: 13px; color: var(--text-secondary);
+}
+.ts-toolbar-label { display: inline-flex; align-items: center; gap: 8px; }
+.ts-toolbar-select {
+    background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px; outline: none;
+}
+.ts-toolbar-select:focus { border-color: var(--accent); }
+.ts-toolbar-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ts-toolbar-right { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
+.ts-icon-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 16px; line-height: 1;
+}
+.ts-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.ts-body { display: flex; flex: 1; overflow: hidden; }
+.ts-left { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ts-right {
+    width: 360px; flex-shrink: 0; border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 16px 20px; background: rgba(0,0,0,0.12);
+}
+
+.ts-table-wrap { flex: 1; overflow: auto; padding: 0 24px; }
+.ts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ts-table thead th {
+    position: sticky; top: 0; background: var(--bg-card);
+    padding: 10px 8px; text-align: left; color: var(--text-secondary);
+    font-weight: 500; border-bottom: 1px solid var(--border-light); white-space: nowrap;
+}
+.ts-table thead th.sortable { cursor: pointer; user-select: none; }
+.ts-table thead th.sortable:hover { color: var(--text-primary); }
+.ts-table tbody td { padding: 10px 8px; border-bottom: 1px solid var(--border); color: var(--text-primary); vertical-align: middle; }
+.ts-table tbody tr:hover { background: var(--bg-hover); cursor: pointer; }
+.ts-table tbody tr.selected { background: rgba(233, 69, 96, 0.08); }
+
+.ts-col-check { width: 32px; text-align: center; }
+.ts-col-id { min-width: 180px; }
+.ts-col-user { width: 120px; }
+.ts-col-algo { width: 110px; }
+.ts-col-rating, .ts-col-files { width: 80px; text-align: center; }
+.ts-col-time { width: 140px; }
+.ts-col-action { width: 110px; text-align: center; }
+
+.ts-id-cell { display: inline-flex; align-items: center; gap: 8px; }
+.ts-thumb {
+    width: 40px; height: 40px; object-fit: cover; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0;
+}
+.ts-id-text { font-size: 12px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ts-copy-btn {
+    background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 0;
+}
+.ts-copy-btn:hover { color: var(--accent); }
+
+.ts-algo-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: rgba(52, 152, 219, 0.15); color: #5dade2; font-size: 12px;
+}
+.ts-rating-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; padding: 2px 7px; border-radius: 10px; font-size: 12px; font-weight: 600;
+}
+.ts-rating-0 { background: rgba(231, 76, 60, 0.18); color: #e74c3c; }
+.ts-rating-low { background: rgba(230, 126, 34, 0.18); color: #e67e22; }
+.ts-rating-mid { background: rgba(52, 152, 219, 0.18); color: #5dade2; }
+.ts-rating-high { background: rgba(241, 196, 15, 0.18); color: #f1c40f; }
+.ts-rating-best { background: rgba(46, 213, 115, 0.18); color: #2ed573; }
+
+.ts-empty-cell { padding: 24px; text-align: center; color: var(--text-muted); }
+
+.ts-view-btn {
+    background: transparent; border: 1px solid var(--border-light); color: var(--text-secondary);
+    border-radius: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+}
+.ts-view-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.ts-pagination {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 24px; border-top: 1px solid var(--border); flex-shrink: 0;
+    font-size: 12px; color: var(--text-secondary);
+}
+.ts-page-btns { display: inline-flex; align-items: center; gap: 4px; }
+.ts-page-btns button {
+    background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 4px; min-width: 28px; height: 26px; cursor: pointer; font-size: 12px;
+}
+.ts-page-btns button:hover { border-color: var(--accent); color: var(--accent); }
+.ts-page-btns button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ts-page-btns button:disabled { opacity: 0.4; cursor: not-allowed; }
+.ts-goto input {
+    width: 44px; background: var(--bg-input); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px; padding: 3px 4px; text-align: center; font-size: 12px;
+}
+
+.ts-section-title {
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    margin: 14px 0 10px;
+}
+.ts-section-title:first-child { margin-top: 0; }
+.ts-preview-wrap {
+    position: relative; border-radius: var(--radius-sm); overflow: hidden;
+    border: 1px solid var(--border); background: var(--bg-secondary); min-height: 140px;
+}
+.ts-preview-img {
+    display: block; width: 100%; max-height: 220px; object-fit: contain; background: var(--bg-secondary);
+    position: relative; z-index: 1;
+}
+.ts-preview-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 12px; z-index: 0;
+}
+.ts-info-list { display: grid; gap: 8px; }
+.ts-info-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.ts-info-row span { color: var(--text-secondary); }
+.ts-info-row b { color: var(--text-primary); font-weight: 500; }
+
+.ts-btn-primary {
+    width: 100%; margin-top: 14px; padding: 10px 0;
+    background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s ease;
+}
+.ts-btn-primary:hover { background: var(--accent-hover); }
+.ts-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ts-full-detail {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.ts-full-detail pre {
+    background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px;
+    padding: 10px; border-radius: var(--radius-sm); max-height: 180px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+}
+.ts-full-detail ul { list-style: none; padding: 0; margin: 0; }
+.ts-full-detail li {
+    font-size: 11px; color: var(--text-secondary); padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.ts-footer {
+    display: flex; justify-content: flex-end; gap: 12px;
+    padding: 14px 24px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.ts-footer .ts-btn-primary { width: auto; padding: 10px 24px; margin: 0; }
+
+/* 浅色模式下把 select / 页码输入框背景从深色改成浅色 */
+html[data-theme="light"] .ts-toolbar-select,
+html[data-theme="light"] .ts-goto input {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
 }

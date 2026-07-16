@@ -2729,7 +2729,9 @@ function initTrainingWorkbench() {
         uploadFolderInput.addEventListener('change', function() {
             if (!uploadFolderInput.files || !uploadFolderInput.files.length) return;
             // 1. 按扩展名过滤出图片（与后端 TRAINING_IMAGE_EXTENSIONS 对齐，双重校验）
-            var imgExts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
+            // 2026-07-15 调试：用户反馈 RAW 格式图片显示不出来缩略图，前端文件夹上传时也得放行 RAW。
+            // 这个列表与后端 TRAINING_IMAGE_EXTENSIONS 保持一致，双重校验。
+            var imgExts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff', '.raw', '.dng', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.rw2', '.rwl', '.orf', '.pef', '.ptx', '.3fr', '.fff', '.iiq', '.cap', '.eip', '.mef', '.mos', '.mfw', '.x3f', '.dcr', '.kdc', '.k25', '.dcs', '.srw', '.erf', '.cs1', '.cs4', '.cs16', '.sti', '.bay', '.pxn', '.braw', '.r3d', '.ari', '.cine', '.lfp', '.rwz'];
             var imgFiles = [];
             Array.prototype.forEach.call(uploadFolderInput.files, function(file) {
                 var name = (file.name || '').toLowerCase();

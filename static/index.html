@@ -445,7 +445,19 @@
                                             <small>Recursive subfolder import</small>
                                         </span>
                                     </button>
-                                    <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
+                                    <button id="training-import-server-btn" class="training-upload-card training-upload-card--server" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M4 4h16v16H4z"></path>
+                                                <path d="M4 8h16M8 4v16"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>从服务器训练库导入</strong>
+                                            <small>浏览已保存的训练样本</small>
+                                        </span>
+                                    </button>
+                                    <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp,.raw,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.rw2,.rwl,.orf,.pef,.ptx,.3fr,.fff,.iiq,.cap,.eip,.mef,.mos,.mfw,.x3f,.dcr,.kdc,.k25,.dcs,.srw,.erf,.cs1,.cs4,.cs16,.sti,.bay,.pxn,.braw,.r3d,.ari,.cine,.lfp,.rwz" hidden>
                                     <input id="training-upload-folder-input" type="file" webkitdirectory directory multiple hidden>
                                 </div>
                             </section>
@@ -1761,6 +1773,111 @@
 </div>
 
 <div class="toast" id="toast" hidden></div>
+
+<!-- 训练样本库浏览模态框 -->
+<div id="training-samples-modal" class="modal-overlay ts-modal-overlay">
+  <div class="ts-modal">
+    <div class="ts-modal-header">
+      <div>
+        <h3>服务器训练样本库</h3>
+        <small>管理和浏览服务器训练样本，支持筛选、查看详情与追色结果回溯</small>
+      </div>
+      <button id="samples-modal-close" type="button" class="ts-modal-close">×</button>
+    </div>
+
+    <div class="ts-toolbar">
+      <label class="ts-toolbar-label">按用户筛选
+        <select id="samples-user-filter" class="ts-toolbar-select">
+          <option value="">全部用户</option>
+        </select>
+      </label>
+      <label class="ts-toolbar-check">
+        <input type="checkbox" id="samples-select-all"> 全选当前页
+      </label>
+      <div class="ts-toolbar-right">
+        <span id="samples-count">共 0 个样本</span>
+        <button id="samples-refresh-btn" type="button" class="ts-icon-btn" title="刷新">⟳</button>
+      </div>
+    </div>
+
+    <div class="ts-body">
+      <!-- 左侧：列表 + 分页 -->
+      <div class="ts-left">
+        <div class="ts-table-wrap">
+          <table class="ts-table">
+            <thead>
+              <tr>
+                <th class="ts-col-check"></th>
+                <th class="ts-col-id">样本 ID</th>
+                <th class="ts-col-user">用户</th>
+                <th class="ts-col-algo">算法</th>
+                <th class="ts-col-rating sortable" data-sort="rating">评分 ↕</th>
+                <th class="ts-col-files sortable" data-sort="file_count">文件数 ↕</th>
+                <th class="ts-col-time sortable" data-sort="uploaded_at">上传时间 ↕</th>
+                <th class="ts-col-action">操作</th>
+              </tr>
+            </thead>
+            <tbody id="samples-tbody"></tbody>
+          </table>
+        </div>
+        <div class="ts-pagination">
+          <span>共 <b id="pagination-total">0</b> 条</span>
+          <select id="samples-page-size" class="ts-toolbar-select">
+            <option value="10">10条/页</option>
+            <option value="20">20条/页</option>
+            <option value="50">50条/页</option>
+          </select>
+          <div id="samples-page-btns" class="ts-page-btns"></div>
+          <span class="ts-goto">前往 <input id="samples-goto" type="number" min="1" value="1"> 页</span>
+        </div>
+      </div>
+
+      <!-- 右侧：详情 -->
+      <div class="ts-right">
+        <div class="ts-section-title">原图</div>
+        <div class="ts-preview-wrap">
+          <img id="preview-target" class="ts-preview-img" alt="原图">
+          <div id="preview-target-empty" class="ts-preview-empty">请选择样本</div>
+        </div>
+
+        <div class="ts-section-title">样本参考</div>
+        <div class="ts-preview-wrap">
+          <img id="preview-reference" class="ts-preview-img" alt="样本参考">
+          <div id="preview-reference-empty" class="ts-preview-empty">无样本参考</div>
+        </div>
+
+        <div class="ts-section-title">追色结果</div>
+        <div class="ts-preview-wrap">
+          <img id="preview-result" class="ts-preview-img" alt="追色结果">
+          <div id="preview-result-empty" class="ts-preview-empty">无追色结果</div>
+        </div>
+
+        <div class="ts-section-title">样本信息</div>
+        <div class="ts-info-list">
+          <div class="ts-info-row"><span>样本 ID</span><b id="info-uuid">-</b></div>
+          <div class="ts-info-row"><span>用户</span><b id="info-user">-</b></div>
+          <div class="ts-info-row"><span>算法</span><b id="info-algo">-</b></div>
+          <div class="ts-info-row"><span>评分</span><b id="info-rating">-</b></div>
+          <div class="ts-info-row"><span>文件数</span><b id="info-files">-</b></div>
+          <div class="ts-info-row"><span>上传时间</span><b id="info-time">-</b></div>
+        </div>
+
+        <button id="samples-view-full-btn" type="button" class="ts-btn-primary">查看全部详情</button>
+
+        <div id="sample-full-detail" class="ts-full-detail" style="display:none;">
+          <div class="ts-section-title">参数 (meta.json)</div>
+          <pre id="preview-meta-json"></pre>
+          <div class="ts-section-title">目录文件</div>
+          <ul id="preview-file-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="ts-footer">
+      <button id="samples-import-btn" type="button" class="ts-btn-primary">导入选中样本并准备训练</button>
+    </div>
+  </div>
+</div>
 
 <script src="/static/js/app.js?v=20260630-bugfix9"></script>
 <script src="/static/js/router.js?v=20260630-bugfix9"></script>

@@ -162,18 +162,35 @@ async function uploadTrainingSample(img, resultBlob, fmt) {
                 return false;
             }
         }
-        // 2. 拿参考图（如果有 data:URL 形式的）
+        // 2. 拿参考图：data:URL 或者服务器路径都可以
         var refUrl = img.refDataUrl || (typeof _refDataUrl !== 'undefined' ? _refDataUrl : '');
+        var refServerUrl = img.refSavedPath || '';
         if (refUrl && refUrl.indexOf('data:') === 0) {
             try {
                 var refResp = await fetch(refUrl);
                 var refBlob = await refResp.blob();
                 fd.append('reference', refBlob, 'reference.jpg');
             } catch (e) { /* 参考图拿不到不影响主流程 */ }
+        } else if (refServerUrl) {
+            try {
+                var refResp2 = await fetch(refServerUrl, { headers: authHeaders });
+                var refBlob2 = await refResp2.blob();
+                fd.append('reference', refBlob2, 'reference.jpg');
+            } catch (e) { /* 参考图拿不到不影响主流程 */ }
         }
-        // 3. result 是前端渲染出来的
+        // 3. 如果有 LUT 文件（服务器路径），也下载下来一起入库
+        var lutUrl = (img.params && img.params.lutPath) || img.lutPath || img.cubePath || '';
+        if (lutUrl && typeof lutUrl === 'string') {
+            try {
+                var lutResp = await fetch(lutUrl, { headers: authHeaders });
+                var lutBlob = await lutResp.blob();
+                var lutName = lutUrl.split('/').pop().split('?')[0] || 'lut.cube';
+                fd.append('lut', lutBlob, lutName);
+            } catch (e) { /* LUT 拿不到不影响主流程 */ }
+        }
+        // 4. result 是前端渲染出来的
         fd.append('result', resultBlob, 'result.' + fmt);
-        // 4. meta + sample_uuid + is_video
+        // 5. meta + sample_uuid + is_video
         fd.append('meta', JSON.stringify(meta));
         fd.append('sample_uuid', 's' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
         fd.append('is_video', isVideo);
@@ -207,6 +224,587 @@ async function uploadDetectionCopy(fileBlob, fileUuid, token) {
         return false;
     }
 }
+
+// ==================== 训练样本库浏览模态框 ====================
+
+var _allSamples = [];            // 缓存全部样本
+var _selectedSamples = [];       // 选中的 {uuid, label}，用于导入
+var _currentPreviewUuid = null;  // 当前右侧正在预览的样本
+var _pageState = {
+    page: 1,
+    pageSize: 10,
+    filterUser: '',
+    sortKey: 'uploaded_at',
+    sortDesc: true
+};
+
+function openTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+    _selectedSamples = [];
+    _currentPreviewUuid = null;
+    _pageState.page = 1;
+    _pageState.filterUser = '';
+    _pageState.sortKey = 'uploaded_at';
+    _pageState.sortDesc = true;
+
+    var filterEl = document.getElementById('samples-user-filter');
+    if (filterEl) filterEl.value = '';
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) pageSize.value = '10';
+
+    clearRightPanel();
+    loadTrainingSamples();
+}
+
+function closeTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function clearRightPanel() {
+    ['preview-target', 'preview-reference', 'preview-result'].forEach(function(id) {
+        var img = document.getElementById(id);
+        if (img) { img.src = ''; img.style.display = 'none'; }
+    });
+    ['preview-target-empty', 'preview-reference-empty', 'preview-result-empty'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'flex';
+    });
+    var fields = {
+        'info-uuid': '-', 'info-user': '-', 'info-algo': '-',
+        'info-rating': '-', 'info-files': '-', 'info-time': '-'
+    };
+    Object.keys(fields).forEach(function(k) {
+        var el = document.getElementById(k);
+        if (el) el.textContent = fields[k];
+    });
+    var metaJson = document.getElementById('preview-meta-json');
+    if (metaJson) metaJson.textContent = '';
+    var fileList = document.getElementById('preview-file-list');
+    if (fileList) fileList.innerHTML = '';
+    var detail = document.getElementById('sample-full-detail');
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    document.querySelectorAll('#samples-tbody tr.selected').forEach(function(tr) {
+        tr.classList.remove('selected');
+    });
+}
+
+async function loadTrainingSamples() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var filterEl = document.getElementById('samples-user-filter');
+    if (!tbody || !countEl) return;
+
+    tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">加载中...</td></tr>';
+    countEl.textContent = '加载中...';
+
+    try {
+        var resp = await fetch('/api/train/samples', { headers: getAuthHeaders() });
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + resp.status + '</td></tr>';
+            return;
+        }
+        var data = await resp.json();
+        _allSamples = data.samples || [];
+
+        // 填充用户筛选下拉
+        if (filterEl) {
+            var currentVal = filterEl.value || '';
+            filterEl.innerHTML = '<option value="">全部用户</option>';
+            (data.users || []).forEach(function(u) {
+                var opt = document.createElement('option');
+                opt.value = u;
+                opt.textContent = u;
+                filterEl.appendChild(opt);
+            });
+            filterEl.value = currentVal;
+        }
+
+        renderSamplesTable();
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function getFilteredSamples() {
+    var list = _allSamples.slice();
+    if (_pageState.filterUser) {
+        list = list.filter(function(s) { return s.storage_label === _pageState.filterUser; });
+    }
+    return list;
+}
+
+function sortSamples(list) {
+    var key = _pageState.sortKey;
+    var desc = _pageState.sortDesc;
+    list.sort(function(a, b) {
+        var av = a[key], bv = b[key];
+        if (key === 'uploaded_at') {
+            av = av || '';
+            bv = bv || '';
+        } else {
+            av = Number(av) || 0;
+            bv = Number(bv) || 0;
+        }
+        if (av < bv) return desc ? 1 : -1;
+        if (av > bv) return desc ? -1 : 1;
+        return 0;
+    });
+    return list;
+}
+
+function renderSamplesTable() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var totalEl = document.getElementById('pagination-total');
+    if (!tbody) return;
+
+    var filtered = sortSamples(getFilteredSamples());
+    var total = filtered.length;
+    var pageSize = _pageState.pageSize;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (_pageState.page > totalPages) _pageState.page = totalPages;
+    if (_pageState.page < 1) _pageState.page = 1;
+    var start = (_pageState.page - 1) * pageSize;
+    var pageItems = filtered.slice(start, start + pageSize);
+
+    if (countEl) countEl.textContent = '共 ' + total + ' 个样本';
+    if (totalEl) totalEl.textContent = total;
+    tbody.innerHTML = '';
+
+    updateSortHeaders();
+    renderPagination(totalPages);
+
+    if (total === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">暂无训练样本</td></tr>';
+        return;
+    }
+
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+
+    pageItems.forEach(function(s) {
+        var tr = document.createElement('tr');
+        tr.dataset.uuid = s.sample_uuid;
+        if (s.sample_uuid === _currentPreviewUuid) tr.classList.add('selected');
+
+        // 复选框
+        var checkTd = document.createElement('td');
+        checkTd.className = 'ts-col-check';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.uuid = s.sample_uuid;
+        cb.dataset.label = s.storage_label;
+        cb.checked = _selectedSamples.some(function(x) { return x.uuid === s.sample_uuid; });
+        cb.addEventListener('change', function(e) {
+            e.stopPropagation();
+            toggleSelection(s.sample_uuid, s.storage_label, this.checked);
+        });
+        checkTd.appendChild(cb);
+        tr.appendChild(checkTd);
+
+        // 样本 ID + 缩略图
+        var tdId = document.createElement('td');
+        tdId.className = 'ts-col-id';
+        var idCell = document.createElement('div');
+        idCell.className = 'ts-id-cell';
+        var thumb = document.createElement('img');
+        thumb.className = 'ts-thumb';
+        thumb.alt = '';
+        idCell.appendChild(thumb);
+        var idText = document.createElement('span');
+        idText.className = 'ts-id-text';
+        idText.textContent = s.sample_uuid.substring(0, 18) + '...';
+        idText.title = s.sample_uuid;
+        idCell.appendChild(idText);
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'ts-copy-btn';
+        copyBtn.innerHTML = '&#10697;';
+        copyBtn.title = '复制样本 ID';
+        copyBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            copyToClipboard(s.sample_uuid);
+        });
+        idCell.appendChild(copyBtn);
+        tdId.appendChild(idCell);
+        tr.appendChild(tdId);
+        loadThumbnail(thumb, s.sample_uuid, s.storage_label);
+
+        // 用户
+        var tdUser = document.createElement('td');
+        tdUser.className = 'ts-col-user';
+        tdUser.textContent = s.storage_label || '-';
+        tr.appendChild(tdUser);
+
+        // 算法
+        var tdAlgo = document.createElement('td');
+        tdAlgo.className = 'ts-col-algo';
+        if (s.algorithm) {
+            var tag = document.createElement('span');
+            tag.className = 'ts-algo-tag';
+            tag.textContent = s.algorithm;
+            tdAlgo.appendChild(tag);
+        } else {
+            tdAlgo.textContent = '-';
+        }
+        tr.appendChild(tdAlgo);
+
+        // 评分
+        var tdRating = document.createElement('td');
+        tdRating.className = 'ts-col-rating';
+        var badge = document.createElement('span');
+        badge.className = 'ts-rating-badge ' + ratingClass(s.rating);
+        badge.textContent = s.rating || 0;
+        tdRating.appendChild(badge);
+        tr.appendChild(tdRating);
+
+        // 文件数
+        var tdFiles = document.createElement('td');
+        tdFiles.className = 'ts-col-files';
+        tdFiles.textContent = s.file_count || 0;
+        tr.appendChild(tdFiles);
+
+        // 上传时间
+        var tdTime = document.createElement('td');
+        tdTime.className = 'ts-col-time';
+        tdTime.textContent = formatTime(s.uploaded_at);
+        tr.appendChild(tdTime);
+
+        // 操作
+        var tdAction = document.createElement('td');
+        tdAction.className = 'ts-col-action';
+        var viewBtn = document.createElement('button');
+        viewBtn.className = 'ts-view-btn';
+        viewBtn.textContent = '查看详情';
+        viewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+        tdAction.appendChild(viewBtn);
+        tr.appendChild(tdAction);
+
+        tr.addEventListener('click', function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || (e.target.closest && e.target.closest('button'))) return;
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+
+        tbody.appendChild(tr);
+    });
+
+    // 默认预览当前页第一条
+    if (!_currentPreviewUuid && pageItems.length > 0) {
+        previewTrainingSample(pageItems[0].sample_uuid, pageItems[0].storage_label);
+    }
+}
+
+function toggleSelection(uuid, label, checked) {
+    if (checked) {
+        if (!_selectedSamples.some(function(x) { return x.uuid === uuid; })) {
+            _selectedSamples.push({uuid: uuid, label: label});
+        }
+    } else {
+        _selectedSamples = _selectedSamples.filter(function(x) { return x.uuid !== uuid; });
+    }
+}
+
+function updateSortHeaders() {
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        var key = th.dataset.sort;
+        var base = th.textContent.replace(/[↑↓↕]/g, '').trim();
+        if (key === _pageState.sortKey) {
+            th.textContent = base + ' ' + (_pageState.sortDesc ? '↓' : '↑');
+        } else {
+            th.textContent = base + ' ↕';
+        }
+    });
+}
+
+function renderPagination(totalPages) {
+    var wrap = document.getElementById('samples-page-btns');
+    var goto = document.getElementById('samples-goto');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    var current = _pageState.page;
+
+    function addBtn(text, page, disabled, active) {
+        var btn = document.createElement('button');
+        btn.textContent = text;
+        btn.disabled = !!disabled;
+        if (active) btn.classList.add('active');
+        if (!disabled && !active) {
+            btn.addEventListener('click', function() {
+                _pageState.page = page;
+                renderSamplesTable();
+            });
+        }
+        wrap.appendChild(btn);
+    }
+
+    addBtn('<', current - 1, current <= 1, false);
+    for (var p = 1; p <= totalPages; p++) {
+        addBtn(String(p), p, false, p === current);
+    }
+    addBtn('>', current + 1, current >= totalPages, false);
+
+    if (goto) goto.value = current;
+}
+
+function formatTime(iso) {
+    if (!iso) return '-';
+    return String(iso).substring(0, 19).replace('T', ' ');
+}
+
+function ratingClass(r) {
+    r = Number(r) || 0;
+    if (r === 0) return 'ts-rating-0';
+    if (r <= 2) return 'ts-rating-low';
+    if (r === 3) return 'ts-rating-mid';
+    if (r === 4) return 'ts-rating-high';
+    return 'ts-rating-best';
+}
+
+function loadThumbnail(imgEl, uuid, label) {
+    fetch('/api/train/samples/' + encodeURIComponent(uuid) + '/thumbnail?storage_label=' + encodeURIComponent(label) + '&size=48', {
+        headers: getAuthHeaders()
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.thumbnail) imgEl.src = data.thumbnail;
+    })
+    .catch(function(err) {
+        console.error('缩略图加载失败', uuid, err);
+    });
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() { showToast('已复制'); }).catch(function() {});
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('已复制');
+    }
+}
+
+async function previewTrainingSample(sampleUuid, storageLabel) {
+    _currentPreviewUuid = sampleUuid;
+    document.querySelectorAll('#samples-tbody tr').forEach(function(tr) {
+        tr.classList.toggle('selected', tr.dataset.uuid === sampleUuid);
+    });
+
+    var targetImg = document.getElementById('preview-target');
+    var targetEmpty = document.getElementById('preview-target-empty');
+    var referenceImg = document.getElementById('preview-reference');
+    var referenceEmpty = document.getElementById('preview-reference-empty');
+    var resultImg = document.getElementById('preview-result');
+    var resultEmpty = document.getElementById('preview-result-empty');
+    var metaJson = document.getElementById('preview-meta-json');
+    var fileList = document.getElementById('preview-file-list');
+    var detail = document.getElementById('sample-full-detail');
+
+    if (targetImg) { targetImg.src = ''; targetImg.style.display = 'none'; }
+    if (targetEmpty) targetEmpty.style.display = 'flex';
+    if (referenceImg) { referenceImg.src = ''; referenceImg.style.display = 'none'; }
+    if (referenceEmpty) referenceEmpty.style.display = 'flex';
+    if (resultImg) { resultImg.src = ''; resultImg.style.display = 'none'; }
+    if (resultEmpty) resultEmpty.style.display = 'flex';
+    if (metaJson) metaJson.textContent = '';
+    if (fileList) fileList.innerHTML = '';
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    var s = _allSamples.filter(function(x) { return x.sample_uuid === sampleUuid; })[0];
+    if (s) {
+        setInfo('info-uuid', s.sample_uuid);
+        setInfo('info-user', s.storage_label || '-');
+        setInfo('info-algo', s.algorithm || '-');
+        setInfo('info-rating', (s.rating || 0) + '');
+        setInfo('info-files', (s.file_count || 0) + '');
+        setInfo('info-time', formatTime(s.uploaded_at));
+    }
+
+    try {
+        var resp = await fetch('/api/train/samples/' + encodeURIComponent(sampleUuid) + '/preview?storage_label=' + encodeURIComponent(storageLabel), {
+            headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+            if (metaJson) metaJson.textContent = '加载失败: ' + resp.status;
+            return;
+        }
+        var data = await resp.json();
+
+        if (data.images && data.images.target && targetImg) {
+            targetImg.src = data.images.target;
+            targetImg.style.display = 'block';
+            if (targetEmpty) targetEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.reference && referenceImg) {
+            referenceImg.src = data.images.reference;
+            referenceImg.style.display = 'block';
+            if (referenceEmpty) referenceEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.result && resultImg) {
+            resultImg.src = data.images.result;
+            resultImg.style.display = 'block';
+            if (resultEmpty) resultEmpty.style.display = 'none';
+        }
+
+        if (metaJson) metaJson.textContent = JSON.stringify(data.meta || {}, null, 2);
+        if (fileList) {
+            fileList.innerHTML = '';
+            (data.file_list || []).forEach(function(fn) {
+                var li = document.createElement('li');
+                li.textContent = fn;
+                fileList.appendChild(li);
+            });
+        }
+    } catch (e) {
+        if (metaJson) metaJson.textContent = '加载失败: ' + e.message;
+    }
+}
+
+function setInfo(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+async function importSelectedSamples() {
+    if (_selectedSamples.length === 0) {
+        showToast('请先选择样本');
+        return;
+    }
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = '导入中...';
+    }
+
+    try {
+        var uuids = _selectedSamples.map(function(x) { return x.uuid; });
+        var labels = _selectedSamples.map(function(x) { return x.label; });
+
+        var resp = await fetch('/api/train/import', {
+            method: 'POST',
+            headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ sample_uuids: uuids, storage_labels: labels })
+        });
+
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showToast('导入失败: ' + (err.detail || resp.status));
+            return;
+        }
+
+        var data = await resp.json();
+        showToast('已导入 ' + data.imported_count + ' 个样本，共 ' + data.training_file_count + ' 张图片');
+
+        var dirInput = document.getElementById('training-image-dir');
+        if (dirInput && data.active_dir) dirInput.value = data.active_dir;
+        if (typeof refreshTrainingDataStats === 'function') refreshTrainingDataStats();
+
+        closeTrainingSamplesModal();
+    } catch (e) {
+        showToast('导入失败: ' + e.message);
+    } finally {
+        if (importBtn) {
+            importBtn.disabled = false;
+            importBtn.textContent = '导入选中样本并准备训练';
+        }
+    }
+}
+
+// 绑定事件
+document.addEventListener('DOMContentLoaded', function() {
+    var importBtn = document.getElementById('training-import-server-btn');
+    if (importBtn) importBtn.addEventListener('click', openTrainingSamplesModal);
+
+    var closeBtn = document.getElementById('samples-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeTrainingSamplesModal);
+
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            var checked = this.checked;
+            var boxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
+            boxes.forEach(function(cb) {
+                cb.checked = checked;
+                toggleSelection(cb.dataset.uuid, cb.dataset.label, checked);
+            });
+        });
+    }
+
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.addEventListener('change', function() {
+            _pageState.filterUser = this.value;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    }
+
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.addEventListener('change', function() {
+            _pageState.pageSize = parseInt(this.value, 10) || 10;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    }
+
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.addEventListener('change', function() {
+            var p = parseInt(this.value, 10);
+            if (!p || p < 1) return;
+            _pageState.page = p;
+            renderSamplesTable();
+        });
+    }
+
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadTrainingSamples);
+
+    var doImportBtn = document.getElementById('samples-import-btn');
+    if (doImportBtn) doImportBtn.addEventListener('click', importSelectedSamples);
+
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.addEventListener('click', function() {
+            var detail = document.getElementById('sample-full-detail');
+            if (!detail) return;
+            var show = detail.style.display === 'none';
+            detail.style.display = show ? 'block' : 'none';
+            viewFullBtn.textContent = show ? '收起全部详情' : '查看全部详情';
+        });
+    }
+
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var key = this.dataset.sort;
+            if (_pageState.sortKey === key) {
+                _pageState.sortDesc = !_pageState.sortDesc;
+            } else {
+                _pageState.sortKey = key;
+                _pageState.sortDesc = true;
+            }
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    });
+});
 
 // 显示下载提示 + 数据泄露风险警告弹窗
 function showAgentDownloadPrompt() {
@@ -458,6 +1056,7 @@ let _mergedSessionId = null;
 let _profileSessionId = null;
 let _modelStatusCache = null;
 let _modelStatusPromise = null;
+let _modelStatusAuthFailed = false;
 let _originalImageData = null, _stylizedImageData = null;
 let _origCanvasDataUrl = null, _resultCanvasDataUrl = null;
 let _refDataUrl = null;
@@ -2216,11 +2815,23 @@ function updateAlgoInfo() {
 function fetchModelStatusCached(force) {
     if (force) {
         _modelStatusCache = null;
+        _modelStatusAuthFailed = false;
     }
     if (!force && _modelStatusCache) return Promise.resolve(_modelStatusCache);
     if (!force && _modelStatusPromise) return _modelStatusPromise;
-    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store' })
-        .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+    // 没登录或已经 401 过，就不要再发了，避免后台一直刷 401 日志
+    if (!localStorage.getItem('cc_token') || _modelStatusAuthFailed) {
+        _modelStatusCache = {};
+        return Promise.resolve(_modelStatusCache);
+    }
+    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store', headers: getAuthHeaders() })
+        .then(function(resp) {
+            if (resp.status === 401) {
+                _modelStatusAuthFailed = true;
+                return { ok: true, data: {} };
+            }
+            return resp.json().then(function(data) { return { ok: resp.ok, data: data }; });
+        })
         .then(function(result) {
             if (!result.ok) throw new Error((result.data && result.data.detail) || '模型状态读取失败');
             _modelStatusCache = result.data || {};

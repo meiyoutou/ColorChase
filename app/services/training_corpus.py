@@ -19,7 +19,16 @@ from database import async_session
 from models import Asset, Project
 
 TRAINING_CORPUS_DIR = get_training_corpus_dir()
-TRAINING_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+TRAINING_IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff",
+    # RAW 相机格式
+    ".raw", ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw",
+    ".arw", ".srf", ".sr2", ".raf", ".rw2", ".rwl",
+    ".orf", ".pef", ".ptx", ".3fr", ".fff", ".iiq", ".cap", ".eip",
+    ".mef", ".mos", ".mfw", ".x3f", ".dcr", ".kdc", ".k25", ".dcs",
+    ".srw", ".erf", ".cs1", ".cs4", ".cs16", ".sti",
+    ".bay", ".pxn", ".braw", ".r3d", ".ari", ".cine", ".lfp", ".rwz",
+}
 
 
 def resolve_training_dir(image_dir: str) -> Path:
@@ -29,7 +38,17 @@ def resolve_training_dir(image_dir: str) -> Path:
     candidate = Path(image_dir)
     if not candidate.is_absolute():
         candidate = BASE_DIR / image_dir
-    return candidate.resolve()
+    candidate = candidate.resolve()
+
+    # 路径穿越防护：训练数据目录必须在 BASE_DIR 内部，
+    # 防止管理员通过 image_dir 参数读取/写入服务器任意目录。
+    base_resolved = BASE_DIR.resolve()
+    storage_resolved = (base_resolved / "storage").resolve()
+    allowed_roots = {base_resolved, storage_resolved}
+    for allowed in allowed_roots:
+        if candidate == allowed or allowed in candidate.parents:
+            return candidate
+    raise HTTPException(status_code=400, detail="训练数据目录必须在项目 storage/ 目录下")
 
 
 def get_training_data_stats_payload(image_dir: str):

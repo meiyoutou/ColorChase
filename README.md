@@ -163,7 +163,7 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 |---|---|
 | `COLORCHASE_ENV` | `development` 或 `production` |
 | `COLORCHASE_SECRET_KEY` | JWT 密钥，必须设置 |
-| `COLORCHASE_ALLOWED_ORIGINS` | 生产 CORS 白名单 |
+| `COLORCHASE_ALLOWED_ORIGINS` | 追加 CORS origin，默认已包含生产站和 GitHub Pages |
 | `COLORCHASE_ALLOWED_HOSTS` | 生产 Host 白名单 |
 | `COLORCHASE_UPLOAD_MAX_BYTES` | 通用上传限制 |
 | `COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES` | 原图/训练图上传限制 |

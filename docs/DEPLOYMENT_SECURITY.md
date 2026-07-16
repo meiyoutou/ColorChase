@@ -37,7 +37,8 @@ git diff
 ```env
 COLORCHASE_ENV=production
 COLORCHASE_SECRET_KEY=replace-with-a-long-random-secret
-COLORCHASE_ALLOWED_ORIGINS=https://colorchase.meiyoutou.top,https://ColorChase.meiyoutou.top
+# 可选：追加默认白名单以外的前端 origin。默认已包含生产站和 GitHub Pages。
+COLORCHASE_ALLOWED_ORIGINS=
 ```
 
 生成密钥：

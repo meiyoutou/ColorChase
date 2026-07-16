@@ -15,8 +15,9 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 ```env
 COLORCHASE_ENV=production
 COLORCHASE_SECRET_KEY=replace-with-your-real-long-secret
-COLORCHASE_ALLOWED_ORIGINS=https://colorchase.meiyoutou.top,https://ColorChase.meiyoutou.top
-COLORCHASE_ALLOWED_HOSTS=colorchase.meiyoutou.top,ColorChase.meiyoutou.top
+# 可选：追加默认白名单以外的前端 origin。默认已包含生产站和 GitHub Pages。
+COLORCHASE_ALLOWED_ORIGINS=
+COLORCHASE_ALLOWED_HOSTS=colorchase.meiyoutou.top
 COLORCHASE_UPLOAD_MAX_BYTES=10485760
 COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES=314572800
 COLORCHASE_VIDEO_UPLOAD_MAX_BYTES=314572800

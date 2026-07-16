@@ -69,7 +69,11 @@ def _runtime_video_dir() -> Path:
     return get_video_dir()
 
 
-def _runtime_temp_lut_dir() -> Path:
+def _runtime_temp_lut_dir(storage_label: Optional[str] = None) -> Path:
+    if storage_label:
+        path = STORAGE_TEMP_DIR / "luts" / _normalize_storage_label(storage_label)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
     return get_temp_lut_dir()
 
 
@@ -371,10 +375,12 @@ def _resolve_local_file_path(
             return None
     route_roots = {
         "/assets/": get_user_assets_dir(),
-        "/temp_luts/": _runtime_temp_lut_dir(),
+        "/temp_luts/": None,
     }
     for prefix, root in route_roots.items():
         if route_path.startswith(prefix):
+            if root is None:
+                root = _runtime_temp_lut_dir(request_storage_label)
             relative = route_path[len(prefix):].strip("/")
             if not relative:
                 return None
@@ -409,14 +415,14 @@ def _resolve_local_file_path(
     return candidate if candidate.exists() else None
 
 
-def _safe_session_dir(session_id: str) -> Path:
+def _safe_session_dir(session_id: str, storage_label: Optional[str] = None) -> Path:
     r"""Validate session_id and return safe subdirectory under temp/luts.
     Rejects path traversal attempts (.., /, \) and non-conforming IDs.
     """
     if not re.match(r"^[A-Za-z0-9_-]{8,64}$", session_id):
         raise HTTPException(status_code=400, detail="无效的 session_id 格式")
 
-    safe_dir = _runtime_temp_lut_dir() / session_id
+    safe_dir = _runtime_temp_lut_dir(storage_label) / session_id
     safe_dir.mkdir(parents=True, exist_ok=True)
     return safe_dir
 
@@ -482,7 +488,6 @@ def _iter_runtime_user_temp_roots(user_id: int, storage_label: Optional[str] = N
     if storage_label:
         candidates.append(_runtime_user_temp_dir_for_label(storage_label))
     candidates.append(STORAGE_TEMP_DIR / "user_uploads" / f"user_{int(user_id)}")
-    candidates.append(_runtime_user_temp_dir(user_id))
     for root in candidates:
         try:
             resolved = root.resolve()

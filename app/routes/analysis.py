@@ -54,7 +54,7 @@ def create_analysis_router(
         target_path = str(resolved_target_path)
 
         cache_key = build_depth_cache_key(target_path, depth_choice["choice"])
-        depth_dir = runtime_depth_dir()
+        depth_dir = runtime_depth_dir(storage_label)
         depth_path = depth_dir / f"{cache_key}_depth.png"
         meta_path = depth_dir / f"{cache_key}_depth.json"
         cached = depth_path.exists()
@@ -195,7 +195,7 @@ def create_analysis_router(
             points = []
 
         cache_key = build_mask_cache_key(target_path, mode, points, mask_choice["choice"])
-        mask_dir = runtime_mask_dir()
+        mask_dir = runtime_mask_dir(storage_label)
         mask_path = mask_dir / f"{cache_key}_mask.png"
         meta_path = mask_dir / f"{cache_key}_mask.json"
         cached = mask_path.exists()

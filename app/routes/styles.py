@@ -145,12 +145,12 @@ async def api_apply_style(
     target_path = str(resolved_target_path)
 
     if session_id:
-        _safe_session_dir(session_id)
+        _safe_session_dir(session_id, storage_label=request_storage_label)
         new_session_id = session_id
     else:
         new_session_id = uuid.uuid4().hex
-        _safe_session_dir(new_session_id)
-    session_dir = os.path.join(str(_runtime_temp_lut_dir()), new_session_id)
+        _safe_session_dir(new_session_id, storage_label=request_storage_label)
+    session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), new_session_id)
 
     if session_id:
         ai_lut_path = os.path.join(session_dir, "lut_global.npy")

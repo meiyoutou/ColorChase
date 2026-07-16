@@ -1,12 +1,9 @@
-from pathlib import Path
-from typing import Optional
-
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from app.settings import IS_PRODUCTION
-from app.services.auth_utils import _get_request_user_id, _resolve_runtime_user_id_from_request
+from app.services.auth_utils import _resolve_runtime_user_id_from_request
 from app.services.paths import _safe_project_asset_file, _safe_runtime_file, _safe_runtime_user_temp_file
 from app.services.user_identity import resolve_user_storage_label
 from database import async_session
@@ -20,8 +17,12 @@ def create_files_router(
     router = APIRouter()
 
     @router.get("/temp_luts/{file_path:path}")
-    async def serve_temp_lut_preview(file_path: str):
-        target = _safe_runtime_file(runtime_temp_lut_dir(), file_path)
+    async def serve_temp_lut_preview(request: Request, file_path: str):
+        request_user_id = _resolve_runtime_user_id_from_request(request)
+        if request_user_id is None and IS_PRODUCTION:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        storage_label = await resolve_user_storage_label(request_user_id) if request_user_id else None
+        target = _safe_runtime_file(runtime_temp_lut_dir(storage_label), file_path)
         is_preview = (
             target.suffix.lower() in (".jpg", ".jpeg")
             and (
@@ -52,11 +53,11 @@ def create_files_router(
 
     @router.get("/api/project_assets/{project_id}/{file_path:path}")
     async def serve_project_asset(
+        request: Request,
         project_id: int,
         file_path: str,
-        authorization: Optional[str] = Header(None),
     ):
-        await ensure_project_access(project_id, _get_request_user_id(authorization))
+        await ensure_project_access(project_id, _resolve_runtime_user_id_from_request(request))
         async with async_session() as session:
             result = await session.execute(select(Project.owner_id).where(Project.id == project_id))
             owner_id = result.scalar_one_or_none()

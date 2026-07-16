@@ -2,10 +2,10 @@ from typing import Optional
 
 import asyncio
 import io
-import os
 import struct
 import uuid
 import zipfile
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -22,6 +22,15 @@ from core.io.lut_session import _load_lut_for_session
 from core.render.full_render import apply_lut
 
 router = APIRouter()
+
+
+def _save_lut_matrix(path: Path, lut_matrix: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        np.save(path, lut_matrix)
+    except FileNotFoundError:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, lut_matrix)
 
 
 def _create_minimal_dng(width=64, height=64):
@@ -120,13 +129,13 @@ async def api_merge_luts(
 
     if ai_session_id:
         try:
-            lut_ai = await asyncio.to_thread(_load_lut_for_session, ai_session_id)
+            lut_ai = await asyncio.to_thread(_load_lut_for_session, ai_session_id, request_storage_label)
         except FileNotFoundError:
             pass
 
     if profile_session_id:
         try:
-            lut_profile = await asyncio.to_thread(_load_lut_for_session, profile_session_id)
+            lut_profile = await asyncio.to_thread(_load_lut_for_session, profile_session_id, request_storage_label)
         except FileNotFoundError:
             pass
     elif profile_builtin:
@@ -151,8 +160,8 @@ async def api_merge_luts(
     lut_merged = merged_flat.reshape(size, size, size, 3)
 
     merged_id = uuid.uuid4().hex
-    merged_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_id}.npy")
-    await asyncio.to_thread(np.save, merged_path, lut_merged)
+    merged_path = _runtime_temp_lut_dir(request_storage_label) / f"{merged_id}.npy"
+    await asyncio.to_thread(_save_lut_matrix, merged_path, lut_merged)
 
     result_b64 = None
     resolved_target_path = _resolve_local_file_path(
@@ -172,6 +181,6 @@ async def api_merge_luts(
     return JSONResponse({
         "success": True,
         "merged_session_id": merged_id,
-        "merged_lut_path": merged_path,
+        "merged_lut_path": str(merged_path),
         "result_b64": result_b64,
     })

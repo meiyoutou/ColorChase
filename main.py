@@ -12,6 +12,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
+
+# 先加载 .env，确保 database.py 等读取环境变量的模块能拿到配置
+import auth
+
 import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, Depends
@@ -456,14 +460,14 @@ async def lifespan(_app: FastAPI):
 app.router.lifespan_context = lifespan
 
 
-def _runtime_mask_dir() -> Path:
-    path = _runtime_temp_lut_dir() / "masks"
+def _runtime_mask_dir(storage_label: Optional[str] = None) -> Path:
+    path = _runtime_temp_lut_dir(storage_label) / "masks"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _runtime_depth_dir() -> Path:
-    path = _runtime_temp_lut_dir() / "depth"
+def _runtime_depth_dir(storage_label: Optional[str] = None) -> Path:
+    path = _runtime_temp_lut_dir(storage_label) / "depth"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -479,6 +483,16 @@ def _write_session_depth_meta(session_dir: str, strength: float, source_path: st
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _save_lut_file(path: str | Path, lut_3d: np.ndarray) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        np.save(target, lut_3d)
+    except FileNotFoundError:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        np.save(target, lut_3d)
 
 
 def _apply_cached_depth_layers_if_any(target_img: np.ndarray, result_img: np.ndarray, session_dir: Optional[str]) -> np.ndarray:
@@ -978,7 +992,7 @@ async def api_apply_profile(
 
     session_dir = None
     if session_id:
-        session_dir = str(_safe_session_dir(session_id))
+        session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label))
 
     if profile_builtin:
         record_model_call("neural_preset")
@@ -992,7 +1006,7 @@ async def api_apply_profile(
         record_model_call("neural_preset")
         lut_ext = os.path.splitext(profile_file.filename)[1].lower()
         lut_bytes = await profile_file.read()
-        tmp_path = os.path.join(str(_runtime_temp_lut_dir()), f"profile_{uuid.uuid4().hex}{lut_ext}")
+        tmp_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"profile_{uuid.uuid4().hex}{lut_ext}")
         with open(tmp_path, "wb") as f:
             f.write(lut_bytes)
         from core.io.lut_parser import parse_lut_file
@@ -1007,12 +1021,12 @@ async def api_apply_profile(
 
     if not session_dir:
         profile_session_id = uuid.uuid4().hex
-        session_dir = str(_safe_session_dir(profile_session_id))
+        session_dir = str(_safe_session_dir(profile_session_id, storage_label=request_storage_label))
 
     lut_save_path = os.path.join(session_dir, "lut_global.npy")
     if os.path.exists(lut_save_path):
         os.remove(lut_save_path)
-    await asyncio.to_thread(np.save, lut_save_path, lut_3d)
+    await asyncio.to_thread(_save_lut_file, lut_save_path, lut_3d)
 
     result_b64 = await asyncio.to_thread(_img_to_base64, result_img, ".png")
     original_b64 = await asyncio.to_thread(_img_to_base64, target_img, ".png")
@@ -1520,7 +1534,7 @@ async def api_transfer(
             print(f"[SegFace] skin: {skin_pct:.1f}%, lip: {lip_mask.sum()/lip_mask.size*100:.1f}%, hair: {hair_mask.sum()/hair_mask.size*100:.1f}%")
             has_skin = skin_pct > 2.0
 
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
 
             def _save_mask(p, m):
@@ -1550,7 +1564,7 @@ async def api_transfer(
                 float(a_ref_full.mean()), float(b_ref_full.mean()),
                 float(ref_hsv[:, :, 2].mean()),
             ], dtype=np.float32)
-            await asyncio.to_thread(np.save,
+            await asyncio.to_thread(_save_lut_file,
                 os.path.join(session_dir, "ref_stats.npy"), ref_stats)
             print(f"[Ref Stats] a={ref_stats[0]:.1f} b={ref_stats[1]:.1f} V={ref_stats[2]:.0f}")
         except Exception as e:
@@ -1605,7 +1619,7 @@ async def api_transfer(
             result_rgb_lut = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             lut_3d = await asyncio.to_thread(extract_lut_from_pair,
                 target_rgb_lut, result_rgb_lut, 33)
-            await asyncio.to_thread(np.save,
+            await asyncio.to_thread(_save_lut_file,
                 os.path.join(session_dir, "lut_global.npy"), lut_3d)
             print("[LUT] extracted from final result (with skin/makeup/highlights)")
         except Exception as e:
@@ -1720,7 +1734,7 @@ async def api_transfer(
                     print(f"[DNCM] enhanced LUT extraction failed: {exc}")
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             if dncm_applied_depth_path:
                 await trace_to_thread(
@@ -1752,7 +1766,7 @@ async def api_transfer(
                     dncm_applied_mask_path,
                 )
             lut_path = os.path.join(session_dir, "lut_global.npy")
-            await asyncio.to_thread(np.save, lut_path, session_lut_3d)
+            await asyncio.to_thread(_save_lut_file, lut_path, session_lut_3d)
             # 风格预设只保存到服务器风格库，普通用户不生成服务器预设
             reusable_preset = None
             if is_admin:
@@ -1784,6 +1798,7 @@ async def api_transfer(
                     result_img,
                     ".png",
                     [cv2.IMWRITE_PNG_COMPRESSION, 3],
+                    storage_label=request_storage_label,
                 )
 
             await prog("done", 100, f"追色完成！耗时 {round(elapsed, 2)}s")
@@ -1837,7 +1852,7 @@ async def api_transfer(
             lut_3d = await asyncio.to_thread(_generate_builtin_profile, profile_builtin)
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
         else:
             await prog("parse_lut", 25, "解析 LUT 文件中...")
@@ -1847,7 +1862,7 @@ async def api_transfer(
             lut_bytes = await profile_file.read()
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
 
             import_lut_path = os.path.join(session_dir, f"imported_lut{lut_ext}")
@@ -1860,7 +1875,7 @@ async def api_transfer(
             except Exception as e:
                 raise_task_http_error(400, f"LUT 文件解析失败: {str(e)}")
 
-        await asyncio.to_thread(np.save, os.path.join(session_dir, "lut_global.npy"), lut_3d)
+        await asyncio.to_thread(_save_lut_file, os.path.join(session_dir, "lut_global.npy"), lut_3d)
 
         await prog("apply_lut", 50, "极速 LUT 渲染中...")
         await asyncio.sleep(0.01)
@@ -2036,7 +2051,7 @@ async def api_transfer(
 
     if applied_depth_path:
         try:
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             session_depth_path = os.path.join(session_dir, "depth_layers.png")
             await trace_to_thread("copy_depth_layers", shutil.copyfile, applied_depth_path, session_depth_path)
@@ -2052,7 +2067,7 @@ async def api_transfer(
 
     if applied_mask_path:
         try:
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             session_mask_path = os.path.join(session_dir, "subject_mask.png")
             await trace_to_thread("copy_subject_mask", shutil.copyfile, applied_mask_path, session_mask_path)
@@ -2077,16 +2092,16 @@ async def api_transfer(
             result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             trace_mark("lut_prepare_rgb_done")
             lut_3d = await trace_to_thread("extract_lut_ai_portrait", extract_lut_from_pair, target_rgb, result_rgb, 33)
-            lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-            await trace_to_thread("save_lut_ai_portrait", np.save, lut_path, lut_3d)
+            lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy")
+            await trace_to_thread("save_lut_ai_portrait", _save_lut_file, lut_path, lut_3d)
         else:
             trace_mark("lut_prepare_rgb_start")
             target_rgb = cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB)
             result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             trace_mark("lut_prepare_rgb_done")
             lut_3d = await trace_to_thread("extract_lut", extract_lut_from_pair, target_rgb, result_rgb, 33)
-            lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-            await trace_to_thread("save_lut", np.save, lut_path, lut_3d)
+            lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy")
+            await trace_to_thread("save_lut", _save_lut_file, lut_path, lut_3d)
     except Exception as e:
         trace_mark("lut_pipeline_error", error=type(e).__name__)
         print(f"[LUT] extract failed: {e}")
@@ -2124,11 +2139,11 @@ async def api_transfer(
                     storage_label=request_storage_label,
                 )
             else:
-                preview_path = os.path.join(str(_runtime_temp_lut_dir()), result_preview_name)
+                preview_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), result_preview_name)
                 cv2.imencode('.jpg', _display_preview(result_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(preview_path)
             trace_mark("preview_result_encode_done")
             trace_mark("preview_target_encode_start")
-            orig_preview_path = os.path.join(str(_runtime_temp_lut_dir()), orig_preview_name)
+            orig_preview_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), orig_preview_name)
             cv2.imencode('.jpg', _display_preview(target_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(orig_preview_path)
             trace_mark("preview_target_encode_done")
             result_preview_url = project_result_url or f"/temp_luts/{result_preview_name}?t={preview_token}"
@@ -3030,10 +3045,10 @@ async def api_download_full(
         raise HTTPException(status_code=400, detail="缺少 session_id，请先预览追色")
 
     has_merged = bool(merged_session_id)
-    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
+    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{merged_session_id}.npy") if has_merged else None
 
-    session_dir = str(_safe_session_dir(session_id)) if session_id else None
-    lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
+    session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label)) if session_id else None
+    lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)
         and os.path.exists(os.path.join(session_dir, "lut_global.npy"))
@@ -3278,9 +3293,9 @@ async def api_render_single(
     target_path = str(resolved_target_path)
 
     has_merged = bool(merged_session_id)
-    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
-    session_dir = str(_safe_session_dir(session_id)) if session_id else None
-    lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
+    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{merged_session_id}.npy") if has_merged else None
+    session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label)) if session_id else None
+    lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)
         and os.path.exists(os.path.join(session_dir, "lut_global.npy"))

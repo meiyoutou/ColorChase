@@ -167,10 +167,6 @@ def _path(key: str, user_id: Optional[int] = None) -> Path:
 def _resolve_user_email(user_id: int) -> Optional[str]:
     """兼容旧调用：路径配置层不再查询数据库。"""
     return None
-            # 优先用邮箱，邮箱为空时用手机号
-
-
-    """把邮箱转成安全的目录名，加上 user_ 前缀。"""
 
 
 def _resolve_user_label(user_id: int) -> str:

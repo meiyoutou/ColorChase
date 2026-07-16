@@ -445,6 +445,18 @@
                                             <small>Recursive subfolder import</small>
                                         </span>
                                     </button>
+                                    <button id="training-import-server-btn" class="training-upload-card training-upload-card--server" type="button">
+                                        <span class="training-upload-icon" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M4 4h16v16H4z"></path>
+                                                <path d="M4 8h16M8 4v16"></path>
+                                            </svg>
+                                        </span>
+                                        <span class="training-upload-copy">
+                                            <strong>从服务器训练库导入</strong>
+                                            <small>浏览已保存的训练样本</small>
+                                        </span>
+                                    </button>
                                     <input id="training-upload-input" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.tif,.tiff,.webp" hidden>
                                     <input id="training-upload-folder-input" type="file" webkitdirectory directory multiple hidden>
                                 </div>
@@ -1761,6 +1773,71 @@
 </div>
 
 <div class="toast" id="toast" hidden></div>
+
+<!-- 训练样本库浏览模态框 -->
+<div id="training-samples-modal" class="modal-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;overflow:auto;">
+  <div style="background:#1e1e2e;border-radius:12px;max-width:1100px;margin:40px auto;padding:0;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid #333;">
+      <h3 style="margin:0;font-size:18px;color:#e0e0e0;">服务器训练样本库</h3>
+      <button id="samples-modal-close" type="button" style="background:none;border:none;color:#888;font-size:24px;cursor:pointer;">×</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid #333;">
+      <label style="font-size:13px;color:#aaa;">按用户筛选:
+        <select id="samples-user-filter" style="background:#2a2a3e;color:#e0e0e0;border:1px solid #444;border-radius:4px;padding:4px 8px;margin-left:8px;">
+          <option value="">全部用户</option>
+        </select>
+      </label>
+      <label style="font-size:13px;color:#aaa;">
+        <input type="checkbox" id="samples-select-all"> 全选
+      </label>
+      <span id="samples-count" style="font-size:12px;color:#666;margin-left:auto;">0 个样本</span>
+    </div>
+    <div id="samples-table-wrap" style="max-height:350px;overflow:auto;padding:0 24px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead style="position:sticky;top:0;background:#1e1e2e;z-index:1;">
+          <tr style="border-bottom:1px solid #444;">
+            <th style="padding:8px;text-align:left;color:#888;"></th>
+            <th style="padding:8px;text-align:left;color:#888;">样本 ID</th>
+            <th style="padding:8px;text-align:left;color:#888;">用户</th>
+            <th style="padding:8px;text-align:left;color:#888;">算法</th>
+            <th style="padding:8px;text-align:center;color:#888;">评分</th>
+            <th style="padding:8px;text-align:center;color:#888;">文件数</th>
+            <th style="padding:8px;text-align:left;color:#888;">上传时间</th>
+            <th style="padding:8px;text-align:center;color:#888;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="samples-tbody"></tbody>
+      </table>
+    </div>
+    <div id="sample-preview-area" style="display:none;border-top:1px solid #333;padding:16px 24px;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        <div style="text-align:center;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">原图</div>
+          <img id="preview-target" style="max-width:200px;max-height:200px;border-radius:6px;border:1px solid #444;">
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">参考图</div>
+          <img id="preview-reference" style="max-width:200px;max-height:200px;border-radius:6px;border:1px solid #444;">
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">追色结果</div>
+          <img id="preview-result" style="max-width:200px;max-height:200px;border-radius:6px;border:1px solid #444;">
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-size:11px;color:#888;margin-bottom:4px;">参数 (meta.json)</div>
+        <pre id="preview-meta-json" style="font-size:11px;background:#15151e;padding:12px;border-radius:6px;max-height:180px;overflow:auto;color:#bbb;"></pre>
+      </div>
+      <div style="margin-top:8px;">
+        <div style="font-size:11px;color:#888;margin-bottom:4px;">目录文件</div>
+        <ul id="preview-file-list" style="font-size:11px;color:#aaa;list-style:none;padding:0;margin:0;"></ul>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:12px;padding:16px 24px;border-top:1px solid #333;">
+      <button id="samples-import-btn" type="button" style="background:#4a9eff;color:#fff;border:none;border-radius:6px;padding:8px 20px;cursor:pointer;font-size:14px;">导入选中样本并准备训练</button>
+    </div>
+  </div>
+</div>
 
 <script src="./static/js/mock-api.js?v=github-pages-preview"></script>
 <script src="./static/js/app.js?v=20260630-bugfix9"></script>

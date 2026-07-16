@@ -162,18 +162,35 @@ async function uploadTrainingSample(img, resultBlob, fmt) {
                 return false;
             }
         }
-        // 2. 拿参考图（如果有 data:URL 形式的）
+        // 2. 拿参考图：data:URL 或者服务器路径都可以
         var refUrl = img.refDataUrl || (typeof _refDataUrl !== 'undefined' ? _refDataUrl : '');
+        var refServerUrl = img.refSavedPath || '';
         if (refUrl && refUrl.indexOf('data:') === 0) {
             try {
                 var refResp = await fetch(refUrl);
                 var refBlob = await refResp.blob();
                 fd.append('reference', refBlob, 'reference.jpg');
             } catch (e) { /* 参考图拿不到不影响主流程 */ }
+        } else if (refServerUrl) {
+            try {
+                var refResp2 = await fetch(refServerUrl, { headers: authHeaders });
+                var refBlob2 = await refResp2.blob();
+                fd.append('reference', refBlob2, 'reference.jpg');
+            } catch (e) { /* 参考图拿不到不影响主流程 */ }
         }
-        // 3. result 是前端渲染出来的
+        // 3. 如果有 LUT 文件（服务器路径），也下载下来一起入库
+        var lutUrl = (img.params && img.params.lutPath) || img.lutPath || img.cubePath || '';
+        if (lutUrl && typeof lutUrl === 'string') {
+            try {
+                var lutResp = await fetch(lutUrl, { headers: authHeaders });
+                var lutBlob = await lutResp.blob();
+                var lutName = lutUrl.split('/').pop().split('?')[0] || 'lut.cube';
+                fd.append('lut', lutBlob, lutName);
+            } catch (e) { /* LUT 拿不到不影响主流程 */ }
+        }
+        // 4. result 是前端渲染出来的
         fd.append('result', resultBlob, 'result.' + fmt);
-        // 4. meta + sample_uuid + is_video
+        // 5. meta + sample_uuid + is_video
         fd.append('meta', JSON.stringify(meta));
         fd.append('sample_uuid', 's' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
         fd.append('is_video', isVideo);
@@ -207,6 +224,299 @@ async function uploadDetectionCopy(fileBlob, fileUuid, token) {
         return false;
     }
 }
+
+// ==================== 训练样本库浏览模态框 ====================
+
+var _allSamples = [];   // 缓存全部样本
+var _selectedSamples = []; // 选中的 {uuid, label}
+
+function openTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+    _selectedSamples = [];
+    loadTrainingSamples();
+}
+
+function closeTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (modal) modal.style.display = 'none';
+    var previewArea = document.getElementById('sample-preview-area');
+    if (previewArea) previewArea.style.display = 'none';
+}
+
+async function loadTrainingSamples() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var filterEl = document.getElementById('samples-user-filter');
+    if (!tbody || !countEl) return;
+
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#666;">加载中...</td></tr>';
+    countEl.textContent = '加载中...';
+
+    try {
+        var resp = await fetch('/api/train/samples', {
+            headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#f44;">加载失败: ' + resp.status + '</td></tr>';
+            return;
+        }
+        var data = await resp.json();
+        _allSamples = data.samples || [];
+
+        // 填充用户筛选下拉
+        if (filterEl) {
+            var currentVal = filterEl.value;
+            filterEl.innerHTML = '<option value="">全部用户</option>';
+            (data.users || []).forEach(function(u) {
+                var opt = document.createElement('option');
+                opt.value = u;
+                opt.textContent = u;
+                filterEl.appendChild(opt);
+            });
+            filterEl.value = currentVal;
+        }
+
+        renderSamplesTable();
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#f44;">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function renderSamplesTable() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var filterEl = document.getElementById('samples-user-filter');
+    if (!tbody) return;
+
+    var filterVal = filterEl ? filterEl.value : '';
+    var filtered = filterVal ? _allSamples.filter(function(s) { return s.storage_label === filterVal; }) : _allSamples;
+
+    countEl.textContent = filtered.length + ' 个样本';
+    tbody.innerHTML = '';
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#666;">暂无训练样本</td></tr>';
+        return;
+    }
+
+    filtered.forEach(function(s) {
+        var tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #2a2a3e';
+
+        // 复选框
+        var checkTd = document.createElement('td');
+        checkTd.style.padding = '8px';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.uuid = s.sample_uuid;
+        cb.dataset.label = s.storage_label;
+        cb.addEventListener('change', function() {
+            if (this.checked) {
+                _selectedSamples.push({uuid: s.sample_uuid, label: s.storage_label});
+            } else {
+                _selectedSamples = _selectedSamples.filter(function(x) { return x.uuid !== s.sample_uuid; });
+            }
+        });
+        checkTd.appendChild(cb);
+        tr.appendChild(checkTd);
+
+        // 样本ID
+        var tdUuid = document.createElement('td');
+        tdUuid.style.padding = '8px';
+        tdUuid.style.color = '#aaa';
+        tdUuid.style.fontSize = '11px';
+        tdUuid.textContent = s.sample_uuid.substring(0, 20) + '...';
+        tr.appendChild(tdUuid);
+
+        // 用户
+        var tdUser = document.createElement('td');
+        tdUser.style.padding = '8px';
+        tdUser.style.color = '#ccc';
+        tdUser.style.fontSize = '12px';
+        tdUser.textContent = s.storage_label;
+        tr.appendChild(tdUser);
+
+        // 算法
+        var tdAlgo = document.createElement('td');
+        tdAlgo.style.padding = '8px';
+        tdAlgo.style.color = '#ccc';
+        tdAlgo.textContent = s.algorithm || '-';
+        tr.appendChild(tdAlgo);
+
+        // 评分
+        var tdRating = document.createElement('td');
+        tdRating.style.padding = '8px';
+        tdRating.style.textAlign = 'center';
+        tdRating.style.color = '#e8c44a';
+        tdRating.textContent = s.rating || 0;
+        tr.appendChild(tdRating);
+
+        // 文件数
+        var tdFiles = document.createElement('td');
+        tdFiles.style.padding = '8px';
+        tdFiles.style.textAlign = 'center';
+        tdFiles.style.color = '#ccc';
+        tdFiles.textContent = s.file_count;
+        tr.appendChild(tdFiles);
+
+        // 上传时间
+        var tdTime = document.createElement('td');
+        tdTime.style.padding = '8px';
+        tdTime.style.color = '#888';
+        tdTime.style.fontSize = '11px';
+        var dt = s.uploaded_at ? s.uploaded_at.substring(0, 19).replace('T', ' ') : '-';
+        tdTime.textContent = dt;
+        tr.appendChild(tdTime);
+
+        // 操作 - 查看按钮
+        var tdAction = document.createElement('td');
+        tdAction.style.padding = '8px';
+        tdAction.style.textAlign = 'center';
+        var viewBtn = document.createElement('button');
+        viewBtn.textContent = '查看';
+        viewBtn.style.cssText = 'background:#333;color:#4a9eff;border:1px solid #444;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px;';
+        viewBtn.addEventListener('click', function() {
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+        tdAction.appendChild(viewBtn);
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+    });
+}
+
+async function previewTrainingSample(sampleUuid, storageLabel) {
+    var previewArea = document.getElementById('sample-preview-area');
+    if (!previewArea) return;
+    previewArea.style.display = 'block';
+
+    // 先清空
+    document.getElementById('preview-target').src = '';
+    document.getElementById('preview-reference').src = '';
+    document.getElementById('preview-result').src = '';
+    document.getElementById('preview-meta-json').textContent = '加载中...';
+    document.getElementById('preview-file-list').innerHTML = '';
+
+    try {
+        var resp = await fetch('/api/train/samples/' + encodeURIComponent(sampleUuid) + '/preview?storage_label=' + encodeURIComponent(storageLabel), {
+            headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+            document.getElementById('preview-meta-json').textContent = '加载失败: ' + resp.status;
+            return;
+        }
+        var data = await resp.json();
+
+        // 显示图片
+        if (data.images) {
+            if (data.images.target) document.getElementById('preview-target').src = data.images.target;
+            if (data.images.reference) document.getElementById('preview-reference').src = data.images.reference;
+            if (data.images.result) document.getElementById('preview-result').src = data.images.result;
+        }
+
+        // 显示 meta
+        document.getElementById('preview-meta-json').textContent = JSON.stringify(data.meta || {}, null, 2);
+
+        // 显示文件列表
+        var fileList = document.getElementById('preview-file-list');
+        (data.file_list || []).forEach(function(fn) {
+            var li = document.createElement('li');
+            li.textContent = fn;
+            li.style.padding = '2px 0';
+            fileList.appendChild(li);
+        });
+    } catch (e) {
+        document.getElementById('preview-meta-json').textContent = '加载失败: ' + e.message;
+    }
+}
+
+async function importSelectedSamples() {
+    if (_selectedSamples.length === 0) {
+        showToast('请先选择样本');
+        return;
+    }
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = '导入中...';
+    }
+
+    try {
+        var uuids = _selectedSamples.map(function(x) { return x.uuid; });
+        var labels = _selectedSamples.map(function(x) { return x.label; });
+
+        var resp = await fetch('/api/train/import', {
+            method: 'POST',
+            headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ sample_uuids: uuids, storage_labels: labels })
+        });
+
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showToast('导入失败: ' + (err.detail || resp.status));
+            return;
+        }
+
+        var data = await resp.json();
+        showToast('已导入 ' + data.imported_count + ' 个样本，共 ' + data.training_file_count + ' 张图片');
+
+        // 更新训练目录为 .active
+        var dirInput = document.getElementById('training-image-dir');
+        if (dirInput && data.active_dir) {
+            dirInput.value = data.active_dir;
+        }
+
+        // 刷新数据统计
+        if (typeof refreshTrainingDataStats === 'function') {
+            refreshTrainingDataStats();
+        }
+
+        closeTrainingSamplesModal();
+    } catch (e) {
+        showToast('导入失败: ' + e.message);
+    } finally {
+        if (importBtn) {
+            importBtn.disabled = false;
+            importBtn.textContent = '导入选中样本并准备训练';
+        }
+    }
+}
+
+// 绑定事件
+document.addEventListener('DOMContentLoaded', function() {
+    var importBtn = document.getElementById('training-import-server-btn');
+    if (importBtn) {
+        importBtn.addEventListener('click', openTrainingSamplesModal);
+    }
+    var closeBtn = document.getElementById('samples-modal-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeTrainingSamplesModal);
+    }
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            var checkboxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
+            _selectedSamples = [];
+            checkboxes.forEach(function(cb) {
+                cb.checked = selectAll.checked;
+                if (selectAll.checked) {
+                    _selectedSamples.push({uuid: cb.dataset.uuid, label: cb.dataset.label});
+                }
+            });
+        });
+    }
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.addEventListener('change', renderSamplesTable);
+    }
+    var doImportBtn = document.getElementById('samples-import-btn');
+    if (doImportBtn) {
+        doImportBtn.addEventListener('click', importSelectedSamples);
+    }
+});
 
 // 显示下载提示 + 数据泄露风险警告弹窗
 function showAgentDownloadPrompt() {
@@ -2219,7 +2529,7 @@ function fetchModelStatusCached(force) {
     }
     if (!force && _modelStatusCache) return Promise.resolve(_modelStatusCache);
     if (!force && _modelStatusPromise) return _modelStatusPromise;
-    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store' })
+    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store', headers: getAuthHeaders() })
         .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
         .then(function(result) {
             if (!result.ok) throw new Error((result.data && result.data.detail) || '模型状态读取失败');

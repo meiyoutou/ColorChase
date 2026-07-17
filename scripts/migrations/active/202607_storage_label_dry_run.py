@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 STORAGE_ROOT = ROOT / "storage"
 PROJECT_ASSETS_ROOT = STORAGE_ROOT / "projects" / "assets"
 TRAINING_CORPUS_ROOT = STORAGE_ROOT / "training" / "corpus"

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.routes.auth import get_current_user
+from app.services.auth_utils import is_admin_role
 
 
 def create_model_status_router(
@@ -23,7 +24,7 @@ def create_model_status_router(
 
     @router.get("/api/model_status")
     async def api_model_status(user=Depends(get_current_user)):
-        is_admin = getattr(user, "role", None) == "admin"
+        is_admin = is_admin_role(getattr(user, "role", None))
 
         def file_info(path):
             path_str = str(path)

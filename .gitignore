@@ -74,3 +74,4 @@ tmp_uvicorn_*.err
 # 通用备份
 *.bak
 *.bak_*
+backups/

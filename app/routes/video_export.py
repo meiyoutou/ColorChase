@@ -12,7 +12,7 @@ from admin_runtime_metrics import record_export, record_task_log, record_user_us
 from algorithms.video.processor import _get_ffmpeg_path
 from app.routes.projects import _user_profile_record
 from app.security import ensure_upload_file_size
-from app.services.auth_utils import _get_request_user_id, _get_request_user_role
+from app.services.auth_utils import _get_request_user_id, _get_request_user_role, is_admin_role
 from app.services.paths import (
     _ensure_project_access,
     _is_admin_request,
@@ -40,7 +40,7 @@ async def api_export_video(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     if request_user_id is None:
         raise HTTPException(status_code=401, detail="请先登录")
     project_id = await _ensure_project_access(project_id, request_user_id)

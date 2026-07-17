@@ -14,8 +14,24 @@ var portalNoticeSelection = {};
 var portalMessagesLoaded = false;
 var portalNoticeAutoShownForVersion = null;
 
+function isAdminRoleValue(role) {
+    role = String(role || '').toLowerCase();
+    return role === 'admin' || role === 'super_admin';
+}
+
 function isAdminUser() {
-    return !!(currentUser && currentUser.role === 'admin');
+    return isAdminRoleValue(currentUser && currentUser.role);
+}
+
+function isSuperAdminUser() {
+    return String((currentUser && currentUser.role) || '').toLowerCase() === 'super_admin';
+}
+
+function getAccountTypeLabel(user, shortLabel) {
+    var role = String((user && user.role) || '').toLowerCase();
+    if (role === 'super_admin') return shortLabel ? '超级管理员' : '超级管理员账号';
+    if (role === 'admin') return shortLabel ? '管理员' : '管理员账号';
+    return '普通用户';
 }
 
 function isAdminSpaceView() {
@@ -78,7 +94,7 @@ function applySettingsProfileData(profile) {
     if (usernameEl) usernameEl.textContent = displayName;
     if (nicknameInput && document.activeElement !== nicknameInput) nicknameInput.value = displayName;
     if (nameValEl) nameValEl.textContent = (profile && profile.account_id) || user.email || user.phone || '未知';
-    if (roleValEl) roleValEl.textContent = (profile && profile.account_type) || (user.role === 'admin' ? '管理员账号' : '普通用户');
+    if (roleValEl) roleValEl.textContent = (profile && profile.account_type) || getAccountTypeLabel(user, false);
     var ratingSummary = profile && profile.rating_summary ? profile.rating_summary : null;
     if (ratedCountEl && ratingSummary) ratedCountEl.textContent = Number(ratingSummary.rated_count || 0);
     if (totalCountEl && ratingSummary) totalCountEl.textContent = Number(ratingSummary.total_count || 0);
@@ -1182,6 +1198,22 @@ function runAdminTaskLogsBackfill() {
     });
     html += '</div></div>';
     html += '</div>';
+
+    // 2026-07-16 调试：只有超级管理员才能在页面上管理其他用户的管理员身份。
+    if (isSuperAdminUser()) {
+        html += '<div class="admin-surface-card compact admin-promote-card">';
+        html += '<div class="admin-card-head"><div><div class="admin-card-title">管理员账号管理</div><div class="admin-card-subtitle">提升或撤销普通管理员身份</div></div><span class="admin-chip">Super Admin</span></div>';
+        html += '<div class="admin-promote-form">';
+        html += '<input id="admin-promote-input" class="admin-promote-input" type="text" placeholder="用户 ID / 邮箱 / 手机号" />';
+        html += '</div>';
+        html += '<div class="admin-promote-actions">';
+        html += '<button id="admin-promote-btn" class="admin-promote-btn" type="button">提升为管理员</button>';
+        html += '<button id="admin-demote-btn" class="admin-demote-btn" type="button">撤销管理员</button>';
+        html += '</div>';
+        html += '<div id="admin-promote-message" class="admin-promote-message"></div>';
+        html += '</div>';
+    }
+
     html += '<div class="admin-surface-card admin-lower-log">';
     html += '<div class="admin-card-head"><div><div class="admin-card-title">系统日志</div><div class="admin-card-subtitle">管理员视角关键摘要</div></div></div>';
     html += '<div class="admin-log-list">';
@@ -1234,6 +1266,48 @@ function runAdminTaskLogsBackfill() {
             });
         }
     });
+
+    // 2026-07-16 调试：绑定"提升/撤销管理员"按钮。
+    var promoteBtn = $r('#admin-promote-btn');
+    var demoteBtn = $r('#admin-demote-btn');
+    var promoteInput = $r('#admin-promote-input');
+    var promoteMsg = $r('#admin-promote-message');
+
+    function bindAdminRoleBtn(btn, url, successText) {
+        if (!btn || !promoteInput || btn.dataset.bound) return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', function() {
+            var account = (promoteInput.value || '').trim();
+            if (!account) {
+                if (promoteMsg) promoteMsg.textContent = '请输入用户标识';
+                return;
+            }
+            btn.disabled = true;
+            if (promoteMsg) promoteMsg.textContent = '处理中...';
+            fetch(url, {
+                method: 'POST',
+                headers: Object.assign({'Content-Type': 'application/json'}, getAuthHeaders()),
+                body: JSON.stringify({account: account})
+            })
+            .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+            .then(function(result) {
+                if (!result.ok) throw new Error((result.data && result.data.detail) || successText + '失败');
+                if (promoteMsg) promoteMsg.textContent = result.data.message || successText + '成功';
+                promoteInput.value = '';
+                fetchAdminDashboard(true);
+            })
+            .catch(function(err) {
+                if (promoteMsg) promoteMsg.textContent = err.message || successText + '失败';
+            })
+            .finally(function() {
+                btn.disabled = false;
+            });
+        });
+    }
+
+    bindAdminRoleBtn(promoteBtn, '/api/admin/promote_user', '提升');
+    bindAdminRoleBtn(demoteBtn, '/api/admin/demote_user', '撤销');
+
     fetchAdminTaskLogs();
 }
 
@@ -2085,6 +2159,8 @@ function renderModelManager(data) {
     var models = Array.isArray(data.models) ? data.models : [];
     var summary = data.summary || {};
     var management = data.management || {};
+    var canControl = isSuperAdminUser();
+    var readonlyTitle = canControl ? '' : '需要超级管理员权限';
     setTextIfExists(
         '#model-manager-summary',
         '已安装/部分可用 ' + Number(summary.installed_or_partial || 0) + '/' + Number(summary.total || models.length) +
@@ -2104,6 +2180,8 @@ function renderModelManager(data) {
                 '</option>';
         }).join('');
         if (!select.value && currentValue) select.value = currentValue;
+        select.disabled = !canControl;
+        select.title = readonlyTitle;
     }
 
     if (!models.length) {
@@ -2117,7 +2195,9 @@ function renderModelManager(data) {
         var statusLabel = getModelManagerStatusLabel(model);
         var enabledText = model.enabled ? '禁用' : '启用';
         var defaultBadge = model.is_default ? '<span class="model-manager-badge default">默认</span>' : '';
-        var defaultDisabled = (!model.ready || !model.default_selectable) ? ' disabled' : '';
+        var defaultDisabled = (!model.ready || !model.default_selectable || !canControl) ? ' disabled' : '';
+        var toggleDisabled = !canControl ? ' disabled' : '';
+        var benchmarkDisabled = (!model.ready || !canControl) ? ' disabled' : '';
         var lastError = model.last_error && model.last_error.message ? ('最近错误：' + model.last_error.message) : '';
         var installHint = model.install_hint || '';
         var metaParts = [
@@ -2139,9 +2219,9 @@ function renderModelManager(data) {
                 '<div class="model-manager-meta">' + escapeHtml(metaParts.join(' · ')) + '</div>' +
             '</div>' +
             '<div class="model-manager-actions">' +
-                '<button type="button" data-model-action="toggle" data-model-key="' + escapeAttr(model.key || '') + '">' + enabledText + '</button>' +
-                '<button type="button" data-model-action="default" data-model-key="' + escapeAttr(model.key || '') + '"' + defaultDisabled + '>设为默认</button>' +
-                '<button type="button" data-model-action="benchmark" data-model-key="' + escapeAttr(model.key || '') + '"' + (!model.ready ? ' disabled' : '') + '>Benchmark</button>' +
+                '<button type="button" data-model-action="toggle" data-model-key="' + escapeAttr(model.key || '') + '"' + toggleDisabled + ' title="' + escapeAttr(readonlyTitle) + '">' + enabledText + '</button>' +
+                '<button type="button" data-model-action="default" data-model-key="' + escapeAttr(model.key || '') + '"' + defaultDisabled + ' title="' + escapeAttr(readonlyTitle) + '">设为默认</button>' +
+                '<button type="button" data-model-action="benchmark" data-model-key="' + escapeAttr(model.key || '') + '"' + benchmarkDisabled + ' title="' + escapeAttr(readonlyTitle) + '">Benchmark</button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -2326,18 +2406,64 @@ function appendTrainingLog(message) {
     el.scrollTop = el.scrollHeight;
 }
 
+function requireTrainingSuperAdmin(actionText) {
+    if (isSuperAdminUser()) return true;
+    var message = (actionText || '模型训练操作') + '需要超级管理员权限';
+    appendTrainingLog(message);
+    if (typeof showToast === 'function') showToast(message);
+    return false;
+}
+
 function toggleTrainingButtons(running) {
     var startBtn = $r('#training-start-btn');
     var pauseBtn = $r('#training-pause-btn');
     var resumeBtn = $r('#training-resume-btn');
     var cancelBtn = $r('#training-cancel-btn');
-    if (startBtn) startBtn.disabled = !!running;
-    if (pauseBtn) pauseBtn.disabled = !running;
-    if (resumeBtn) resumeBtn.disabled = !trainingTaskId;
-    if (cancelBtn) cancelBtn.disabled = !trainingTaskId;
+    var uploadBtn = $r('#training-upload-btn');
+    var uploadFolderBtn = $r('#training-upload-folder-btn');
+    var dataClearBtn = $r('#training-data-clear');
+    var refreshBtn = $r('#training-data-refresh');
+    var modelRefreshBtn = $r('#admin-model-refresh');
+    var clearBtn = $r('#training-log-clear');
+    var importServerBtn = $r('#training-import-server-btn');
+    var canControl = isSuperAdminUser();
+    var title = canControl ? '' : '需要超级管理员权限';
+    if (startBtn) { startBtn.disabled = !!running || !canControl; startBtn.title = title; }
+    if (pauseBtn) { pauseBtn.disabled = !running || !canControl; pauseBtn.title = title; }
+    if (resumeBtn) { resumeBtn.disabled = !trainingTaskId || !canControl; resumeBtn.title = title; }
+    if (cancelBtn) { cancelBtn.disabled = !trainingTaskId || !canControl; cancelBtn.title = title; }
+    if (uploadBtn) { uploadBtn.disabled = !canControl; uploadBtn.title = title; }
+    if (uploadFolderBtn) { uploadFolderBtn.disabled = !canControl; uploadFolderBtn.title = title; }
+    if (dataClearBtn) {
+        // 数据清理本身只允许服务器手动执行；非超级管理员更是直接禁用。
+        dataClearBtn.disabled = true;
+        dataClearBtn.title = '训练数据清理只能由服务器手动执行';
+    }
+    if (refreshBtn) { refreshBtn.disabled = !canControl; refreshBtn.title = title; }
+    if (modelRefreshBtn) { modelRefreshBtn.disabled = !canControl; modelRefreshBtn.title = title; }
+    if (clearBtn) { clearBtn.disabled = !canControl; clearBtn.title = title; }
+    if (importServerBtn) { importServerBtn.disabled = !canControl; importServerBtn.title = title; }
+
+    // 2026-07-16 调试：用户要求普通管理员在训练模块只能看、不能操作，
+    // 把文件上传 input 和训练参数输入框也一并禁用，避免还能触发选择文件或修改参数。
+    var uploadInput = $r('#training-upload-input');
+    var uploadFolderInput = $r('#training-upload-folder-input');
+    if (uploadInput) uploadInput.disabled = !canControl;
+    if (uploadFolderInput) uploadFolderInput.disabled = !canControl;
+    ['#training-stage', '#training-image-dir', '#training-epoch', '#training-batch', '#training-lr', '#training-size', '#training-val-enabled'].forEach(function(sel) {
+        var el = $r(sel);
+        if (!el) return;
+        el.disabled = !canControl;
+        el.title = canControl ? '' : title;
+    });
+    document.querySelectorAll('input[name="training-target"]').forEach(function(el) {
+        el.disabled = !canControl;
+        el.title = canControl ? '' : title;
+    });
 }
 
 function startTrainingTask() {
+    if (!requireTrainingSuperAdmin('启动训练')) return Promise.resolve(null);
     var form = new FormData();
     form.append('stage', (($r('#training-stage') || {}).value || 'both'));
     form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
@@ -2351,7 +2477,8 @@ function startTrainingTask() {
 
     return fetch('/api/train', {
         method: 'POST',
-        body: form
+        body: form,
+        headers: getAuthHeaders()
     })
     .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
     .then(function(result) {
@@ -2374,11 +2501,15 @@ function startTrainingTask() {
 }
 
 function postTrainingTaskAction(action) {
+    if (!requireTrainingSuperAdmin('控制训练任务')) return Promise.resolve(null);
     if (!trainingTaskId) {
         if (typeof showToast === 'function') showToast('当前没有可控的训练任务 ID');
         return Promise.resolve(null);
     }
-    return fetch('/api/task/' + encodeURIComponent(trainingTaskId) + '/' + action, { method: 'POST' })
+    return fetch('/api/task/' + encodeURIComponent(trainingTaskId) + '/' + action, {
+        method: 'POST',
+        headers: getAuthHeaders()
+    })
     .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
     .then(function(result) {
         if (!result.ok) throw new Error((result.data && result.data.detail) || '任务控制失败');
@@ -2460,7 +2591,10 @@ function initTrainingWorkbench() {
     var uploadInput = $r('#training-upload-input');
     if (uploadBtn && uploadInput && !uploadBtn.dataset.bound) {
         uploadBtn.dataset.bound = '1';
-        uploadBtn.addEventListener('click', function() { uploadInput.click(); });
+        uploadBtn.addEventListener('click', function() {
+            if (!requireTrainingSuperAdmin('上传训练图片')) return;
+            uploadInput.click();
+        });
     }
 
     var startBtn = $r('#training-start-btn');
@@ -2561,6 +2695,7 @@ function startTrainingProgressPolling() {
 }
 
 function startTrainingTask() {
+    if (!requireTrainingSuperAdmin('启动训练')) return Promise.resolve(null);
     var form = new FormData();
     form.append('stage', (($r('#training-stage') || {}).value || 'both'));
     form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
@@ -2579,7 +2714,8 @@ function startTrainingTask() {
 
     return fetch('/api/train', {
         method: 'POST',
-        body: form
+        body: form,
+        headers: getAuthHeaders()
     })
     .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
     .then(function(result) {
@@ -2690,8 +2826,15 @@ function initTrainingWorkbench() {
     var uploadInput = $r('#training-upload-input');
     if (uploadBtn && uploadInput && !uploadBtn.dataset.bound) {
         uploadBtn.dataset.bound = '1';
-        uploadBtn.addEventListener('click', function() { uploadInput.click(); });
+        uploadBtn.addEventListener('click', function() {
+            if (!requireTrainingSuperAdmin('上传训练图片')) return;
+            uploadInput.click();
+        });
         uploadInput.addEventListener('change', function() {
+            if (!requireTrainingSuperAdmin('上传训练图片')) {
+                uploadInput.value = '';
+                return;
+            }
             if (!uploadInput.files || !uploadInput.files.length) return;
             var selectedCount = uploadInput.files.length;
             var form = new FormData();
@@ -2701,7 +2844,8 @@ function initTrainingWorkbench() {
             form.append('image_dir', (($r('#training-image-dir') || {}).value || 'storage/training/corpus'));
             fetch('/api/train/upload', {
                 method: 'POST',
-                body: form
+                body: form,
+                headers: getAuthHeaders()
             })
             .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
             .then(function(result) {
@@ -2725,8 +2869,15 @@ function initTrainingWorkbench() {
     var uploadFolderInput = $r('#training-upload-folder-input');
     if (uploadFolderBtn && uploadFolderInput && !uploadFolderBtn.dataset.bound) {
         uploadFolderBtn.dataset.bound = '1';
-        uploadFolderBtn.addEventListener('click', function() { uploadFolderInput.click(); });
+        uploadFolderBtn.addEventListener('click', function() {
+            if (!requireTrainingSuperAdmin('上传训练文件夹')) return;
+            uploadFolderInput.click();
+        });
         uploadFolderInput.addEventListener('change', function() {
+            if (!requireTrainingSuperAdmin('上传训练文件夹')) {
+                uploadFolderInput.value = '';
+                return;
+            }
             if (!uploadFolderInput.files || !uploadFolderInput.files.length) return;
             // 1. 按扩展名过滤出图片（与后端 TRAINING_IMAGE_EXTENSIONS 对齐，双重校验）
             // 2026-07-15 调试：用户反馈 RAW 格式图片显示不出来缩略图，前端文件夹上传时也得放行 RAW。
@@ -2779,7 +2930,8 @@ function initTrainingWorkbench() {
                 form.append('image_dir', imageDir);
                 fetch('/api/train/upload', {
                     method: 'POST',
-                    body: form
+                    body: form,
+                    headers: getAuthHeaders()
                 })
                 .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
                 .then(function(result) {
@@ -3136,7 +3288,7 @@ function showSettingsModal() {
     var displayName = nickname || user.email || user.phone || '未知';
     if (usernameEl) usernameEl.textContent = displayName;
     if (nameValEl) nameValEl.textContent = user.email || user.phone || '未知';
-    if (roleValEl) roleValEl.textContent = user.role === 'admin' ? '管理员' : '普通用户';
+    if (roleValEl) roleValEl.textContent = getAccountTypeLabel(user, true);
 
     var imgs = window.targetImages || [];
     var total = imgs.length;
@@ -3152,7 +3304,7 @@ function showSettingsModal() {
 
     var deleteAccountBtn = $r('#settings-delete-account-btn');
     if (deleteAccountBtn) {
-        if (user.role === 'admin') {
+        if (isAdminRoleValue(user.role)) {
             deleteAccountBtn.textContent = '管理员账户不可注销';
             deleteAccountBtn.style.opacity = '0.55';
             deleteAccountBtn.style.pointerEvents = 'none';
@@ -4291,7 +4443,7 @@ function initRouter() {
     if (deleteAccountBtn) {
         deleteAccountBtn.addEventListener('click', function() {
             var user = JSON.parse(localStorage.getItem('cc_user') || '{}');
-            if (user && user.role === 'admin') {
+            if (user && isAdminRoleValue(user.role)) {
                 hideSettingsModal();
                 if (typeof showToast === 'function') {
                     showToast('管理员账号禁止注销');
@@ -5117,7 +5269,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (editArea) editArea.style.display = 'none';
         var deleteAccountBtn = $r('#settings-delete-account-btn');
         if (deleteAccountBtn) {
-            if (user.role === 'admin') {
+            if (isAdminRoleValue(user.role)) {
                 deleteAccountBtn.textContent = '管理员账户不可注销';
                 deleteAccountBtn.style.opacity = '0.55';
                 deleteAccountBtn.style.pointerEvents = 'none';
@@ -5130,7 +5282,7 @@ document.addEventListener('DOMContentLoaded', function() {
         localStorage.removeItem('cc_nickname');
         applySettingsProfileData({
             account_id: user.email || user.phone || '未知',
-            account_type: user.role === 'admin' ? '管理员账号' : '普通用户',
+            account_type: getAccountTypeLabel(user, false),
             display_name: getSettingsFallbackDisplayName(user),
             rating_summary: userSpaceDashboardCache && userSpaceDashboardCache.profile ? userSpaceDashboardCache.profile.rating_summary : null
         });

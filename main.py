@@ -92,6 +92,7 @@ from app.services.auth_utils import (
     _get_request_user_role,
     _resolve_runtime_user_id_from_request,
     _task_elapsed_ms,
+    is_admin_role,
 )
 from app.services.model_management import (
     _disabled_model_error,
@@ -145,7 +146,7 @@ async def _require_local_storage(request: Request):
     if authorization:
         try:
             role = _get_request_user_role(authorization)
-            if role == "admin":
+            if is_admin_role(role):
                 return
         except Exception:
             pass
@@ -971,7 +972,7 @@ async def api_apply_profile(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
     if request_user_id is not None:
@@ -1116,7 +1117,7 @@ async def api_transfer(
 
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     project_id = await _ensure_project_access(project_id, request_user_id)
     request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
@@ -2302,7 +2303,7 @@ async def api_video_transfer(
 
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     project_id = await _ensure_project_access(project_id, request_user_id)
     request_storage_label = await _require_storage_label_for_user(request_user_id)
     if _normalize_project_id(project_id) <= 0:
@@ -2523,7 +2524,7 @@ async def _background_video_transfer(
             await prog("error", 0, "未关联项目，无法保存视频结果")
             mark_video_task_failure()
             return
-        if user_role == "admin":
+        if is_admin_role(user_role):
             output_path = str(
                 _safe_project_bucket_dir(
                     project_id,
@@ -2848,7 +2849,7 @@ async def api_preview_upload(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     request_storage_label = await _require_storage_label_for_user(request_user_id)
 
     preview_upload_max_bytes = int_env(
@@ -3212,7 +3213,7 @@ async def api_download_full(
         print(f"[Download] imencode failed: {e}, falling back to file write")
         output_filename = f"{uuid.uuid4().hex}_full.png"
         # 普通用户异常回退也不落盘服务器上传目录
-        is_admin_download = request_user_role == "admin"
+        is_admin_download = is_admin_role(request_user_role)
         if is_admin_download:
             output_path = os.path.join(str(_runtime_upload_dir()), output_filename)
         else:

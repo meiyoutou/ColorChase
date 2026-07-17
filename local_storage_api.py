@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Depends, Request
-from app.services.auth_utils import _get_request_user_id, _get_request_user_role
+from app.services.auth_utils import _get_request_user_id, _get_request_user_role, is_admin_role
 from app.services.paths import (
     _is_admin_request,
+    _is_super_admin_request,
     _runtime_user_temp_url,
     _save_to_runtime_user_temp,
     _training_corpus_dir_for_label,
@@ -46,7 +47,7 @@ async def _require_local_storage(request: Request):
     if authorization:
         try:
             role = _get_request_user_role(authorization)
-            if role == "admin":
+            if is_admin_role(role):
                 return
         except Exception:
             pass
@@ -149,9 +150,9 @@ async def api_training_upload(
     if rating == 0:
         return JSONResponse({"ok": True, "skipped": "no_rating"})
 
-    # 普通用户：评分记录只在本地保存，不上传到服务器训练库
-    if not _is_admin_request(authorization):
-        return JSONResponse({"ok": True, "skipped": "non_admin_no_server_storage"})
+    # 训练库是服务器级数据，只有超级管理员的评分副本会入库。
+    if not _is_super_admin_request(authorization):
+        return JSONResponse({"ok": True, "skipped": "not_super_admin_no_server_training_storage"})
 
     request_user_id = _get_request_user_id(authorization)
     if request_user_id is None:

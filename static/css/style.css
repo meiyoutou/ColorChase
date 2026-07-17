@@ -2274,13 +2274,81 @@ input[type="range"]::-webkit-slider-thumb {
     display: grid;
     gap: 8px;
 }
+.admin-promote-card .admin-promote-form {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.admin-promote-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.admin-promote-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(230, 238, 247, 0.98);
+  background: rgba(255, 255, 255, 0.9);
+  color: #3a3a4a;
+  font-size: 13px;
+  outline: none;
+}
+.admin-promote-input::placeholder {
+  color: #9ca3af;
+}
+.admin-promote-btn {
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #4f63ff, #7b3fe4);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.admin-promote-btn:hover {
+  opacity: 0.92;
+}
+.admin-promote-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.admin-demote-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(240, 95, 112, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  color: #f05f70;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.admin-demote-btn:hover {
+  background: rgba(240, 95, 112, 0.08);
+}
+.admin-demote-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.admin-promote-message {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #4f63ff;
+  min-height: 18px;
+}
+
 .admin-lower-log {
-    height: 100%;
-    display: grid;
-    grid-template-rows: auto 1fr;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
 }
 .admin-lower-log .admin-log-list {
-    padding-top: 2px;
+  padding-top: 2px;
 }
 .admin-log-item {
     min-height: 46px;
@@ -5182,6 +5250,26 @@ html[data-theme="dark"] .admin-welcome-action {
   font-weight: 800 !important;
 }
 
+html[data-theme="dark"] .admin-promote-input {
+  background: rgba(22, 28, 42, 0.8);
+  border-color: rgba(120, 133, 162, 0.25);
+  color: #e8ecf3;
+}
+html[data-theme="dark"] .admin-promote-input::placeholder {
+  color: #7b8398;
+}
+html[data-theme="dark"] .admin-promote-message {
+  color: #8a9cff;
+}
+html[data-theme="dark"] .admin-demote-btn {
+  background: rgba(30, 22, 26, 0.8);
+  border-color: rgba(240, 95, 112, 0.45);
+  color: #ff7a8a;
+}
+html[data-theme="dark"] .admin-demote-btn:hover {
+  background: rgba(240, 95, 112, 0.12);
+}
+
 html[data-theme="dark"] .training-stage-card {
   background: linear-gradient(180deg, rgba(18, 24, 37, 0.98), rgba(14, 19, 31, 0.98)) !important;
   border-color: rgba(120, 133, 162, 0.16) !important;
@@ -6557,6 +6645,15 @@ html[data-theme="light"] .training-stage-card select {
   line-height: 1.7;
 }
 
+.training-upload-card:disabled,
+.training-upload-card:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: grayscale(0.6);
+  transform: none;
+  box-shadow: none;
+}
+
 .training-data-size-bar {
   min-height: 40px;
   padding: 0 20px;
@@ -7173,6 +7270,19 @@ html[data-theme="dark"] .training-upload-card {
 html[data-theme="dark"] .training-upload-card:hover {
   border-color: rgba(129, 140, 248, 0.72);
   background: rgba(25, 32, 48, 0.92);
+}
+
+html[data-theme="dark"] .training-upload-card:disabled,
+html[data-theme="dark"] .training-upload-card:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.5;
+  filter: grayscale(0.7);
+  transform: none;
+  border-color: rgba(129, 140, 248, 0.15);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(129, 140, 248, 0.06), transparent 48%),
+    rgba(22, 28, 42, 0.6);
+  box-shadow: none;
 }
 
 html[data-theme="dark"] .training-upload-copy strong {

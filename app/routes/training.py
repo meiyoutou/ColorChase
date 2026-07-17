@@ -15,7 +15,12 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.security import DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, ensure_upload_file_size, get_upload_file_size
-from app.services.paths import _is_admin_request, _training_corpus_dir_for_label, _user_assets_root_for_label
+from app.services.paths import (
+    _is_admin_request,
+    _is_super_admin_request,
+    _training_corpus_dir_for_label,
+    _user_assets_root_for_label,
+)
 from app.services.user_identity import resolve_user_storage_label
 from app.settings import int_env
 from config import get_training_corpus_dir
@@ -67,10 +72,9 @@ def create_training_router(
         authorization: Optional[str] = Header(None),
     ):
         request_user_id = get_request_user_id(authorization)
-        request_user_role = get_request_user_role(authorization)
-        # 训练任务使用服务器语料库，仅管理员可启动
-        if request_user_role != "admin":
-            raise HTTPException(status_code=403, detail="模型训练仅限管理员")
+        # 启动训练会改动模型产物，只允许超级管理员操作。
+        if not _is_super_admin_request(authorization):
+            raise HTTPException(status_code=403, detail="模型训练仅限超级管理员")
         if target not in ("neuralpreset", "modflows_b0", "modflows_b6"):
             raise HTTPException(status_code=400, detail="不支持的训练目标")
 
@@ -127,9 +131,9 @@ def create_training_router(
         relative_paths: str = Form(""),
         authorization: Optional[str] = Header(None),
     ):
-        # 训练语料库属于服务器数据，仅管理员可上传；普通用户数据不落盘
-        if not _is_admin_request(authorization):
-            raise HTTPException(status_code=403, detail="训练语料上传仅限管理员")
+        # 训练语料库是服务器级资产，写入动作只给超级管理员。
+        if not _is_super_admin_request(authorization):
+            raise HTTPException(status_code=403, detail="训练语料上传仅限超级管理员")
 
         training_path = resolve_training_dir(image_dir)
         training_path.mkdir(parents=True, exist_ok=True)
@@ -546,9 +550,9 @@ def create_training_router(
         data: dict,
         authorization: Optional[str] = Header(None),
     ):
-        """把选中的训练样本复制到 .active 目录，仅管理员可用。"""
-        if not _is_admin_request(authorization):
-            raise HTTPException(status_code=403, detail="训练样本导入仅限管理员")
+        """把选中的训练样本复制到 .active 目录，仅超级管理员可用。"""
+        if not _is_super_admin_request(authorization):
+            raise HTTPException(status_code=403, detail="训练样本导入仅限超级管理员")
 
         sample_uuids = data.get("sample_uuids", [])
         storage_labels = data.get("storage_labels", [])

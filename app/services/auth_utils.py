@@ -7,6 +7,20 @@ from jose import JWTError, jwt
 from auth import ALGORITHM, AUTH_COOKIE_NAME, SECRET_KEY
 
 
+ADMIN_ROLES = {"admin", "super_admin"}
+SUPER_ADMIN_ROLE = "super_admin"
+
+
+def is_admin_role(role: Optional[str]) -> bool:
+    """普通管理员和超级管理员都算后台管理员。"""
+    return str(role or "").strip().lower() in ADMIN_ROLES
+
+
+def is_super_admin_role(role: Optional[str]) -> bool:
+    """只有超级管理员能动训练这类高风险功能。"""
+    return str(role or "").strip().lower() == SUPER_ADMIN_ROLE
+
+
 def _decode_request_payload(token: Optional[str]) -> Optional[dict]:
     if not token:
         return None

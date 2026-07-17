@@ -7,14 +7,15 @@ import ctypes
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_runtime_metrics import get_monthly_user_usage, get_task_logs, load_runtime_stats
-from app.routes.auth import require_admin
+from app.routes.auth import require_admin, require_super_admin
 from app.routes.admin_models import _build_status_payload
 from app.routes.projects import _derive_display_name, _user_profile_record
+from app.services.auth_utils import is_super_admin_role
 from config import (
     BASE_DIR,
     MODEL_DIR,
@@ -893,7 +894,7 @@ async def _collect_overview(db: AsyncSession):
             User.last_active_at >= active_cutoff,
         )
     )
-    admin_count = await db.scalar(select(func.count(User.id)).where(User.role == "admin"))
+    admin_count = await db.scalar(select(func.count(User.id)).where(User.role.in_(["admin", "super_admin"])))
     project_count = await db.scalar(select(func.count(Project.id)))
     active_project_count = await db.scalar(
         select(func.count(Project.id)).where(Project.deleted_at == None)
@@ -1463,3 +1464,102 @@ def _user_lookup_keys(user: User):
     if display_name:
         keys.add(display_name)
     return keys
+
+
+async def _lookup_user_by_account(db: AsyncSession, account: str):
+    """通过 id / email / phone / storage_label 定位用户，返回 User 或 None。"""
+    normalized = str(account or "").strip()
+    if not normalized:
+        return None
+    try:
+        user_id = int(normalized)
+    except ValueError:
+        user_id = None
+
+    conditions = [
+        User.email == normalized,
+        User.phone == normalized,
+        User.storage_label == normalized,
+        User.storage_label == f"user_{normalized}",
+    ]
+    if user_id is not None:
+        conditions.append(User.id == user_id)
+
+    result = await db.execute(select(User).where(or_(*conditions)).limit(2))
+    users = result.scalars().all()
+    if len(users) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="该标识匹配到多个用户，请使用明确的用户 ID、邮箱或手机号",
+        )
+    return users[0] if users else None
+
+
+@router.post("/promote_user")
+async def admin_promote_user(
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """将指定用户提升为管理员（admin）。仅超级管理员可用。"""
+    account = str(data.get("account", "")).strip()
+    if not account:
+        raise HTTPException(status_code=400, detail="请提供用户标识")
+
+    user = await _lookup_user_by_account(db, account)
+    if not user:
+        raise HTTPException(status_code=404, detail="未找到该用户")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能修改自己的权限")
+
+    old_role = user.role or "user"
+    user.role = "admin"
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "success": True,
+        "user_id": user.id,
+        "account": account,
+        "old_role": old_role,
+        "role": user.role,
+        "message": f"用户 {account} 已提升为管理员",
+    }
+
+
+@router.post("/demote_user")
+async def admin_demote_user(
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """撤销指定用户的管理员身份，降为普通用户（user）。仅超级管理员可用。"""
+    account = str(data.get("account", "")).strip()
+    if not account:
+        raise HTTPException(status_code=400, detail="请提供用户标识")
+
+    user = await _lookup_user_by_account(db, account)
+    if not user:
+        raise HTTPException(status_code=404, detail="未找到该用户")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能修改自己的权限")
+
+    # 不允许直接撤销超级管理员，避免误操作把另一个 super_admin 关掉
+    if is_super_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="不能撤销超级管理员身份，请先将其降级为普通管理员")
+
+    old_role = user.role or "admin"
+    user.role = "user"
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "success": True,
+        "user_id": user.id,
+        "account": account,
+        "old_role": old_role,
+        "role": user.role,
+        "message": f"用户 {account} 已撤销管理员身份",
+    }

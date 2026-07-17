@@ -17,6 +17,7 @@ from models import User, Project, Asset
 from app.routes.auth import get_current_user
 from app.settings import USER_SPACE_TZ
 from app.security import ensure_upload_file_size
+from app.services.auth_utils import is_admin_role
 from app.services.paths import (
     _project_assets_root_for_label,
     _runtime_user_temp_url,
@@ -898,7 +899,12 @@ def _derive_display_name(user: User) -> str:
 
 
 def _account_type_label(role: str) -> str:
-    return "管理员账号" if str(role or "").lower() == "admin" else "普通用户"
+    normalized = str(role or "").lower()
+    if normalized == "super_admin":
+        return "超级管理员账号"
+    if is_admin_role(normalized):
+        return "管理员账号"
+    return "普通用户"
 
 
 def _status_label(status: str) -> str:
@@ -2123,7 +2129,7 @@ async def upload_project_asset(
     storage_label = await resolve_user_storage_label(user.id)
 
     # 普通用户数据不落盘到服务器 project 目录，改走临时目录
-    if getattr(user, "role", None) == "admin":
+    if is_admin_role(getattr(user, "role", None)):
         proj_dir = _project_assets_root_for_label(storage_label) / str(project_id) / safe_bucket
         proj_dir.mkdir(parents=True, exist_ok=True)
         fpath = proj_dir / fname

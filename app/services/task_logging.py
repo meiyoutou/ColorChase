@@ -20,7 +20,7 @@ def create_task_log_writer(base_dir, user_profile_record, record_task_log):
     def _build_user_label(user_id: Optional[int], role: str = "") -> str:
         if user_id is None:
             return "游客"
-        suffix = "admin" if role == "admin" else "user"
+        suffix = "admin" if str(role or "").lower() in {"admin", "super_admin"} else "user"
         return f"user_{user_id}_{suffix}"
 
     def _load_log_user_snapshot(user_id: Optional[int], role: str = "") -> dict:

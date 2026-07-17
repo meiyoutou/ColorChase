@@ -194,7 +194,7 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 GitHub 上传前预检：
 
 ```bash
-python scripts/github_preflight.py
+python scripts/tools/github_preflight.py
 ```
 
 预检脚本会检查分支状态、工作区状态和仓库体积。

@@ -430,8 +430,17 @@ def _safe_session_dir(session_id: str, storage_label: Optional[str] = None) -> P
 def _is_admin_request(authorization: Optional[str]) -> bool:
     """根据 JWT token 判断当前请求是否来自管理员账号。"""
     try:
-        from app.services.auth_utils import _get_request_user_role
-        return _get_request_user_role(authorization) == "admin"
+        from app.services.auth_utils import _get_request_user_role, is_admin_role
+        return is_admin_role(_get_request_user_role(authorization))
+    except Exception:
+        return False
+
+
+def _is_super_admin_request(authorization: Optional[str]) -> bool:
+    """训练写入、导入、启动这类操作只给超级管理员。"""
+    try:
+        from app.services.auth_utils import _get_request_user_role, is_super_admin_role
+        return is_super_admin_role(_get_request_user_role(authorization))
     except Exception:
         return False
 

@@ -66,6 +66,7 @@ from app.services.paths import (
     _training_corpus_dir_for_label,
     _user_assets_root_for_label,
 )
+from app.services.auth_utils import is_admin_role, is_super_admin_role
 from app.services.user_identity import build_user_storage_label, resolve_user_storage_label
 from database import get_db
 from models import Asset, Project, User
@@ -802,8 +803,14 @@ async def logout(response: Response):
 
 
 async def require_admin(user: User = Depends(get_current_user)):
-    if user.role != "admin":
+    if not is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
+async def require_super_admin(user: User = Depends(get_current_user)):
+    if not is_super_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
     return user
 
 
@@ -812,7 +819,7 @@ async def send_delete_code(
     req: SendDeleteCodeRequest,
     user: User = Depends(get_current_user),
 ):
-    if user.role == "admin":
+    if is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="管理员账号禁止注销")
     if not user.email:
         raise HTTPException(status_code=400, detail="当前账户未绑定邮箱，暂不支持邮箱二次验证注销")
@@ -948,7 +955,7 @@ async def delete_account(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if user.role == "admin":
+    if is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="管理员账号禁止注销")
     if not user.email:
         raise HTTPException(status_code=400, detail="当前账户未绑定邮箱，暂不支持邮箱二次验证注销")

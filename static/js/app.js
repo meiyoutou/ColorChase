@@ -132,6 +132,8 @@ function localAgentWriteText(relativePath, textContent, projectId, projectName) 
 // 两种模式都直接 POST 到 /api/training/upload，从服务器下载 target、前端拿 reference 和 result
 async function uploadTrainingSample(img, resultBlob, fmt) {
     try {
+        // 2026-07-16 调试：用户要求导出时自动写入训练样本库对所有登录用户开放，
+        // 不再限制只有超级管理员才能自动入库；后端 /api/training/upload 也只校验登录。
         // 构造 meta 元数据
         var meta = {
             name: img.name || '',
@@ -238,6 +240,54 @@ var _pageState = {
     sortDesc: true
 };
 
+function syncTrainingSampleImportPermission() {
+    // 2026-07-16 调试：用户要求普通管理员在训练样本库只能看、不能操作，
+    // 这里把所有会改变状态或触发写入的控件都禁用掉。
+    var canControl = isCurrentUserSuperAdmin();
+    var title = canControl ? '' : '需要超级管理员权限';
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = !canControl;
+        importBtn.title = title;
+    }
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.disabled = !canControl;
+        selectAll.title = title;
+    }
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.disabled = !canControl;
+        userFilter.title = title;
+    }
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.disabled = !canControl;
+        pageSize.title = title;
+    }
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.disabled = !canControl;
+        gotoInput.title = title;
+    }
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.disabled = !canControl;
+        refreshBtn.title = title;
+    }
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.disabled = !canControl;
+        viewFullBtn.title = title;
+    }
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.style.pointerEvents = canControl ? '' : 'none';
+        th.style.opacity = canControl ? '' : '0.6';
+        th.title = title;
+    });
+}
+
 function openTrainingSamplesModal() {
     var modal = document.getElementById('training-samples-modal');
     if (!modal) return;
@@ -256,6 +306,7 @@ function openTrainingSamplesModal() {
     var pageSize = document.getElementById('samples-page-size');
     if (pageSize) pageSize.value = '10';
 
+    syncTrainingSampleImportPermission();
     clearRightPanel();
     loadTrainingSamples();
 }
@@ -402,6 +453,8 @@ function renderSamplesTable() {
         cb.type = 'checkbox';
         cb.dataset.uuid = s.sample_uuid;
         cb.dataset.label = s.storage_label;
+        cb.disabled = !isCurrentUserSuperAdmin();
+        cb.title = cb.disabled ? '需要超级管理员权限' : '';
         cb.checked = _selectedSamples.some(function(x) { return x.uuid === s.sample_uuid; });
         cb.addEventListener('change', function(e) {
             e.stopPropagation();
@@ -428,6 +481,8 @@ function renderSamplesTable() {
         copyBtn.className = 'ts-copy-btn';
         copyBtn.innerHTML = '&#10697;';
         copyBtn.title = '复制样本 ID';
+        copyBtn.disabled = !isCurrentUserSuperAdmin();
+        if (copyBtn.disabled) copyBtn.title = '需要超级管理员权限';
         copyBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             copyToClipboard(s.sample_uuid);
@@ -483,6 +538,8 @@ function renderSamplesTable() {
         var viewBtn = document.createElement('button');
         viewBtn.className = 'ts-view-btn';
         viewBtn.textContent = '查看详情';
+        viewBtn.disabled = !isCurrentUserSuperAdmin();
+        viewBtn.title = viewBtn.disabled ? '需要超级管理员权限' : '';
         viewBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             previewTrainingSample(s.sample_uuid, s.storage_label);
@@ -505,6 +562,10 @@ function renderSamplesTable() {
 }
 
 function toggleSelection(uuid, label, checked) {
+    if (!isCurrentUserSuperAdmin()) {
+        if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+        return;
+    }
     if (checked) {
         if (!_selectedSamples.some(function(x) { return x.uuid === uuid; })) {
             _selectedSamples.push({uuid: uuid, label: label});
@@ -533,12 +594,14 @@ function renderPagination(totalPages) {
     wrap.innerHTML = '';
     var current = _pageState.page;
 
+    var canControl = isCurrentUserSuperAdmin();
     function addBtn(text, page, disabled, active) {
         var btn = document.createElement('button');
         btn.textContent = text;
-        btn.disabled = !!disabled;
+        btn.disabled = !!disabled || !canControl;
+        btn.title = !canControl ? '需要超级管理员权限' : '';
         if (active) btn.classList.add('active');
-        if (!disabled && !active) {
+        if (canControl && !disabled && !active) {
             btn.addEventListener('click', function() {
                 _pageState.page = page;
                 renderSamplesTable();
@@ -681,6 +744,11 @@ function setInfo(id, text) {
 }
 
 async function importSelectedSamples() {
+    if (!isCurrentUserSuperAdmin()) {
+        showToast('导入训练样本需要超级管理员权限');
+        syncTrainingSampleImportPermission();
+        return;
+    }
     if (_selectedSamples.length === 0) {
         showToast('请先选择样本');
         return;
@@ -720,8 +788,9 @@ async function importSelectedSamples() {
         showToast('导入失败: ' + e.message);
     } finally {
         if (importBtn) {
-            importBtn.disabled = false;
+            importBtn.disabled = !isCurrentUserSuperAdmin();
             importBtn.textContent = '导入选中样本并准备训练';
+            importBtn.title = isCurrentUserSuperAdmin() ? '' : '需要超级管理员权限';
         }
     }
 }
@@ -729,7 +798,15 @@ async function importSelectedSamples() {
 // 绑定事件
 document.addEventListener('DOMContentLoaded', function() {
     var importBtn = document.getElementById('training-import-server-btn');
-    if (importBtn) importBtn.addEventListener('click', openTrainingSamplesModal);
+    if (importBtn) {
+        importBtn.addEventListener('click', function() {
+            if (!isCurrentUserSuperAdmin()) {
+                if (typeof showToast === 'function') showToast('浏览训练样本库需要超级管理员权限');
+                return;
+            }
+            openTrainingSamplesModal();
+        });
+    }
 
     var closeBtn = document.getElementById('samples-modal-close');
     if (closeBtn) closeBtn.addEventListener('click', closeTrainingSamplesModal);
@@ -737,6 +814,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var selectAll = document.getElementById('samples-select-all');
     if (selectAll) {
         selectAll.addEventListener('change', function() {
+            if (!isCurrentUserSuperAdmin()) {
+                this.checked = false;
+                if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+                return;
+            }
             var checked = this.checked;
             var boxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
             boxes.forEach(function(cb) {
@@ -779,6 +861,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var doImportBtn = document.getElementById('samples-import-btn');
     if (doImportBtn) doImportBtn.addEventListener('click', importSelectedSamples);
+    syncTrainingSampleImportPermission();
 
     var viewFullBtn = document.getElementById('samples-view-full-btn');
     if (viewFullBtn) {
@@ -841,7 +924,16 @@ function showAgentDownloadPrompt() {
 // 判断当前登录用户是否是管理员
 function isCurrentUserAdmin() {
     try {
-        return !!(window.currentUser && window.currentUser.role === 'admin');
+        var role = String((window.currentUser && window.currentUser.role) || '').toLowerCase();
+        return role === 'admin' || role === 'super_admin';
+    } catch (e) {
+        return false;
+    }
+}
+
+function isCurrentUserSuperAdmin() {
+    try {
+        return String((window.currentUser && window.currentUser.role) || '').toLowerCase() === 'super_admin';
     } catch (e) {
         return false;
     }

@@ -21,7 +21,7 @@ def test_training_upload_uses_storage_label_dir(monkeypatch, tmp_path):
         "_training_corpus_dir_for_label",
         lambda storage_label: training_root / storage_label,
     )
-    monkeypatch.setattr(local_storage_api, "_is_admin_request", lambda authorization: True)
+    monkeypatch.setattr(local_storage_api, "_is_super_admin_request", lambda authorization: True)
     monkeypatch.setattr(local_storage_api, "_get_request_user_id", lambda authorization: 7)
     monkeypatch.setattr(local_storage_api, "_get_user_email", lambda authorization: asyncio.sleep(0, result="admin@example.com"))
     monkeypatch.setattr(local_storage_api, "resolve_user_storage_label", lambda user_id: asyncio.sleep(0, result="user_admin@example.com"))
@@ -54,3 +54,31 @@ def test_training_upload_uses_storage_label_dir(monkeypatch, tmp_path):
     assert meta["storage_label"] == "user_admin@example.com"
     assert meta["user_folder"] == "user_admin@example.com"
     assert meta["tier"] == "high_rating"
+
+
+def test_training_upload_skips_without_super_admin(monkeypatch, tmp_path):
+    training_root = tmp_path / "storage" / "training" / "corpus"
+    monkeypatch.setattr(
+        local_storage_api,
+        "_training_corpus_dir_for_label",
+        lambda storage_label: training_root / storage_label,
+    )
+    monkeypatch.setattr(local_storage_api, "_is_super_admin_request", lambda authorization: False)
+
+    response = asyncio.run(
+        local_storage_api.api_training_upload(
+            storage_check=None,
+            target=FakeUpload("target.jpg", b"target"),
+            reference=FakeUpload("reference.jpg", b"reference"),
+            result=FakeUpload("result.jpg", b"result"),
+            meta=json.dumps({"rating": 5}),
+            sample_uuid="sample_1",
+            is_video="0",
+            authorization="Bearer token",
+        )
+    )
+
+    payload = json.loads(response.body)
+    assert payload["ok"] is True
+    assert payload["skipped"] == "not_super_admin_no_server_training_storage"
+    assert not training_root.exists()

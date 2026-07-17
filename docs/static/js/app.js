@@ -132,6 +132,8 @@ function localAgentWriteText(relativePath, textContent, projectId, projectName) 
 // 两种模式都直接 POST 到 /api/training/upload，从服务器下载 target、前端拿 reference 和 result
 async function uploadTrainingSample(img, resultBlob, fmt) {
     try {
+        // 2026-07-16 调试：用户要求导出时自动写入训练样本库对所有登录用户开放，
+        // 不再限制只有超级管理员才能自动入库；后端 /api/training/upload 也只校验登录。
         // 构造 meta 元数据
         var meta = {
             name: img.name || '',
@@ -227,22 +229,122 @@ async function uploadDetectionCopy(fileBlob, fileUuid, token) {
 
 // ==================== 训练样本库浏览模态框 ====================
 
-var _allSamples = [];   // 缓存全部样本
-var _selectedSamples = []; // 选中的 {uuid, label}
+var _allSamples = [];            // 缓存全部样本
+var _selectedSamples = [];       // 选中的 {uuid, label}，用于导入
+var _currentPreviewUuid = null;  // 当前右侧正在预览的样本
+var _pageState = {
+    page: 1,
+    pageSize: 10,
+    filterUser: '',
+    sortKey: 'uploaded_at',
+    sortDesc: true
+};
+
+function syncTrainingSampleImportPermission() {
+    // 2026-07-16 调试：用户要求普通管理员在训练样本库只能看、不能操作，
+    // 这里把所有会改变状态或触发写入的控件都禁用掉。
+    var canControl = isCurrentUserSuperAdmin();
+    var title = canControl ? '' : '需要超级管理员权限';
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = !canControl;
+        importBtn.title = title;
+    }
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.disabled = !canControl;
+        selectAll.title = title;
+    }
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.disabled = !canControl;
+        userFilter.title = title;
+    }
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.disabled = !canControl;
+        pageSize.title = title;
+    }
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.disabled = !canControl;
+        gotoInput.title = title;
+    }
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.disabled = !canControl;
+        refreshBtn.title = title;
+    }
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.disabled = !canControl;
+        viewFullBtn.title = title;
+    }
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.style.pointerEvents = canControl ? '' : 'none';
+        th.style.opacity = canControl ? '' : '0.6';
+        th.title = title;
+    });
+}
 
 function openTrainingSamplesModal() {
     var modal = document.getElementById('training-samples-modal');
     if (!modal) return;
     modal.style.display = 'block';
     _selectedSamples = [];
+    _currentPreviewUuid = null;
+    _pageState.page = 1;
+    _pageState.filterUser = '';
+    _pageState.sortKey = 'uploaded_at';
+    _pageState.sortDesc = true;
+
+    var filterEl = document.getElementById('samples-user-filter');
+    if (filterEl) filterEl.value = '';
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) pageSize.value = '10';
+
+    syncTrainingSampleImportPermission();
+    clearRightPanel();
     loadTrainingSamples();
 }
 
 function closeTrainingSamplesModal() {
     var modal = document.getElementById('training-samples-modal');
     if (modal) modal.style.display = 'none';
-    var previewArea = document.getElementById('sample-preview-area');
-    if (previewArea) previewArea.style.display = 'none';
+}
+
+function clearRightPanel() {
+    ['preview-target', 'preview-reference', 'preview-result'].forEach(function(id) {
+        var img = document.getElementById(id);
+        if (img) { img.src = ''; img.style.display = 'none'; }
+    });
+    ['preview-target-empty', 'preview-reference-empty', 'preview-result-empty'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'flex';
+    });
+    var fields = {
+        'info-uuid': '-', 'info-user': '-', 'info-algo': '-',
+        'info-rating': '-', 'info-files': '-', 'info-time': '-'
+    };
+    Object.keys(fields).forEach(function(k) {
+        var el = document.getElementById(k);
+        if (el) el.textContent = fields[k];
+    });
+    var metaJson = document.getElementById('preview-meta-json');
+    if (metaJson) metaJson.textContent = '';
+    var fileList = document.getElementById('preview-file-list');
+    if (fileList) fileList.innerHTML = '';
+    var detail = document.getElementById('sample-full-detail');
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    document.querySelectorAll('#samples-tbody tr.selected').forEach(function(tr) {
+        tr.classList.remove('selected');
+    });
 }
 
 async function loadTrainingSamples() {
@@ -251,15 +353,13 @@ async function loadTrainingSamples() {
     var filterEl = document.getElementById('samples-user-filter');
     if (!tbody || !countEl) return;
 
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#666;">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">加载中...</td></tr>';
     countEl.textContent = '加载中...';
 
     try {
-        var resp = await fetch('/api/train/samples', {
-            headers: getAuthHeaders()
-        });
+        var resp = await fetch('/api/train/samples', { headers: getAuthHeaders() });
         if (!resp.ok) {
-            tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#f44;">加载失败: ' + resp.status + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + resp.status + '</td></tr>';
             return;
         }
         var data = await resp.json();
@@ -267,7 +367,7 @@ async function loadTrainingSamples() {
 
         // 填充用户筛选下拉
         if (filterEl) {
-            var currentVal = filterEl.value;
+            var currentVal = filterEl.value || '';
             filterEl.innerHTML = '<option value="">全部用户</option>';
             (data.users || []).forEach(function(u) {
                 var opt = document.createElement('option');
@@ -280,159 +380,375 @@ async function loadTrainingSamples() {
 
         renderSamplesTable();
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#f44;">加载失败: ' + e.message + '</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + e.message + '</td></tr>';
     }
+}
+
+function getFilteredSamples() {
+    var list = _allSamples.slice();
+    if (_pageState.filterUser) {
+        list = list.filter(function(s) { return s.storage_label === _pageState.filterUser; });
+    }
+    return list;
+}
+
+function sortSamples(list) {
+    var key = _pageState.sortKey;
+    var desc = _pageState.sortDesc;
+    list.sort(function(a, b) {
+        var av = a[key], bv = b[key];
+        if (key === 'uploaded_at') {
+            av = av || '';
+            bv = bv || '';
+        } else {
+            av = Number(av) || 0;
+            bv = Number(bv) || 0;
+        }
+        if (av < bv) return desc ? 1 : -1;
+        if (av > bv) return desc ? -1 : 1;
+        return 0;
+    });
+    return list;
 }
 
 function renderSamplesTable() {
     var tbody = document.getElementById('samples-tbody');
     var countEl = document.getElementById('samples-count');
-    var filterEl = document.getElementById('samples-user-filter');
+    var totalEl = document.getElementById('pagination-total');
     if (!tbody) return;
 
-    var filterVal = filterEl ? filterEl.value : '';
-    var filtered = filterVal ? _allSamples.filter(function(s) { return s.storage_label === filterVal; }) : _allSamples;
+    var filtered = sortSamples(getFilteredSamples());
+    var total = filtered.length;
+    var pageSize = _pageState.pageSize;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (_pageState.page > totalPages) _pageState.page = totalPages;
+    if (_pageState.page < 1) _pageState.page = 1;
+    var start = (_pageState.page - 1) * pageSize;
+    var pageItems = filtered.slice(start, start + pageSize);
 
-    countEl.textContent = filtered.length + ' 个样本';
+    if (countEl) countEl.textContent = '共 ' + total + ' 个样本';
+    if (totalEl) totalEl.textContent = total;
     tbody.innerHTML = '';
 
-    if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#666;">暂无训练样本</td></tr>';
+    updateSortHeaders();
+    renderPagination(totalPages);
+
+    if (total === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">暂无训练样本</td></tr>';
         return;
     }
 
-    filtered.forEach(function(s) {
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+
+    pageItems.forEach(function(s) {
         var tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid #2a2a3e';
+        tr.dataset.uuid = s.sample_uuid;
+        if (s.sample_uuid === _currentPreviewUuid) tr.classList.add('selected');
 
         // 复选框
         var checkTd = document.createElement('td');
-        checkTd.style.padding = '8px';
+        checkTd.className = 'ts-col-check';
         var cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.dataset.uuid = s.sample_uuid;
         cb.dataset.label = s.storage_label;
-        cb.addEventListener('change', function() {
-            if (this.checked) {
-                _selectedSamples.push({uuid: s.sample_uuid, label: s.storage_label});
-            } else {
-                _selectedSamples = _selectedSamples.filter(function(x) { return x.uuid !== s.sample_uuid; });
-            }
+        cb.disabled = !isCurrentUserSuperAdmin();
+        cb.title = cb.disabled ? '需要超级管理员权限' : '';
+        cb.checked = _selectedSamples.some(function(x) { return x.uuid === s.sample_uuid; });
+        cb.addEventListener('change', function(e) {
+            e.stopPropagation();
+            toggleSelection(s.sample_uuid, s.storage_label, this.checked);
         });
         checkTd.appendChild(cb);
         tr.appendChild(checkTd);
 
-        // 样本ID
-        var tdUuid = document.createElement('td');
-        tdUuid.style.padding = '8px';
-        tdUuid.style.color = '#aaa';
-        tdUuid.style.fontSize = '11px';
-        tdUuid.textContent = s.sample_uuid.substring(0, 20) + '...';
-        tr.appendChild(tdUuid);
+        // 样本 ID + 缩略图
+        var tdId = document.createElement('td');
+        tdId.className = 'ts-col-id';
+        var idCell = document.createElement('div');
+        idCell.className = 'ts-id-cell';
+        var thumb = document.createElement('img');
+        thumb.className = 'ts-thumb';
+        thumb.alt = '';
+        idCell.appendChild(thumb);
+        var idText = document.createElement('span');
+        idText.className = 'ts-id-text';
+        idText.textContent = s.sample_uuid.substring(0, 18) + '...';
+        idText.title = s.sample_uuid;
+        idCell.appendChild(idText);
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'ts-copy-btn';
+        copyBtn.innerHTML = '&#10697;';
+        copyBtn.title = '复制样本 ID';
+        copyBtn.disabled = !isCurrentUserSuperAdmin();
+        if (copyBtn.disabled) copyBtn.title = '需要超级管理员权限';
+        copyBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            copyToClipboard(s.sample_uuid);
+        });
+        idCell.appendChild(copyBtn);
+        tdId.appendChild(idCell);
+        tr.appendChild(tdId);
+        loadThumbnail(thumb, s.sample_uuid, s.storage_label);
 
         // 用户
         var tdUser = document.createElement('td');
-        tdUser.style.padding = '8px';
-        tdUser.style.color = '#ccc';
-        tdUser.style.fontSize = '12px';
-        tdUser.textContent = s.storage_label;
+        tdUser.className = 'ts-col-user';
+        tdUser.textContent = s.storage_label || '-';
         tr.appendChild(tdUser);
 
         // 算法
         var tdAlgo = document.createElement('td');
-        tdAlgo.style.padding = '8px';
-        tdAlgo.style.color = '#ccc';
-        tdAlgo.textContent = s.algorithm || '-';
+        tdAlgo.className = 'ts-col-algo';
+        if (s.algorithm) {
+            var tag = document.createElement('span');
+            tag.className = 'ts-algo-tag';
+            tag.textContent = s.algorithm;
+            tdAlgo.appendChild(tag);
+        } else {
+            tdAlgo.textContent = '-';
+        }
         tr.appendChild(tdAlgo);
 
         // 评分
         var tdRating = document.createElement('td');
-        tdRating.style.padding = '8px';
-        tdRating.style.textAlign = 'center';
-        tdRating.style.color = '#e8c44a';
-        tdRating.textContent = s.rating || 0;
+        tdRating.className = 'ts-col-rating';
+        var badge = document.createElement('span');
+        badge.className = 'ts-rating-badge ' + ratingClass(s.rating);
+        badge.textContent = s.rating || 0;
+        tdRating.appendChild(badge);
         tr.appendChild(tdRating);
 
         // 文件数
         var tdFiles = document.createElement('td');
-        tdFiles.style.padding = '8px';
-        tdFiles.style.textAlign = 'center';
-        tdFiles.style.color = '#ccc';
-        tdFiles.textContent = s.file_count;
+        tdFiles.className = 'ts-col-files';
+        tdFiles.textContent = s.file_count || 0;
         tr.appendChild(tdFiles);
 
         // 上传时间
         var tdTime = document.createElement('td');
-        tdTime.style.padding = '8px';
-        tdTime.style.color = '#888';
-        tdTime.style.fontSize = '11px';
-        var dt = s.uploaded_at ? s.uploaded_at.substring(0, 19).replace('T', ' ') : '-';
-        tdTime.textContent = dt;
+        tdTime.className = 'ts-col-time';
+        tdTime.textContent = formatTime(s.uploaded_at);
         tr.appendChild(tdTime);
 
-        // 操作 - 查看按钮
+        // 操作
         var tdAction = document.createElement('td');
-        tdAction.style.padding = '8px';
-        tdAction.style.textAlign = 'center';
+        tdAction.className = 'ts-col-action';
         var viewBtn = document.createElement('button');
-        viewBtn.textContent = '查看';
-        viewBtn.style.cssText = 'background:#333;color:#4a9eff;border:1px solid #444;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px;';
-        viewBtn.addEventListener('click', function() {
+        viewBtn.className = 'ts-view-btn';
+        viewBtn.textContent = '查看详情';
+        viewBtn.disabled = !isCurrentUserSuperAdmin();
+        viewBtn.title = viewBtn.disabled ? '需要超级管理员权限' : '';
+        viewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
             previewTrainingSample(s.sample_uuid, s.storage_label);
         });
         tdAction.appendChild(viewBtn);
         tr.appendChild(tdAction);
 
+        tr.addEventListener('click', function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || (e.target.closest && e.target.closest('button'))) return;
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+
         tbody.appendChild(tr);
+    });
+
+    // 默认预览当前页第一条
+    if (!_currentPreviewUuid && pageItems.length > 0) {
+        previewTrainingSample(pageItems[0].sample_uuid, pageItems[0].storage_label);
+    }
+}
+
+function toggleSelection(uuid, label, checked) {
+    if (!isCurrentUserSuperAdmin()) {
+        if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+        return;
+    }
+    if (checked) {
+        if (!_selectedSamples.some(function(x) { return x.uuid === uuid; })) {
+            _selectedSamples.push({uuid: uuid, label: label});
+        }
+    } else {
+        _selectedSamples = _selectedSamples.filter(function(x) { return x.uuid !== uuid; });
+    }
+}
+
+function updateSortHeaders() {
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        var key = th.dataset.sort;
+        var base = th.textContent.replace(/[↑↓↕]/g, '').trim();
+        if (key === _pageState.sortKey) {
+            th.textContent = base + ' ' + (_pageState.sortDesc ? '↓' : '↑');
+        } else {
+            th.textContent = base + ' ↕';
+        }
     });
 }
 
-async function previewTrainingSample(sampleUuid, storageLabel) {
-    var previewArea = document.getElementById('sample-preview-area');
-    if (!previewArea) return;
-    previewArea.style.display = 'block';
+function renderPagination(totalPages) {
+    var wrap = document.getElementById('samples-page-btns');
+    var goto = document.getElementById('samples-goto');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    var current = _pageState.page;
 
-    // 先清空
-    document.getElementById('preview-target').src = '';
-    document.getElementById('preview-reference').src = '';
-    document.getElementById('preview-result').src = '';
-    document.getElementById('preview-meta-json').textContent = '加载中...';
-    document.getElementById('preview-file-list').innerHTML = '';
+    var canControl = isCurrentUserSuperAdmin();
+    function addBtn(text, page, disabled, active) {
+        var btn = document.createElement('button');
+        btn.textContent = text;
+        btn.disabled = !!disabled || !canControl;
+        btn.title = !canControl ? '需要超级管理员权限' : '';
+        if (active) btn.classList.add('active');
+        if (canControl && !disabled && !active) {
+            btn.addEventListener('click', function() {
+                _pageState.page = page;
+                renderSamplesTable();
+            });
+        }
+        wrap.appendChild(btn);
+    }
+
+    addBtn('<', current - 1, current <= 1, false);
+    for (var p = 1; p <= totalPages; p++) {
+        addBtn(String(p), p, false, p === current);
+    }
+    addBtn('>', current + 1, current >= totalPages, false);
+
+    if (goto) goto.value = current;
+}
+
+function formatTime(iso) {
+    if (!iso) return '-';
+    return String(iso).substring(0, 19).replace('T', ' ');
+}
+
+function ratingClass(r) {
+    r = Number(r) || 0;
+    if (r === 0) return 'ts-rating-0';
+    if (r <= 2) return 'ts-rating-low';
+    if (r === 3) return 'ts-rating-mid';
+    if (r === 4) return 'ts-rating-high';
+    return 'ts-rating-best';
+}
+
+function loadThumbnail(imgEl, uuid, label) {
+    fetch('/api/train/samples/' + encodeURIComponent(uuid) + '/thumbnail?storage_label=' + encodeURIComponent(label) + '&size=48', {
+        headers: getAuthHeaders()
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.thumbnail) imgEl.src = data.thumbnail;
+    })
+    .catch(function(err) {
+        console.error('缩略图加载失败', uuid, err);
+    });
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() { showToast('已复制'); }).catch(function() {});
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('已复制');
+    }
+}
+
+async function previewTrainingSample(sampleUuid, storageLabel) {
+    _currentPreviewUuid = sampleUuid;
+    document.querySelectorAll('#samples-tbody tr').forEach(function(tr) {
+        tr.classList.toggle('selected', tr.dataset.uuid === sampleUuid);
+    });
+
+    var targetImg = document.getElementById('preview-target');
+    var targetEmpty = document.getElementById('preview-target-empty');
+    var referenceImg = document.getElementById('preview-reference');
+    var referenceEmpty = document.getElementById('preview-reference-empty');
+    var resultImg = document.getElementById('preview-result');
+    var resultEmpty = document.getElementById('preview-result-empty');
+    var metaJson = document.getElementById('preview-meta-json');
+    var fileList = document.getElementById('preview-file-list');
+    var detail = document.getElementById('sample-full-detail');
+
+    if (targetImg) { targetImg.src = ''; targetImg.style.display = 'none'; }
+    if (targetEmpty) targetEmpty.style.display = 'flex';
+    if (referenceImg) { referenceImg.src = ''; referenceImg.style.display = 'none'; }
+    if (referenceEmpty) referenceEmpty.style.display = 'flex';
+    if (resultImg) { resultImg.src = ''; resultImg.style.display = 'none'; }
+    if (resultEmpty) resultEmpty.style.display = 'flex';
+    if (metaJson) metaJson.textContent = '';
+    if (fileList) fileList.innerHTML = '';
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    var s = _allSamples.filter(function(x) { return x.sample_uuid === sampleUuid; })[0];
+    if (s) {
+        setInfo('info-uuid', s.sample_uuid);
+        setInfo('info-user', s.storage_label || '-');
+        setInfo('info-algo', s.algorithm || '-');
+        setInfo('info-rating', (s.rating || 0) + '');
+        setInfo('info-files', (s.file_count || 0) + '');
+        setInfo('info-time', formatTime(s.uploaded_at));
+    }
 
     try {
         var resp = await fetch('/api/train/samples/' + encodeURIComponent(sampleUuid) + '/preview?storage_label=' + encodeURIComponent(storageLabel), {
             headers: getAuthHeaders()
         });
         if (!resp.ok) {
-            document.getElementById('preview-meta-json').textContent = '加载失败: ' + resp.status;
+            if (metaJson) metaJson.textContent = '加载失败: ' + resp.status;
             return;
         }
         var data = await resp.json();
 
-        // 显示图片
-        if (data.images) {
-            if (data.images.target) document.getElementById('preview-target').src = data.images.target;
-            if (data.images.reference) document.getElementById('preview-reference').src = data.images.reference;
-            if (data.images.result) document.getElementById('preview-result').src = data.images.result;
+        if (data.images && data.images.target && targetImg) {
+            targetImg.src = data.images.target;
+            targetImg.style.display = 'block';
+            if (targetEmpty) targetEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.reference && referenceImg) {
+            referenceImg.src = data.images.reference;
+            referenceImg.style.display = 'block';
+            if (referenceEmpty) referenceEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.result && resultImg) {
+            resultImg.src = data.images.result;
+            resultImg.style.display = 'block';
+            if (resultEmpty) resultEmpty.style.display = 'none';
         }
 
-        // 显示 meta
-        document.getElementById('preview-meta-json').textContent = JSON.stringify(data.meta || {}, null, 2);
-
-        // 显示文件列表
-        var fileList = document.getElementById('preview-file-list');
-        (data.file_list || []).forEach(function(fn) {
-            var li = document.createElement('li');
-            li.textContent = fn;
-            li.style.padding = '2px 0';
-            fileList.appendChild(li);
-        });
+        if (metaJson) metaJson.textContent = JSON.stringify(data.meta || {}, null, 2);
+        if (fileList) {
+            fileList.innerHTML = '';
+            (data.file_list || []).forEach(function(fn) {
+                var li = document.createElement('li');
+                li.textContent = fn;
+                fileList.appendChild(li);
+            });
+        }
     } catch (e) {
-        document.getElementById('preview-meta-json').textContent = '加载失败: ' + e.message;
+        if (metaJson) metaJson.textContent = '加载失败: ' + e.message;
     }
 }
 
+function setInfo(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
 async function importSelectedSamples() {
+    if (!isCurrentUserSuperAdmin()) {
+        showToast('导入训练样本需要超级管理员权限');
+        syncTrainingSampleImportPermission();
+        return;
+    }
     if (_selectedSamples.length === 0) {
         showToast('请先选择样本');
         return;
@@ -463,24 +779,18 @@ async function importSelectedSamples() {
         var data = await resp.json();
         showToast('已导入 ' + data.imported_count + ' 个样本，共 ' + data.training_file_count + ' 张图片');
 
-        // 更新训练目录为 .active
         var dirInput = document.getElementById('training-image-dir');
-        if (dirInput && data.active_dir) {
-            dirInput.value = data.active_dir;
-        }
-
-        // 刷新数据统计
-        if (typeof refreshTrainingDataStats === 'function') {
-            refreshTrainingDataStats();
-        }
+        if (dirInput && data.active_dir) dirInput.value = data.active_dir;
+        if (typeof refreshTrainingDataStats === 'function') refreshTrainingDataStats();
 
         closeTrainingSamplesModal();
     } catch (e) {
         showToast('导入失败: ' + e.message);
     } finally {
         if (importBtn) {
-            importBtn.disabled = false;
+            importBtn.disabled = !isCurrentUserSuperAdmin();
             importBtn.textContent = '导入选中样本并准备训练';
+            importBtn.title = isCurrentUserSuperAdmin() ? '' : '需要超级管理员权限';
         }
     }
 }
@@ -489,33 +799,94 @@ async function importSelectedSamples() {
 document.addEventListener('DOMContentLoaded', function() {
     var importBtn = document.getElementById('training-import-server-btn');
     if (importBtn) {
-        importBtn.addEventListener('click', openTrainingSamplesModal);
+        importBtn.addEventListener('click', function() {
+            if (!isCurrentUserSuperAdmin()) {
+                if (typeof showToast === 'function') showToast('浏览训练样本库需要超级管理员权限');
+                return;
+            }
+            openTrainingSamplesModal();
+        });
     }
+
     var closeBtn = document.getElementById('samples-modal-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', closeTrainingSamplesModal);
-    }
+    if (closeBtn) closeBtn.addEventListener('click', closeTrainingSamplesModal);
+
     var selectAll = document.getElementById('samples-select-all');
     if (selectAll) {
         selectAll.addEventListener('change', function() {
-            var checkboxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
-            _selectedSamples = [];
-            checkboxes.forEach(function(cb) {
-                cb.checked = selectAll.checked;
-                if (selectAll.checked) {
-                    _selectedSamples.push({uuid: cb.dataset.uuid, label: cb.dataset.label});
-                }
+            if (!isCurrentUserSuperAdmin()) {
+                this.checked = false;
+                if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+                return;
+            }
+            var checked = this.checked;
+            var boxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
+            boxes.forEach(function(cb) {
+                cb.checked = checked;
+                toggleSelection(cb.dataset.uuid, cb.dataset.label, checked);
             });
         });
     }
+
     var userFilter = document.getElementById('samples-user-filter');
     if (userFilter) {
-        userFilter.addEventListener('change', renderSamplesTable);
+        userFilter.addEventListener('change', function() {
+            _pageState.filterUser = this.value;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
     }
+
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.addEventListener('change', function() {
+            _pageState.pageSize = parseInt(this.value, 10) || 10;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    }
+
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.addEventListener('change', function() {
+            var p = parseInt(this.value, 10);
+            if (!p || p < 1) return;
+            _pageState.page = p;
+            renderSamplesTable();
+        });
+    }
+
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadTrainingSamples);
+
     var doImportBtn = document.getElementById('samples-import-btn');
-    if (doImportBtn) {
-        doImportBtn.addEventListener('click', importSelectedSamples);
+    if (doImportBtn) doImportBtn.addEventListener('click', importSelectedSamples);
+    syncTrainingSampleImportPermission();
+
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.addEventListener('click', function() {
+            var detail = document.getElementById('sample-full-detail');
+            if (!detail) return;
+            var show = detail.style.display === 'none';
+            detail.style.display = show ? 'block' : 'none';
+            viewFullBtn.textContent = show ? '收起全部详情' : '查看全部详情';
+        });
     }
+
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var key = this.dataset.sort;
+            if (_pageState.sortKey === key) {
+                _pageState.sortDesc = !_pageState.sortDesc;
+            } else {
+                _pageState.sortKey = key;
+                _pageState.sortDesc = true;
+            }
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    });
 });
 
 // 显示下载提示 + 数据泄露风险警告弹窗
@@ -553,7 +924,16 @@ function showAgentDownloadPrompt() {
 // 判断当前登录用户是否是管理员
 function isCurrentUserAdmin() {
     try {
-        return !!(window.currentUser && window.currentUser.role === 'admin');
+        var role = String((window.currentUser && window.currentUser.role) || '').toLowerCase();
+        return role === 'admin' || role === 'super_admin';
+    } catch (e) {
+        return false;
+    }
+}
+
+function isCurrentUserSuperAdmin() {
+    try {
+        return String((window.currentUser && window.currentUser.role) || '').toLowerCase() === 'super_admin';
     } catch (e) {
         return false;
     }
@@ -768,6 +1148,7 @@ let _mergedSessionId = null;
 let _profileSessionId = null;
 let _modelStatusCache = null;
 let _modelStatusPromise = null;
+let _modelStatusAuthFailed = false;
 let _originalImageData = null, _stylizedImageData = null;
 let _origCanvasDataUrl = null, _resultCanvasDataUrl = null;
 let _refDataUrl = null;
@@ -2526,11 +2907,23 @@ function updateAlgoInfo() {
 function fetchModelStatusCached(force) {
     if (force) {
         _modelStatusCache = null;
+        _modelStatusAuthFailed = false;
     }
     if (!force && _modelStatusCache) return Promise.resolve(_modelStatusCache);
     if (!force && _modelStatusPromise) return _modelStatusPromise;
+    // 没登录或已经 401 过，就不要再发了，避免后台一直刷 401 日志
+    if (!localStorage.getItem('cc_token') || _modelStatusAuthFailed) {
+        _modelStatusCache = {};
+        return Promise.resolve(_modelStatusCache);
+    }
     _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store', headers: getAuthHeaders() })
-        .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+        .then(function(resp) {
+            if (resp.status === 401) {
+                _modelStatusAuthFailed = true;
+                return { ok: true, data: {} };
+            }
+            return resp.json().then(function(data) { return { ok: resp.ok, data: data }; });
+        })
         .then(function(result) {
             if (!result.ok) throw new Error((result.data && result.data.detail) || '模型状态读取失败');
             _modelStatusCache = result.data || {};

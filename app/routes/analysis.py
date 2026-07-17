@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
-from app.services.auth_utils import _get_request_user_id
+from app.services.auth_utils import _get_request_user_id, is_admin_role
 from app.services.user_identity import resolve_user_storage_label
 
 
@@ -111,7 +111,7 @@ def create_analysis_router(
             raise HTTPException(status_code=401, detail="请先登录")
         storage_label = await resolve_user_storage_label(user_id)
         request_user_role = get_request_user_role(authorization)
-        is_admin = request_user_role == "admin"
+        is_admin = is_admin_role(request_user_role)
         semantic_choice = resolve_semantic_model_choice(semantic_model)
         resolved_target_path = resolve_local_file_path(
             target_path,

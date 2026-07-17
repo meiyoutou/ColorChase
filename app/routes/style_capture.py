@@ -12,7 +12,7 @@ from fastapi import APIRouter, UploadFile, File, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.security import ensure_upload_file_size
-from app.services.auth_utils import _get_request_user_id, _get_request_user_role
+from app.services.auth_utils import _get_request_user_id, _get_request_user_role, is_admin_role
 from app.services.paths import _runtime_user_temp_dir, _runtime_user_temp_url, _save_to_runtime_user_temp
 from app.services.user_identity import resolve_user_storage_label
 from config import STORAGE_STYLES_EXTRACTED_DIR
@@ -91,7 +91,7 @@ async def api_capture_style(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
-    is_admin = request_user_role == "admin"
+    is_admin = is_admin_role(request_user_role)
     if request_user_id is None:
         raise HTTPException(status_code=401, detail="请先登录")
     storage_label = await resolve_user_storage_label(request_user_id)

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 STORAGE_ROOT = ROOT / "storage"
 TRAINING_CORPUS_ROOT = STORAGE_ROOT / "training" / "corpus"
 MANIFEST_ROOT = STORAGE_ROOT / "logs" / "migrations"

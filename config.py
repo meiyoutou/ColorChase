@@ -1,4 +1,5 @@
 import json
+import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Optional
@@ -58,6 +59,9 @@ DEFAULT_PATHS = {
 RUNTIME_PATH_KEYS = tuple(DEFAULT_PATHS.keys())
 
 _RUNTIME_USER_ID: ContextVar[Optional[int]] = ContextVar("runtime_user_id", default=None)
+# 2026-07-23 修复：运行时路径（uploads/temp/videos/debug）按 user_邮箱 隔离，
+# 不再按 user_id。中间件每次请求把 storage_label 塞进来，_resolve_user_label 优先读它。
+_RUNTIME_STORAGE_LABEL: ContextVar[Optional[str]] = ContextVar("runtime_storage_label", default=None)
 
 
 def _coerce_user_id(user_id: Optional[int]) -> Optional[int]:
@@ -75,6 +79,15 @@ def set_current_runtime_user(user_id: Optional[int]):
 
 def reset_current_runtime_user(token) -> None:
     _RUNTIME_USER_ID.reset(token)
+
+
+def set_current_runtime_storage_label(label: Optional[str]):
+    """中间件调用：把当前请求用户的 storage_label（user_邮箱）塞进 ContextVar。"""
+    return _RUNTIME_STORAGE_LABEL.set(str(label).strip() if label else None)
+
+
+def reset_current_runtime_storage_label(token) -> None:
+    _RUNTIME_STORAGE_LABEL.reset(token)
 
 
 def get_current_runtime_user() -> Optional[int]:
@@ -118,10 +131,16 @@ def _is_legacy_default_path(key: str, value) -> bool:
         return False
 
 
+def _is_foreign_windows_path(value) -> bool:
+    raw = str(value or "").strip()
+    return os.name != "nt" and len(raw) >= 3 and raw[1] == ":" and raw[2] in ("\\", "/")
+
+
 def _upgrade_legacy_config_paths(cfg: dict) -> dict:
     upgraded = dict(cfg or {})
     for key, default_value in DEFAULT_PATHS.items():
-        if _is_legacy_default_path(key, upgraded.get(key)):
+        configured = upgraded.get(key)
+        if _is_legacy_default_path(key, configured) or _is_foreign_windows_path(configured):
             upgraded[key] = default_value
     return upgraded
 
@@ -170,7 +189,14 @@ def _resolve_user_email(user_id: int) -> Optional[str]:
 
 
 def _resolve_user_label(user_id: int) -> str:
-    """路径配置层只使用 user_id，不查询数据库。"""
+    """运行时路径隔离用的目录名。
+
+    优先用中间件设置的 storage_label（user_邮箱/手机号），和持久化目录（project_assets）
+    保持一致。非请求上下文（启动时、后台任务）没有 storage_label 时 fallback 到 user_{id}。
+    """
+    label = _RUNTIME_STORAGE_LABEL.get()
+    if label:
+        return label
     return f"user_{user_id}"
 
 

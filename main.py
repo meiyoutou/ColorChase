@@ -1546,6 +1546,13 @@ async def api_transfer(
         skin_mask = None
         lip_mask = None
         hair_mask = None
+        # 2026-07-23 修复：先用 mediapipe 快速检测人脸，挡掉风景/物体图
+        # 调试发现 SegFace 对风景图会误检出 skin 20.7%，靠 skin_pct 阈值挡不住
+        # mediapipe 在 CPU 上几十毫秒，先跑这步还能省掉非人像白跑 SegFace 的时间
+        from algorithms.segface import has_human_face
+        has_face = await asyncio.to_thread(has_human_face, target_img)
+        if not has_face:
+            raise_task_http_error(400, "AI人像追色仅支持人物照片，请选择包含清晰人脸的图片或切换至其他追色模式")
         try:
             if not model_runtime["segface_enabled"]:
                 raise RuntimeError("SegFace 已在后台禁用")

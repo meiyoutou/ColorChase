@@ -287,6 +287,8 @@ from config import (
     get_user_profiles_dir,
     get_user_references_dir,
     reset_current_runtime_user,
+    reset_current_runtime_storage_label,
+    set_current_runtime_storage_label,
     set_current_runtime_user,
 )
 ensure_runtime_dirs()
@@ -316,6 +318,14 @@ async def serve_style_extracted_file(file_path: str):
     if not target:
         raise HTTPException(status_code=404, detail="Style asset not found")
     return FileResponse(str(target))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon():
+    favicon_path = STATIC_DIR / "assets" / "favicon.jpg"
+    if not favicon_path.exists():
+        raise HTTPException(status_code=404, detail="Favicon not found")
+    return FileResponse(str(favicon_path), media_type="image/jpeg")
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -356,6 +366,20 @@ async def serve_user_asset(
 async def no_cache_static(request: Request, call_next):
     request_user_id = _resolve_runtime_user_id_from_request(request)
     runtime_user_token = set_current_runtime_user(request_user_id)
+
+    # 2026-07-23 修复：把 storage_label（user_邮箱）也塞进 ContextVar，
+    # 这样 _resolve_user_label 就能返回 user_邮箱 而不是 user_id。
+    # resolve_user_storage_label 有内存缓存，不会每个请求都查库。
+    runtime_label_token = None
+    request_storage_label = None
+    if request_user_id is not None:
+        try:
+            from app.services.user_identity import resolve_user_storage_label
+            request_storage_label = await resolve_user_storage_label(request_user_id)
+        except Exception:
+            request_storage_label = None
+        runtime_label_token = set_current_runtime_storage_label(request_storage_label)
+
     # 首次访问时为该用户创建按用户隔离的子目录
     if request_user_id is not None and request_user_id not in _ensured_user_dirs:
         try:
@@ -375,6 +399,8 @@ async def no_cache_static(request: Request, call_next):
     finally:
         if limit_lease is not None:
             await limit_lease.release()
+        if runtime_label_token is not None:
+            reset_current_runtime_storage_label(runtime_label_token)
         reset_current_runtime_user(runtime_user_token)
 
 from app.routes.style_capture import router as style_capture_router
@@ -1229,7 +1255,7 @@ async def api_transfer(
     await prog("upload", 5, "读取图片中...")
     await asyncio.sleep(0.01)
 
-    target_load_size = 2048 if not generate_lut_only else None
+    target_load_size = 2048
     if algorithm == "dncm_lut" and str(lut_mode or "").lower() == "fast":
         target_load_size = 1024
 

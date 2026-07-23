@@ -277,10 +277,14 @@ def _iter_user_asset_roots(asset_group: str, storage_label: Optional[str] = None
         candidate_maps.append(_user_asset_roots(storage_label=storage_label))
     candidate_maps.append(_user_asset_roots())
     if user_id is not None:
+        # 2026-07-23 修复：用 _resolve_user_label 走 storage_label（user_邮箱），
+        # 不再硬编码 user_{id}。
+        from config import _resolve_user_label
+        _label = _resolve_user_label(int(user_id))
         candidate_maps.append({
-            "images": get_user_assets_dir() / f"user_{int(user_id)}" / "images",
-            "references": get_user_assets_dir() / f"user_{int(user_id)}" / "references",
-            "profiles": get_user_assets_dir() / f"user_{int(user_id)}" / "profiles",
+            "images": get_user_assets_dir() / _label / "images",
+            "references": get_user_assets_dir() / _label / "references",
+            "profiles": get_user_assets_dir() / _label / "profiles",
         })
     for roots in candidate_maps:
         root = roots.get(group)
@@ -392,6 +396,45 @@ def _resolve_local_file_path(
             if candidate == root_resolved or root_resolved in candidate.parents:
                 return candidate if candidate.exists() else None
             return None
+    # #region debug-point A:abs-path
+    # 处理前端直接传入的服务器绝对路径（迁移/本地缓存遗留）
+    if raw.startswith("/") and request_storage_label:
+        try:
+            abs_candidate = Path(raw).resolve()
+        except Exception:
+            abs_candidate = Path(raw)
+        try:
+            project_root = _project_assets_root_for_label(request_storage_label).resolve()
+        except Exception:
+            project_root = None
+        if project_root is not None and (project_root == abs_candidate or project_root in abs_candidate.parents):
+            try:
+                rel = abs_candidate.relative_to(project_root)
+            except Exception:
+                rel = None
+            if rel is not None and len(rel.parts) >= 2:
+                pid_part, *rest = rel.parts
+                if pid_part.isdigit():
+                    try:
+                        return _safe_project_asset_file(int(pid_part), "/".join(rest), storage_label=request_storage_label)
+                    except HTTPException:
+                        return None
+        try:
+            user_roots = _user_assets_root_for_label(request_storage_label)
+        except Exception:
+            user_roots = {}
+        for group, root in user_roots.items():
+            try:
+                root_resolved = root.resolve()
+            except Exception:
+                root_resolved = root
+            if root_resolved == abs_candidate or root_resolved in abs_candidate.parents:
+                try:
+                    rel = abs_candidate.relative_to(root_resolved)
+                    return _safe_user_asset_file(group, "/".join(rel.parts), storage_label=request_storage_label, user_id=request_user_id)
+                except (ValueError, HTTPException):
+                    return None
+    # #endregion
     if not allow_workspace_path:
         return None
     candidate = Path(raw)
@@ -496,7 +539,10 @@ def _iter_runtime_user_temp_roots(user_id: int, storage_label: Optional[str] = N
     candidates = []
     if storage_label:
         candidates.append(_runtime_user_temp_dir_for_label(storage_label))
-    candidates.append(STORAGE_TEMP_DIR / "user_uploads" / f"user_{int(user_id)}")
+    # 2026-07-23 修复：用 _resolve_user_label 走 storage_label（user_邮箱），
+    # 不再硬编码 user_{id}。非请求上下文 fallback 到 user_{id}。
+    from config import _resolve_user_label
+    candidates.append(STORAGE_TEMP_DIR / "user_uploads" / _resolve_user_label(int(user_id)))
     for root in candidates:
         try:
             resolved = root.resolve()

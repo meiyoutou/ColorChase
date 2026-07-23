@@ -172,8 +172,10 @@ def _load_model(ckpt_path, device):
     return model
 
 
-def neuralpreset_transfer(target_img, reference_img, device="cuda"):
-    if device == "cuda" and not torch.cuda.is_available():
+def neuralpreset_transfer(target_img, reference_img, device="auto"):
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    elif device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
 
     ckpt_path = os.path.join(

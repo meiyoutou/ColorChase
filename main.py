@@ -1532,10 +1532,10 @@ async def api_transfer(
             from core.color.color_refine import refine_color_distribution
             result_img = await asyncio.to_thread(
                 refine_color_distribution, result_global, reference_img,
-                l_mean_strength=0.3, a_mean_strength=0.0, b_mean_strength=0.8,
-                l_std_strength=0.25, a_std_strength=0.15, b_std_strength=0.3
+                l_mean_strength=0.3, a_mean_strength=0.3, b_mean_strength=0.6,
+                l_std_strength=0.25, a_std_strength=0.2, b_std_strength=0.3
             )
-            print("[Color Refine] L_mean=0.3 a_mean=0.0 b_mean=0.8 L_std=0.25 a_std=0.15 b_std=0.3")
+            print("[Color Refine] L_mean=0.3 a_mean=0.3 b_mean=0.6 L_std=0.25 a_std=0.2 b_std=0.3")
         except Exception as e:
             print(f"[Color Refine] failed: {e}, using raw ModFlows output")
             result_img = result_global
@@ -1598,6 +1598,9 @@ async def api_transfer(
             print(f"[SegFace] segmentation failed: {e}")
             has_skin = False
 
+        if not has_skin:
+            raise_task_http_error(400, "AI人像追色仅支持人物照片，请选择包含清晰人脸的图片或切换至其他追色模式")
+
         if has_skin and skin_mask is not None:
             await prog("skin_reconstruct", 68, "肤色重建(保留血色底子)...")
             await asyncio.sleep(0.01)
@@ -1633,6 +1636,7 @@ async def api_transfer(
                     colorize_highlights,
                     result_img=result_img,
                     hair_mask=hair_mask,
+                    highlight_shift=-6,
                 )
                 print("[Highlights] applied in preview")
             except Exception as e:

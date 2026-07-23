@@ -64,7 +64,7 @@ def reconstruct_clean_skin(result_img, source_img=None, mask_skin=None, strength
     return result_final, mask_soft
 
 
-def colorize_highlights(result_img, hair_mask=None, mask_skin=None):
+def colorize_highlights(result_img, hair_mask=None, mask_skin=None, highlight_shift=-6):
     h, w = result_img.shape[:2]
 
     res_lab = cv2.cvtColor(result_img, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -92,8 +92,8 @@ def colorize_highlights(result_img, hair_mask=None, mask_skin=None):
         print("[Highlights] no non-skin highlight pixels (L>190) found")
         return result_img
 
-    a_colored = a - non_skin * 12.0
-    b_colored = b - non_skin * 12.0
+    a_colored = a - non_skin * highlight_shift
+    b_colored = b - non_skin * highlight_shift
 
     colored_lab = cv2.merge([L, a_colored, b_colored]).astype(np.uint8)
     colored_bgr = cv2.cvtColor(colored_lab, cv2.COLOR_LAB2BGR)

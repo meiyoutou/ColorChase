@@ -28,7 +28,12 @@ _session_factory = None
 def get_engine():
     global engine
     if engine is None:
-        engine = create_async_engine(DATABASE_URL, echo=False)
+        engine = create_async_engine(
+            DATABASE_URL,
+            echo=False,
+            pool_pre_ping=True,
+            pool_recycle=1800,
+        )
     return engine
 
 

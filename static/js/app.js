@@ -138,7 +138,7 @@ async function uploadTrainingSample(img, resultBlob, fmt) {
         var meta = {
             name: img.name || '',
             rating: img.rating || 0,
-            algorithm: img.aiAlgo || (function() { try { return $('#ai-algorithm-select').value; } catch (e) { return ''; } })(),
+            algorithm: (function() { try { return getSelectedAIAlgorithm(); } catch (e) { return img.aiAlgo || ''; } })(),
             sourcePath: img.sourcePath || '',
             refSavedPath: img.refSavedPath || '',
             params: img.params || {},
@@ -1133,6 +1133,15 @@ const STYLE_TAGS = {
     'standard': 'Original',
 };
 
+function getSelectedAIAlgorithm() {
+    var select = $('#ai-algorithm-select');
+    var value = select && select.value ? select.value : window._currentSelectedAlgorithm;
+    if (!value || !ALGO_NAMES[value]) value = 'reinhard';
+    window._currentSelectedAlgorithm = value;
+    if (select && select.value !== value) select.value = value;
+    return value;
+}
+
 const BUILTIN_PROFILES = ['bw', 'warm', 'cool', 'orange_bw'];
 
 let targetImages = [];
@@ -1259,9 +1268,9 @@ function getImageReferenceSrc(img) {
 function getImageResultSrc(img, fallbackSrc) {
     if (!img) return fallbackSrc || '';
     // localResultPath 在旧快照里可能存本地绝对路径，统一过 normalize 转 HTTP URL
-    return img.localResultObjectUrl ||
+    return img.resultDataUrl ||
+        img.localResultObjectUrl ||
         normalizeProjectAssetUrl(img.localResultPath, window.currentProjectId) ||
-        img.resultDataUrl ||
         normalizeProjectAssetUrl(img.resultSavedPath, window.currentProjectId) ||
         fallbackSrc ||
         '';
@@ -1497,12 +1506,37 @@ function nextId() {
 /* ---------- helpers ---------- */
 function showToast(msg, dur = 3000) {
     const t = $('#toast');
-    if (typeof msg === 'string') {
-        t.innerHTML = '';
-        t.textContent = msg;
-    } else {
+    if (typeof Node !== 'undefined' && msg instanceof Node) {
         t.innerHTML = '';
         t.appendChild(msg);
+    } else {
+        if (msg == null) {
+            msg = '';
+        } else if (Array.isArray(msg)) {
+            msg = msg.map(function(item) {
+                if (typeof item === 'string') return item;
+                if (item && typeof item.msg === 'string') return item.msg;
+                if (item && typeof item.message === 'string') return item.message;
+                try { return JSON.stringify(item); } catch(e) { return String(item); }
+            }).join('; ');
+        } else if (typeof msg === 'object') {
+            if (typeof msg.detail === 'string') msg = msg.detail;
+            else if (Array.isArray(msg.detail)) {
+                msg = msg.detail.map(function(item) {
+                    if (typeof item === 'string') return item;
+                    if (item && typeof item.msg === 'string') return item.msg;
+                    if (item && typeof item.message === 'string') return item.message;
+                    try { return JSON.stringify(item); } catch(e) { return String(item); }
+                }).join('; ');
+            } else if (typeof msg.message === 'string') msg = msg.message;
+            else {
+                try { msg = JSON.stringify(msg); } catch(e) { msg = String(msg); }
+            }
+        } else {
+            msg = String(msg);
+        }
+        t.innerHTML = '';
+        t.textContent = msg;
     }
     t.hidden = false;
     t.onclick = null;
@@ -1723,9 +1757,18 @@ function getProjectImageDeletionPaths(images) {
     var paths = [];
     var seen = new Set();
     (images || []).forEach(function(img) {
-        ['savedPath', 'sourcePath', 'thumbnailUrl'].forEach(function(key) {
+        [
+            'savedPath',
+            'sourcePath',
+            'thumbnailUrl',
+            'resultSavedPath',
+            'refSavedPath',
+            'subjectMaskPath',
+            'depthLayerPath',
+        ].forEach(function(key) {
             var value = img && img[key] ? String(img[key]).trim() : '';
             if (!value) return;
+            value = normalizeProjectAssetUrl(value, window.currentProjectId) || value;
             if (!(value.startsWith('/api/project_assets/') || value.startsWith('/assets/projects/') || value.startsWith('/uploaded/projects/'))) return;
             var normalized = value.split('?')[0];
             if (seen.has(normalized)) return;
@@ -2071,6 +2114,49 @@ function setupPressCompare() {
     var savedResultSrc = null;
     var savedCompareRightSrc = null;
 
+    function ensurePressOriginalLayer() {
+        var pane = $('#pane-result');
+        if (!pane) return null;
+        var layer = $('#press-compare-original-layer');
+        if (!layer) {
+            layer = document.createElement('img');
+            layer.id = 'press-compare-original-layer';
+            layer.className = 'canvas-layer press-compare-original-layer';
+            layer.draggable = false;
+            layer.hidden = true;
+            pane.appendChild(layer);
+        }
+        return layer;
+    }
+
+    function syncPressOriginalLayer() {
+        var layer = ensurePressOriginalLayer();
+        if (!layer) return null;
+        var originalEl = $('#canvas-original');
+        var src = (originalEl && originalEl.src) || _origCanvasDataUrl || '';
+        if (src && layer.src !== src) layer.src = src;
+        return layer;
+    }
+
+    function showPressOriginalLayer() {
+        var layer = syncPressOriginalLayer();
+        var stack = $('#canvas-stack');
+        if (!layer || !layer.src || !stack) return false;
+        layer.hidden = false;
+        stack.classList.add('press-compare-active');
+        return true;
+    }
+
+    function hidePressOriginalLayer() {
+        var layer = $('#press-compare-original-layer');
+        var stack = $('#canvas-stack');
+        if (stack) stack.classList.remove('press-compare-active');
+        if (layer) layer.hidden = true;
+    }
+
+    var originalEl = $('#canvas-original');
+    if (originalEl) originalEl.addEventListener('load', syncPressOriginalLayer);
+
     function onPressStart(e) {
         e.preventDefault();
         if (btn.disabled || isProcessing) return;
@@ -2084,8 +2170,11 @@ function setupPressCompare() {
             savedCompareRightSrc = $('#compare-right-img').src;
             $('#compare-right-img').src = $('#canvas-original').src;
         } else {
-            savedResultSrc = $('#canvas-result').src;
-            if (_origCanvasDataUrl) $('#canvas-result').src = _origCanvasDataUrl;
+            savedResultSrc = null;
+            if (!showPressOriginalLayer() && _origCanvasDataUrl) {
+                savedResultSrc = $('#canvas-result').src;
+                $('#canvas-result').src = _origCanvasDataUrl;
+            }
         }
     }
 
@@ -2098,6 +2187,7 @@ function setupPressCompare() {
             if (savedCompareRightSrc) { $('#compare-right-img').src = savedCompareRightSrc; }
             savedCompareRightSrc = null;
         } else {
+            hidePressOriginalLayer();
             if (savedResultSrc) $('#canvas-result').src = savedResultSrc;
             savedResultSrc = null;
         }
@@ -2883,6 +2973,8 @@ function switchTab(name) {
 /* ---------- AI tab ---------- */
 function updateAlgoInfo() {
     const algo = $('#ai-algorithm-select').value;
+    window._currentSelectedAlgorithm = algo;
+    console.log('[updateAlgoInfo] current algorithm:', algo);
     const info = {
         reinhard: '经典 LAB 空间统计迁移，速度极快',
         histogram: '逐通道直方图 CDF 匹配，色彩分布精确',
@@ -2981,7 +3073,7 @@ async function refreshCapabilityModelSelectors(force) {
         applyModelOptionAvailability($('#ai-mask-model'), {
             auto: { type: 'always' },
             birefnet: { type: 'model', modelKey: 'birefnet_subject_mask', requireReadyStatus: true },
-            sam: { type: 'custom', disabled: true, note: 'SAM/SAM2 推理链路尚未接入，暂不可选' },
+            sam: { type: 'model', modelKey: 'sam_subject_mask', requireReadyStatus: true },
             fallback: { type: 'always' },
         }, modelMap);
         applyModelOptionAvailability($('#ai-depth-model'), {
@@ -3278,8 +3370,9 @@ async function doAITransfer() {
     if (!img) { showToast('请先选择目标图片并上传参考图'); return; }
     if (!referenceUpload && !referencePath) { showToast('请先上传参考图'); return; }
 
-    const algorithm = $('#ai-algorithm-select').value;
     await refreshCapabilityModelSelectors(true);
+    var algorithm = getSelectedAIAlgorithm();
+    console.log('[doAITransfer] algorithm selected:', algorithm, 'cached:', window._currentSelectedAlgorithm);
     if (algorithm === 'dncm_lut' && !(await ensureDncmLutReady())) return;
     if ($('#ai-depth-enabled') && $('#ai-depth-enabled').checked) {
         if (!_depthLayerPath) {
@@ -3303,6 +3396,7 @@ async function doAITransfer() {
         algorithm: algorithm,
         image: img.name || '',
     });
+    var waitingForResultDisplay = false;
     perfTrace('start');
 
     updateProgress('canvas', 2, '准备中...');
@@ -3336,6 +3430,7 @@ async function doAITransfer() {
             formData.append('reference', referenceUpload, refFile && refFile.name ? refFile.name : 'reference.jpg');
         }
         formData.append('algorithm', algorithm);
+        console.log('[doAITransfer] submitting algorithm:', algorithm);
         formData.append('blend_strength', $('#ai-blend-slider').value / 100);
         formData.append('enable_postprocess', $('#ai-postprocess').checked);
         formData.append('enable_metrics', $('#ai-metrics').checked);
@@ -3406,8 +3501,8 @@ async function doAITransfer() {
 
             img.sessionId = data.session_id;
             img.resultDataUrl = resultSrc;
-            img.resultSavedPath = data.result_path || img.resultSavedPath || '';
-            img.localResultPath = localResultPath || img.localResultPath || '';
+            img.resultSavedPath = data.result_path || '';
+            img.localResultPath = localResultPath || '';
             img.status = 'done';
             img.aiAlgo = data.algorithm || $('#ai-algorithm-select').value || '';
             var previousRefPath = img.refSavedPath || window._refSavedPath || '';
@@ -3453,19 +3548,32 @@ async function doAITransfer() {
                 }
             }
 
-            $('#canvas-status').hidden = true;
             $('#canvas-original').src = targetSrc;
             var resultEl = $('#canvas-result');
-            resultEl.addEventListener('load', function onResultLoad() {
+            var resultDisplayDone = false;
+            function finishResultDisplay(kind) {
+                if (resultDisplayDone) return;
+                resultDisplayDone = true;
                 resultEl.removeEventListener('load', onResultLoad);
+                resultEl.removeEventListener('error', onResultError);
                 perfTrace('canvas_result_loaded', {
+                    kind: kind || 'load',
                     width: resultEl.naturalWidth || 0,
                     height: resultEl.naturalHeight || 0,
                 });
-            });
+                updateProgress('canvas', 100, '追色完成');
+                setTimeout(() => { $('#canvas-status').hidden = true; }, 500);
+            }
+            function onResultLoad() { finishResultDisplay('load'); }
+            function onResultError() { finishResultDisplay('error'); }
+            resultEl.addEventListener('load', onResultLoad);
+            resultEl.addEventListener('error', onResultError);
+            updateProgress('canvas', 98, '正在显示追色结果...');
+            waitingForResultDisplay = true;
             perfTrace('before_set_result_src');
             resultEl.src = resultSrc;
             perfTrace('after_set_result_src');
+            setTimeout(function() { finishResultDisplay('timeout'); }, 10000);
             deferIdle(function() {
                 perfTrace('image_data_cache_start');
                 Promise.all([
@@ -3516,14 +3624,6 @@ async function doAITransfer() {
             updateAllButtons();
             perfTrace('after_update_buttons');
 
-            deferIdle(function() {
-                perfTrace('merge_idle_start');
-                mergeAndUpdateCanvas().then(function() {
-                    perfTrace('merge_idle_done');
-                }).catch(function(err) {
-                    perfTrace('merge_idle_error', { message: err && err.message ? err.message : String(err) });
-                });
-            });
             setViewMode('single');
             perfTrace('after_set_view_mode');
             showToast(data.reusable_preset && data.reusable_preset.name
@@ -3536,7 +3636,9 @@ async function doAITransfer() {
     } finally {
         isProcessing = false; updateAllButtons();
         if (sse) sse.close();
-        setTimeout(() => { $('#canvas-status').hidden = true; }, 3500);
+        if (!waitingForResultDisplay) {
+            setTimeout(() => { $('#canvas-status').hidden = true; }, 3500);
+        }
         perfTrace('finally_done');
     }
 }
@@ -4686,7 +4788,7 @@ async function renderSingleImageBlob(img, format, sizeMode, sizeCustomVal) {
     formData.append('project_id', String(window.currentProjectId || 0));
     formData.append('asset_name', img.name || '');
     formData.append('rating', String(img.rating || 0));
-    formData.append('algorithm', img.aiAlgo || $('#ai-algorithm-select').value || '');
+    formData.append('algorithm', getSelectedAIAlgorithm());
     formData.append('reference_path', img.refSavedPath || window._refSavedPath || '');
     if (!(img.refSavedPath || window._refSavedPath)) {
         formData.append('reference_data_url', img.refDataUrl || _refDataUrl || '');
@@ -5131,7 +5233,12 @@ function init() {
     });
 
     $('#ai-transfer-btn').addEventListener('click', doAITransfer);
-    $('#ai-algorithm-select').addEventListener('change', updateAlgoInfo);
+    $('#ai-algorithm-select').addEventListener('change', function(e) {
+        var selected = e.target.value || '';
+        window._currentSelectedAlgorithm = selected;
+        console.log('[algorithm-select] changed to:', selected);
+        updateAlgoInfo();
+    });
     $('#ai-blend-slider').addEventListener('input', (e) => { $('#ai-blend-value').textContent = e.target.value; });
     if ($('#ai-mask-generate')) $('#ai-mask-generate').addEventListener('click', generateSubjectMask);
     if ($('#ai-mask-clear-points')) $('#ai-mask-clear-points').addEventListener('click', function() { clearSubjectMask({ clearPoints: true }); });
@@ -7281,7 +7388,7 @@ function buildSnapshotData() {
         }),
         currentTargetIndex: currentTargetIndex,
         refSavedPath: window._refSavedPath || '',
-        algorithm: $('#ai-algorithm-select') ? $('#ai-algorithm-select').value : '',
+        algorithm: getSelectedAIAlgorithm(),
         profileBuiltin: _profileBuiltin,
         lutAI: lutAI, lutProfile: lutProfile,
         videoFileSavedPath: window._videoSavedPath || '',
@@ -7610,6 +7717,8 @@ function loadSnapshotData(snap, pid) {
     if (snap.algorithm) {
         var sel = $('#ai-algorithm-select');
         if (sel) sel.value = snap.algorithm;
+        window._currentSelectedAlgorithm = snap.algorithm;
+        console.log('[loadSnapshotData] restored algorithm:', snap.algorithm);
         updateAlgoInfo();
     }
     if (snap.profileBuiltin) {
@@ -7779,6 +7888,7 @@ function loadSnapshotData(snap, pid) {
             var origSrc = getImageOriginalSrc(img) || thumbSrc;
             $('#canvas-original').src = origSrc;
             $('#canvas-result').src = getImageResultSrc(img, thumbSrc);
+            $('#canvas-reference').src = getImageReferenceSrc(img);
             _origCanvasDataUrl = origSrc;
             _resultCanvasDataUrl = getImageResultSrc(img, thumbSrc);
             setViewMode('single');

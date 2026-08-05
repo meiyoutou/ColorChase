@@ -11,14 +11,13 @@ import shutil
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = ROOT / "static"
 DOCS_DIR = ROOT / "docs"
 DOCS_STATIC_DIR = DOCS_DIR / "static"
 INDEX_SRC = STATIC_DIR / "index.html"
 INDEX_DEST = DOCS_DIR / "index.html"
 MOCK_SCRIPT = '<script src="./static/js/mock-api.js?v=github-pages-preview"></script>'
-APP_SCRIPT = '<script src="./static/js/app.js?v=20260630-bugfix9"></script>'
 MOCK_API_PATH = DOCS_STATIC_DIR / "js" / "mock-api.js"
 
 
@@ -45,10 +44,22 @@ def rewrite_static_paths(value: str) -> str:
     )
 
 
+def inject_mock_script(html: str) -> str:
+    if MOCK_SCRIPT in html:
+        return html
+
+    lines = html.splitlines()
+    for index, line in enumerate(lines):
+        if 'src="./static/js/app.js' in line:
+            lines.insert(index, MOCK_SCRIPT)
+            return "\n".join(lines)
+
+    raise RuntimeError("Could not find app.js script tag in docs preview index.")
+
+
 def sync_index() -> None:
     html = rewrite_static_paths(read_text(INDEX_SRC))
-    if MOCK_SCRIPT not in html:
-        html = html.replace(APP_SCRIPT, MOCK_SCRIPT + "\n" + APP_SCRIPT)
+    html = inject_mock_script(html)
     write_text(INDEX_DEST, html)
 
 

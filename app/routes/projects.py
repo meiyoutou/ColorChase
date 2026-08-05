@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 from collections import Counter
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from sqlalchemy import select, desc, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1881,6 +1881,23 @@ class DeleteProjectAssetsRequest(BaseModel):
     paths: list[str]
 
 
+def _coerce_delete_asset_paths_payload(payload):
+    if isinstance(payload, dict):
+        candidates = payload.get("paths")
+        if candidates is None:
+            candidates = payload.get("path") or payload.get("assets") or payload.get("items")
+        if candidates is None:
+            return []
+        if isinstance(candidates, list):
+            return candidates
+        return [candidates]
+    if isinstance(payload, list):
+        return payload
+    if payload is None:
+        return []
+    return [payload]
+
+
 @router.put("/{project_id}/snapshot")
 async def save_snapshot(
     project_id: int,
@@ -2039,7 +2056,7 @@ async def empty_trash(
 @router.delete("/{project_id}/assets")
 async def delete_project_assets(
     project_id: int,
-    req: DeleteProjectAssetsRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2049,7 +2066,18 @@ async def delete_project_assets(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    raw_paths = req.paths if isinstance(req.paths, list) else []
+    raw_payload = None
+    try:
+        raw_payload = await request.json()
+    except Exception:
+        try:
+            body_text = (await request.body()).decode("utf-8", errors="ignore").strip()
+            if body_text:
+                raw_payload = json.loads(body_text)
+        except Exception:
+            raw_payload = None
+
+    raw_paths = _coerce_delete_asset_paths_payload(raw_payload)
     normalized_paths = []
     seen = set()
     for item in raw_paths:

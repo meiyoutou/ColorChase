@@ -216,7 +216,11 @@ def _run_model_benchmark(model_key):
         from algorithms.modflows import modflows_transfer
         result = modflows_transfer(target, reference, encoder_type="B0", steps=2, strength=0.45)
         output_shape = list(result.shape)
-    elif model_key in ("ai_portrait_neuralpreset", "neural_preset"):
+    elif model_key == "ai_portrait_neuralpreset":
+        from algorithms.neuralpreset.adapter import neuralpreset_transfer
+        result = neuralpreset_transfer(target, reference, device="cpu")
+        output_shape = list(result.shape)
+    elif model_key == "neural_preset":
         from algorithms.neural_preset import neural_preset_transfer
         result = neural_preset_transfer(target, reference)
         output_shape = list(result.shape)
@@ -224,8 +228,18 @@ def _run_model_benchmark(model_key):
         from algorithms.dncm import generate_lut_from_dncm
         lut = generate_lut_from_dncm(reference, target, 9)
         output_shape = list(lut.shape)
-    elif model_key in ("segface", "sam_subject_mask"):
+    elif model_key == "segface":
         mask, meta = generate_subject_mask(target, mode="subject", prefer_birefnet=False)
+        output_shape = list(mask.shape)
+        detail = meta.get("source", "")
+    elif model_key == "sam_subject_mask":
+        mask, meta = generate_subject_mask(
+            target,
+            mode="subject",
+            prefer_birefnet=False,
+            model_choice="sam2",
+            base_dir=BASE_DIR,
+        )
         output_shape = list(mask.shape)
         detail = meta.get("source", "")
     elif model_key == "birefnet_subject_mask":

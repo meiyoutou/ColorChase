@@ -217,6 +217,7 @@ def create_analysis_router(
                 points,
                 prefer_birefnet,
                 mask_choice["choice"],
+                base_dir,
             )
             await asyncio.to_thread(save_mask_png, mask, str(mask_path))
             meta.update(

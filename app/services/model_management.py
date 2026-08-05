@@ -12,7 +12,7 @@ MODEL_MANAGEMENT_PATH = STORAGE_CACHE_DIR / "model_management.json"
 
 def _load_model_management_runtime():
     data = {
-        "default_model": "modflows_b6",
+        "default_model": "modflows_b0",
         "disabled_models": [],
         "benchmarks": {},
         "last_errors": {},
@@ -126,7 +126,12 @@ def _resolve_mask_model_choice(mask_model: str) -> dict:
         }
     if choice in ("sam", "sam2", "sam_subject_mask"):
         _force_model_ready("sam_subject_mask", bool(subject_status.get("sam_ready")), "SAM/SAM2 主体分割")
-        raise HTTPException(status_code=400, detail="SAM/SAM2 权重已检测到，但当前后端还没有接入真实 SAM 推理，暂不能强制选择")
+        return {
+            "choice": "sam2",
+            "model_key": "sam_subject_mask",
+            "prefer_birefnet": False,
+            "note": "using SAM2 Small subject mask",
+        }
     if choice in ("birefnet", "birefnet_subject_mask"):
         _force_model_ready("birefnet_subject_mask", bool(birefnet_status.get("model_ready")), "BiRefNet 主体抠图")
         return {
@@ -138,6 +143,13 @@ def _resolve_mask_model_choice(mask_model: str) -> dict:
     if choice not in ("", "auto"):
         raise HTTPException(status_code=400, detail=f"不支持的 mask 模型: {mask_model}")
 
+    if "sam_subject_mask" not in disabled and subject_status.get("sam_ready"):
+        return {
+            "choice": "sam2",
+            "model_key": "sam_subject_mask",
+            "prefer_birefnet": False,
+            "note": "auto selected SAM2 subject mask",
+        }
     if "birefnet_subject_mask" not in disabled and birefnet_status.get("model_ready"):
         return {
             "choice": "birefnet",

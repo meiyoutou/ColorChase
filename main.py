@@ -1546,6 +1546,8 @@ async def api_transfer(
         skin_mask = None
         lip_mask = None
         hair_mask = None
+        portrait_subject_mask = None
+        portrait_subject_meta = None
         # 2026-07-23 修复：先用 mediapipe 快速检测人脸，挡掉风景/物体图
         # 调试发现 SegFace 对风景图会误检出 skin 20.7%，靠 skin_pct 阈值挡不住
         # mediapipe 在 CPU 上几十毫秒，先跑这步还能省掉非人像白跑 SegFace 的时间
@@ -1568,6 +1570,42 @@ async def api_transfer(
             print(f"[SegFace] skin: {skin_pct:.1f}%, lip: {lip_mask.sum()/lip_mask.size*100:.1f}%, hair: {hair_mask.sum()/hair_mask.size*100:.1f}%")
             has_skin = skin_pct > 2.0
 
+            if model_runtime["subject_mask_enabled"]:
+                await prog("subject_segment", 64, "SAM2 人物轮廓分割...")
+                try:
+                    portrait_subject_mask, portrait_subject_meta = await asyncio.to_thread(
+                        generate_subject_mask,
+                        target_img,
+                        "subject",
+                        [],
+                        False,
+                        "sam2",
+                        BASE_DIR,
+                    )
+                    subject_source = portrait_subject_meta.get("source", "")
+                    subject_coverage = float(portrait_subject_meta.get("coverage", 0.0) or 0.0)
+                    if subject_source == "sam2" and 0.02 <= subject_coverage <= 0.9:
+                        subject_mask_soft = np.clip(portrait_subject_mask, 0.0, 1.0)
+                        skin_mask = np.clip(skin_mask * subject_mask_soft, 0.0, 1.0)
+                        lip_mask = np.clip(lip_mask * subject_mask_soft, 0.0, 1.0)
+                        hair_mask = np.clip(hair_mask * subject_mask_soft, 0.0, 1.0)
+                        skin_pct = skin_mask.sum() / skin_mask.size * 100
+                        has_skin = skin_pct > 2.0
+                        print(
+                            f"[SAM2] subject mask applied: coverage={subject_coverage:.3f}, "
+                            f"skin={skin_pct:.1f}%"
+                        )
+                    else:
+                        portrait_subject_mask = None
+                        print(
+                            f"[SAM2] subject mask skipped: source={subject_source or 'unknown'} "
+                            f"coverage={subject_coverage:.3f}"
+                        )
+                except Exception as exc:
+                    portrait_subject_mask = None
+                    portrait_subject_meta = {"source": "sam2_error", "error": str(exc)}
+                    print(f"[SAM2] portrait subject mask failed, keeping SegFace masks: {exc}")
+
             session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
 
@@ -1583,6 +1621,12 @@ async def api_transfer(
                 os.path.join(session_dir, "lip_mask.png"), lip_mask)
             await asyncio.to_thread(_save_mask,
                 os.path.join(session_dir, "hair_mask.png"), hair_mask)
+            if portrait_subject_mask is not None:
+                await asyncio.to_thread(
+                    _save_mask,
+                    os.path.join(session_dir, "subject_mask.png"),
+                    portrait_subject_mask,
+                )
             await asyncio.to_thread(_debug_save,
                 (skin_mask * 255).astype(np.uint8), "3_skin_mask.png")
             await asyncio.to_thread(_debug_save,

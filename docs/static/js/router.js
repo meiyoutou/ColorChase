@@ -2907,15 +2907,21 @@ function initTrainingWorkbench() {
             var failed = 0;
             var skippedUnsupported = 0;
             var skippedTooLarge = 0;
+            var skippedEmpty = 0;
             var idx = 0;
             appendTrainingLog('文件夹上传开始：已扫描 ' + totalScanned + ' 个文件，发现图片 ' + imgFiles.length + ' 张');
             function uploadNextBatch() {
                 if (idx >= imgFiles.length) {
                     // 全部完成：进度文案汇总 已上传 / 已失败
+                    var finishDetailParts = [];
+                    if (skippedUnsupported > 0) finishDetailParts.push('格式不支持 ' + skippedUnsupported + ' 张');
+                    if (skippedTooLarge > 0) finishDetailParts.push('超过 300MB ' + skippedTooLarge + ' 张');
+                    if (skippedEmpty > 0) finishDetailParts.push('空文件名 ' + skippedEmpty + ' 张');
+                    var finishDetail = finishDetailParts.length ? '（' + finishDetailParts.join('，') + '）' : '';
                     if (typeof showToast === 'function') {
-                        showToast('文件夹上传完成：已上传 ' + uploaded + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张' : ''));
+                        showToast('文件夹上传完成：已上传 ' + uploaded + ' 张' + (failed > 0 ? '，失败/跳过 ' + failed + ' 张' : '') + finishDetail);
                     }
-                    appendTrainingLog('文件夹上传完成：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张' + (skippedUnsupported > 0 ? '，非图片 ' + skippedUnsupported + ' 张' : '') + (skippedTooLarge > 0 ? '，超限 ' + skippedTooLarge + ' 张' : ''));
+                    appendTrainingLog('文件夹上传完成：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张' + finishDetail);
                     uploadFolderInput.value = '';
                     return;
                 }
@@ -2941,12 +2947,18 @@ function initTrainingWorkbench() {
                     var skipped = result.data.skipped_count || Math.max(batch.length - saved, 0);
                     skippedUnsupported += result.data.skipped_unsupported_count || 0;
                     skippedTooLarge += result.data.skipped_too_large_count || 0;
+                    skippedEmpty += result.data.skipped_empty_count || 0;
                     // 后端按扩展名/大小过滤，本批次中没保存的算跳过
                     failed += skipped;
                     if (result.data.training_file_count !== undefined) {
                         updateTrainingDataCountDirect(result.data.training_file_count, result.data.training_size_mb);
                     }
-                    appendTrainingLog('文件夹上传进度：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张');
+                    var detailParts = [];
+                    if (result.data.skipped_unsupported_count) detailParts.push('格式不支持 ' + result.data.skipped_unsupported_count + ' 张');
+                    if (result.data.skipped_too_large_count) detailParts.push('超过 300MB ' + result.data.skipped_too_large_count + ' 张');
+                    if (result.data.skipped_empty_count) detailParts.push('空文件名 ' + result.data.skipped_empty_count + ' 张');
+                    var detail = detailParts.length ? '（' + detailParts.join('，') + '）' : '';
+                    appendTrainingLog('文件夹上传进度：已上传 ' + uploaded + ' / 已跳过或失败 ' + failed + ' / 共 ' + imgFiles.length + ' 张' + detail);
                     idx += batchSize;
                     uploadNextBatch();
                 })
@@ -3884,7 +3896,7 @@ function loadTrashProjects() {
         grid.innerHTML = '<p style="color:#888;text-align:center;padding:40px;">请先登录</p>';
         return;
     }
-    fetch('/api/projects/trash/', {
+    fetch('/api/projects/trash', {
         method: 'GET',
         headers: { 'Authorization': 'Bearer ' + token }
     })

@@ -72,6 +72,7 @@ def create_training_router(
         authorization: Optional[str] = Header(None),
     ):
         request_user_id = get_request_user_id(authorization)
+        request_user_role = get_request_user_role(authorization)
         # 启动训练会改动模型产物，只允许超级管理员操作。
         if not _is_super_admin_request(authorization):
             raise HTTPException(status_code=403, detail="模型训练仅限超级管理员")
@@ -150,6 +151,7 @@ def create_training_router(
         skipped = 0
         skipped_unsupported = 0
         skipped_too_large = 0
+        skipped_empty = 0
         index_records = []
         now_iso = datetime.now(timezone.utc).isoformat()
         max_training_image_bytes = int_env(
@@ -159,24 +161,34 @@ def create_training_router(
         for idx, file in enumerate(files):
             if not file or not file.filename:
                 skipped += 1
+                skipped_empty += 1
+                print(f"[train/upload] skip empty file: idx={idx}")
                 continue
             ext = Path(file.filename).suffix.lower() or ".jpg"
             if ext not in training_image_extensions:
                 skipped += 1
                 skipped_unsupported += 1
+                print(f"[train/upload] skip unsupported: {file.filename} ext={ext}")
                 continue
             size = get_upload_file_size(file)
             if size is not None and size > max_training_image_bytes:
                 skipped += 1
                 skipped_too_large += 1
+                print(f"[train/upload] skip too large: {file.filename} size={size}")
                 continue
             ensure_upload_file_size(file, max_training_image_bytes, label="训练图片")
             save_name = f"{uuid.uuid4().hex}{ext}"
             save_path = training_path / save_name
-            content = await file.read()
-            with open(save_path, "wb") as f:
-                f.write(content)
-            saved.append(save_name)
+            try:
+                content = await file.read()
+                with open(save_path, "wb") as f:
+                    f.write(content)
+                saved.append(save_name)
+                print(f"[train/upload] saved: {file.filename} -> {save_name} size={len(content)}")
+            except Exception as exc:
+                skipped += 1
+                print(f"[train/upload] save failed: {file.filename} error={exc}")
+                continue
 
             # 提取相对路径和分组（用于训练样本页按子文件夹展示）
             rel_path = ""
@@ -203,12 +215,15 @@ def create_training_router(
             _append_upload_index(training_path, index_records)
 
         stats = get_training_data_stats_payload(str(training_path))
+        print(f"[train/upload] summary: files={len(files)} saved={len(saved)} skipped={skipped} "
+              f"unsupported={skipped_unsupported} too_large={skipped_too_large} empty={skipped_empty}")
         return JSONResponse({
             "success": True,
             "saved_count": len(saved),
             "skipped_count": skipped,
             "skipped_unsupported_count": skipped_unsupported,
             "skipped_too_large_count": skipped_too_large,
+            "skipped_empty_count": skipped_empty,
             "training_file_count": stats["training_file_count"],
             "training_size_mb": stats["training_size_mb"],
             "image_dir": stats["image_dir"],

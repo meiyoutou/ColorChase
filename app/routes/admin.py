@@ -45,8 +45,6 @@ from config import (
 from database import get_db
 from models import Asset, Project, User
 from progress import progress_manager
-from scripts.backfill_admin_task_logs import backfill_admin_task_logs
-
 router = APIRouter()
 
 TRAINING_DATA_ROOT = STORAGE_TRAINING_CORPUS_DIR
@@ -1443,6 +1441,11 @@ async def admin_task_logs(
 async def admin_task_logs_backfill(
     _admin: User = Depends(require_admin),
 ):
+    try:
+        from scripts.migrations.archived.backfill_admin_task_logs import backfill_admin_task_logs
+    except ModuleNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="历史日志回填脚本不可用") from exc
+
     result = await backfill_admin_task_logs()
     return {
         "success": True,

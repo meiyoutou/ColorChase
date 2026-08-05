@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+SQLAlchemy>=2.0
 aiomysql
 cryptography
 python-multipart

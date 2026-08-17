@@ -396,7 +396,6 @@ def _resolve_local_file_path(
             if candidate == root_resolved or root_resolved in candidate.parents:
                 return candidate if candidate.exists() else None
             return None
-    # #region debug-point A:abs-path
     # 处理前端直接传入的服务器绝对路径（迁移/本地缓存遗留）
     if raw.startswith("/") and request_storage_label:
         try:
@@ -434,7 +433,6 @@ def _resolve_local_file_path(
                     return _safe_user_asset_file(group, "/".join(rel.parts), storage_label=request_storage_label, user_id=request_user_id)
                 except (ValueError, HTTPException):
                     return None
-    # #endregion
     if not allow_workspace_path:
         return None
     candidate = Path(raw)
@@ -671,3 +669,24 @@ def cleanup_misc_temp(max_age_seconds: float = 24 * 3600):
             except Exception:
                 pass
     return deleted
+
+
+def to_relative_storage_path(p) -> str:
+    """把（可能绝对的）存储路径转为相对路径，供 API 响应使用，不暴露服务器目录结构。
+
+    依次相对 STORAGE_DIR、BASE_DIR 解析；都不在范围内则兜底只返回文件名。
+    """
+    if p is None:
+        return ""
+    try:
+        resolved = Path(p).resolve()
+    except Exception:
+        resolved = Path(p)
+    for root in (STORAGE_DIR, BASE_DIR):
+        try:
+            resolved_root = Path(root).resolve()
+            resolved.relative_to(resolved_root)
+            return resolved.relative_to(resolved_root).as_posix()
+        except (ValueError, OSError):
+            continue
+    return Path(p).name

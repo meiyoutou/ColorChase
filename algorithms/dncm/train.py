@@ -6,14 +6,18 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from .model import NeuralPresetPipeline, NormalizationStage, StylizationStage
+from core.io.loaders.universal_loader import RAW_EXTS, load_image_bgr
 
 
 class ColorAugmentationDataset(Dataset):
     def __init__(self, image_dir, image_size=256, num_luts=300):
         self.image_dir = image_dir
         self.image_size = image_size
+        # 2026-07-15 调试：用户上传了 RAW 相机原图训练，之前只认 jpg/png/bmp，导致训练集为空。
+        # 这里把 RAW 扩展名加进来，让 DNCM/NeuralPreset 训练也能读到这些图。
+        _supported_exts = ('.jpg', '.jpeg', '.png', '.bmp') + tuple(RAW_EXTS)
         self.image_files = [f for f in os.listdir(image_dir)
-                           if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
+                           if f.lower().endswith(_supported_exts)]
         self.lut_transforms = self._generate_random_luts(num_luts)
 
     def _generate_random_luts(self, num_luts):
@@ -65,11 +69,13 @@ class ColorAugmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = os.path.join(self.image_dir, self.image_files[idx])
-        arr = np.fromfile(img_path, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
+        # RAW 用通用加载器（rawpy）解码，普通图也能走同一条路径，省得分两套逻辑。
+        try:
+            bgr, _ = load_image_bgr(img_path)
+            img = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        except Exception as exc:
+            print(f"[DNCM Dataset] 加载失败，用黑图占位: {img_path} -> {exc}")
             img = np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.image_size, self.image_size))
 
         img_i = self._apply_color_augmentation(img)

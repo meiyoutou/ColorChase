@@ -40,6 +40,8 @@ def run_git(args, input_text=None):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if result.returncode != 0:

@@ -1,16 +1,37 @@
 import asyncio
 import json
+import os
 import re
 import sys
 from pathlib import Path
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[3]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+
+ENV_PATH = BASE_DIR / ".env"
+
+
+def _load_dotenv() -> None:
+    """简单加载 .env，确保 database.py 能读到 COLORCHASE_DATABASE_URL。"""
+    if not ENV_PATH.exists():
+        return
+    for line in ENV_PATH.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 from sqlalchemy import select
 
 from config import LEGACY_CACHE_DIR, STORAGE_CACHE_DIR
-from database import async_session
+from database import async_session, get_engine
 from models import User
 from app.routes.projects import _derive_display_name, _user_profile_record
 
@@ -289,6 +310,7 @@ async def backfill_admin_task_logs():
 
 async def main():
     result = await backfill_admin_task_logs()
+    await get_engine().dispose()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

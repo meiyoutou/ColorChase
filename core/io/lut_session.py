@@ -14,18 +14,22 @@ from config import STORAGE_STYLES_EXTRACTED_DIR
 STYLES_EXTRACTED_DIR = STORAGE_STYLES_EXTRACTED_DIR
 
 
-def _load_lut_for_session(session_id: str) -> np.ndarray:
+def _load_lut_for_session(session_id: str, storage_label: str | None = None) -> np.ndarray:
     if not re.match(r'^[A-Za-z0-9_-]{8,64}$', session_id):
         pass
     elif os.path.exists(session_id) and session_id.endswith('.npy'):
         return np.load(session_id)
-    session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
-    lut_global = os.path.join(session_dir, "lut_global.npy")
-    if os.path.exists(lut_global):
-        return np.load(lut_global)
-    lut_direct = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-    if os.path.exists(lut_direct):
-        return np.load(lut_direct)
+    roots = [_runtime_temp_lut_dir(storage_label)]
+    if storage_label:
+        roots.append(_runtime_temp_lut_dir())
+    for root in roots:
+        session_dir = os.path.join(str(root), session_id)
+        lut_global = os.path.join(session_dir, "lut_global.npy")
+        if os.path.exists(lut_global):
+            return np.load(lut_global)
+        lut_direct = os.path.join(str(root), f"{session_id}.npy")
+        if os.path.exists(lut_direct):
+            return np.load(lut_direct)
     raise FileNotFoundError(f"LUT not found for session {session_id}")
 
 

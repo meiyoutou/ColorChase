@@ -1,6 +1,8 @@
 (function() {
     'use strict';
 
+    try { console.log('[ColorChase Mock] 静态预览模式已激活，所有 /api/* 请求将由 mock 数据驱动'); } catch (_) {}
+
     var PREVIEW_USER = {
         id: 1,
         email: 'demo@colorchase.local',
@@ -194,128 +196,132 @@
 
     var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
     window.fetch = function(input, init) {
-        var rawUrl = typeof input === 'string' ? input : ((input && input.url) || '');
-        var url;
         try {
-            url = new URL(rawUrl, window.location.href);
-        } catch (e) {
-            url = { pathname: rawUrl, searchParams: new URLSearchParams() };
-        }
-        var path = url.pathname.replace(/^\/ColorChase/, '');
-        var method = ((init && init.method) || 'GET').toUpperCase();
+            var rawUrl = typeof input === 'string' ? input : ((input && input.url) || '');
+            var url;
+            try {
+                url = new URL(rawUrl, window.location.href);
+            } catch (e) {
+                url = { pathname: rawUrl, searchParams: new URLSearchParams() };
+            }
+            var path = url.pathname.replace(/^\/ColorChase/, '');
+            var method = ((init && init.method) || 'GET').toUpperCase();
 
-        if (!path.startsWith('/api/')) {
-            return nativeFetch ? nativeFetch(input, init) : Promise.reject(new Error('fetch unavailable'));
-        }
+            if (!path.startsWith('/api/')) {
+                return nativeFetch ? nativeFetch(input, init) : Promise.reject(new Error('fetch unavailable'));
+            }
 
-        if (path === '/api/auth/me') return json(PREVIEW_USER);
-        if (path === '/api/auth/login' || path === '/api/auth/register') return json({ token: 'github-pages-preview-token', user: PREVIEW_USER });
-        if (path === '/api/auth/logout') return json({ success: true });
-        if (path.indexOf('/api/auth/send_') === 0) return json({ success: true, message: '静态预览验证码已模拟发送' });
+            if (path === '/api/auth/me') return json(PREVIEW_USER);
+            if (path === '/api/auth/login' || path === '/api/auth/register') return json({ token: 'github-pages-preview-token', user: PREVIEW_USER });
+            if (path === '/api/auth/logout') return json({ success: true });
+            if (path.indexOf('/api/auth/send_') === 0) return json({ success: true, message: '静态预览验证码已模拟发送' });
 
-        if (path === '/api/portal_messages') {
-            return json({
-                notice: {
-                    version: 3,
-                    title: 'ColorChase 静态预览',
-                    body: '当前页面复用真实前端资源，所有接口由 mock 数据驱动。',
-                    updated_at: nowIso(),
-                    items: [
-                        { id: 1, title: 'GitHub Pages Preview', body: '不连接后端，不包含运行时数据。', created_at: nowIso() }
+            if (path === '/api/portal_messages') {
+                return json({
+                    notice: {
+                        version: 3,
+                        title: 'ColorChase 静态预览',
+                        body: '当前页面复用真实前端资源，所有接口由 mock 数据驱动。',
+                        updated_at: nowIso(),
+                        items: [
+                            { id: 1, title: 'GitHub Pages Preview', body: '不连接后端，不包含运行时数据。', created_at: nowIso() }
+                        ]
+                    },
+                    contact: { qq: '955749464', notes: '静态预览展示信息' }
+                });
+            }
+
+            if (path === '/api/projects/' || path === '/api/projects') return json(projects);
+            if (path === '/api/projects/trash' || path === '/api/projects/trash/') return json([]);
+            if (/^\/api\/projects\/\d+\/assets$/.test(path)) return mockProjectsAssets(path.split('/')[3]);
+            if (/^\/api\/projects\/\d+\/snapshot$/.test(path)) return json({ success: true });
+            if (/^\/api\/projects\/\d+\/upload$/.test(path)) return json({ success: true, asset_url: SAMPLE_SOURCE, thumbnail: SAMPLE_SOURCE });
+            if (/^\/api\/projects\/\d+\/rate_asset$/.test(path)) return json({ success: true });
+            if (path === '/api/projects/record_export_metric') return json({ success: true });
+            if (path === '/api/projects/space_dashboard_v2') return json(dashboard(false));
+            if (path === '/api/projects/space_profile') {
+                if (method === 'POST') return json({ success: true, nickname: PREVIEW_USER.display_name });
+                return json(dashboard(false).profile);
+            }
+            if (path === '/api/projects/space_profile/avatar') return json({ success: true, avatar_url: SAMPLE_SOURCE });
+
+            if (path === '/api/admin/dashboard') return json(dashboard(true));
+            if (path === '/api/admin/models' || /^\/api\/admin\/models\//.test(path)) return json(modelStatus);
+            if (path === '/api/admin/task_logs') {
+                return json({
+                    items: dashboard(true).task_center,
+                    total: 2,
+                    alerts: []
+                });
+            }
+            if (path.indexOf('/api/admin/task_logs') === 0) return json({ success: true });
+            if (path.indexOf('/api/admin/portal_messages') === 0) return json({ success: true });
+
+            if (path === '/api/model_status') return json(modelStatus);
+            if (path === '/api/list_styles') return json(styles);
+            if (path.indexOf('/api/get_style/') === 0) {
+                var id = decodeURIComponent(path.split('/').pop() || '');
+                return json(styles.find(function(item) { return item.id === id; }) || styles[0]);
+            }
+            if (path === '/api/rename_style') return json({ success: true });
+            if (path === '/api/apply_style' || path === '/api/apply_profile' || path === '/api/transfer') {
+                return json({
+                    success: true,
+                    result_b64: SAMPLE_RESULT,
+                    original_b64: SAMPLE_SOURCE,
+                    reference_b64: SAMPLE_SOURCE,
+                    session_id: 'preview_session_001',
+                    merged_session_id: 'preview_session_001',
+                    reference_path: SAMPLE_SOURCE
+                });
+            }
+            if (path === '/api/merge_luts') return json({ success: true, merged_session_id: 'preview_merged_001', preview_b64: SAMPLE_RESULT, result_b64: SAMPLE_RESULT });
+            if (path === '/api/prepare_lr_preset') return text('ColorChase static preset preview', 200);
+            if (path === '/api/capture_style') return json({ success: true, style_id: 'captured_preview', name: 'Captured Preview' });
+
+            if (path === '/api/upload_batch') {
+                return json({
+                    success: true,
+                    files: [
+                        { filename: 'preview-target.jpg', path: SAMPLE_SOURCE, asset_url: SAMPLE_SOURCE, thumbnail: SAMPLE_SOURCE, project_saved: true }
                     ]
-                },
-                contact: { qq: '955749464', notes: '静态预览展示信息' }
-            });
-        }
+                });
+            }
+            if (path === '/api/render_single') return Promise.resolve(new Response('preview image blob', { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
+            if (path === '/api/video_metadata') return json({ fps: 24, duration: 12.5, codec: 'h264', width: 1920, height: 1080, preview: SAMPLE_VIDEO });
+            if (path === '/api/video_transfer') return json({ success: true, task_id: 'video-preview-task', message: '静态预览任务已创建' });
+            if (path === '/api/export_video') return json({ success: true, url: SAMPLE_VIDEO, output_url: SAMPLE_VIDEO, filename: 'colorchase-preview.mp4' });
 
-        if (path === '/api/projects/' || path === '/api/projects') return json(projects);
-        if (path === '/api/projects/trash/') return json([]);
-        if (/^\/api\/projects\/\d+\/assets$/.test(path)) return mockProjectsAssets(path.split('/')[3]);
-        if (/^\/api\/projects\/\d+\/snapshot$/.test(path)) return json({ success: true });
-        if (/^\/api\/projects\/\d+\/upload$/.test(path)) return json({ success: true, asset_url: SAMPLE_SOURCE, thumbnail: SAMPLE_SOURCE });
-        if (/^\/api\/projects\/\d+\/rate_asset$/.test(path)) return json({ success: true });
-        if (path === '/api/projects/record_export_metric') return json({ success: true });
-        if (path === '/api/projects/space_dashboard_v2') return json(dashboard(false));
-        if (path === '/api/projects/space_profile') {
-            if (method === 'POST') return json({ success: true, nickname: PREVIEW_USER.display_name });
-            return json(dashboard(false).profile);
-        }
-        if (path === '/api/projects/space_profile/avatar') return json({ success: true, avatar_url: SAMPLE_SOURCE });
+            if (/^\/api\/task\/[^/]+\/progress$/.test(path)) {
+                return json({ task_id: path.split('/')[3], status: 'done', progress: 100, message: '静态预览任务完成', result_url: SAMPLE_RESULT });
+            }
+            if (/^\/api\/task\/[^/]+\/(pause|resume|cancel)$/.test(path)) return json({ success: true });
+            if (path === '/api/user_config') {
+                if (method === 'POST') return json({ success: true });
+                return json({
+                    image_uploads: 'storage/uploads/images',
+                    image_luts: 'storage/temp/luts',
+                    image_debug: 'storage/logs/debug_output',
+                    video_uploads: 'storage/uploads/videos',
+                    video_results: 'storage/videos',
+                    video_frames: 'storage/temp/frames'
+                });
+            }
+            if (path === '/api/pick_folder') return json({ success: false, message: '静态预览不访问本地文件夹' });
 
-        if (path === '/api/admin/dashboard') return json(dashboard(true));
-        if (path === '/api/admin/models' || /^\/api\/admin\/models\//.test(path)) return json(modelStatus);
-        if (path === '/api/admin/task_logs') {
-            return json({
-                items: dashboard(true).task_center,
-                total: 2,
-                alerts: []
-            });
-        }
-        if (path.indexOf('/api/admin/task_logs') === 0) return json({ success: true });
-        if (path.indexOf('/api/admin/portal_messages') === 0) return json({ success: true });
+            if (path === '/api/train/data_stats') return json({ file_count: 128, size_mb: 742.6, image_dir: 'storage/training/uploads/preview' });
+            if (path === '/api/train/upload') return json({ success: true, uploaded: 12, failed: 0, file_count: 140, size_mb: 780.2 });
+            if (path === '/api/train') return json({ success: true, task_id: 'training-preview-task', message: '静态预览训练任务已启动' });
 
-        if (path === '/api/model_status') return json(modelStatus);
-        if (path === '/api/list_styles') return json(styles);
-        if (path.indexOf('/api/get_style/') === 0) {
-            var id = decodeURIComponent(path.split('/').pop() || '');
-            return json(styles.find(function(item) { return item.id === id; }) || styles[0]);
-        }
-        if (path === '/api/rename_style') return json({ success: true });
-        if (path === '/api/apply_style' || path === '/api/apply_profile' || path === '/api/transfer') {
-            return json({
-                success: true,
-                result_b64: SAMPLE_RESULT,
-                original_b64: SAMPLE_SOURCE,
-                reference_b64: SAMPLE_SOURCE,
-                session_id: 'preview_session_001',
-                merged_session_id: 'preview_session_001',
-                reference_path: SAMPLE_SOURCE
-            });
-        }
-        if (path === '/api/merge_luts') return json({ success: true, merged_session_id: 'preview_merged_001', preview_b64: SAMPLE_RESULT, result_b64: SAMPLE_RESULT });
-        if (path === '/api/prepare_lr_preset') return text('ColorChase static preset preview', 200);
-        if (path === '/api/capture_style') return json({ success: true, style_id: 'captured_preview', name: 'Captured Preview' });
+            if (path === '/api/mask/subject') return json({ success: true, mask_path: 'mock://mask/subject.png', preview_b64: SAMPLE_RESULT });
+            if (path === '/api/depth/layers') return json({ success: true, depth_path: 'mock://depth/layers.png', preview_b64: SAMPLE_RESULT });
+            if (path === '/api/semantic/match') return json({ success: true, semantic_path: 'mock://semantic/match.png', preview_b64: SAMPLE_RESULT });
 
-        if (path === '/api/upload_batch') {
-            return json({
-                success: true,
-                files: [
-                    { filename: 'preview-target.jpg', path: SAMPLE_SOURCE, asset_url: SAMPLE_SOURCE, thumbnail: SAMPLE_SOURCE, project_saved: true }
-                ]
-            });
+            return json({ success: true, preview: true, detail: 'GitHub Pages 静态预览 mock 响应：' + path });
+        } catch (e) {
+            try { console.warn('[ColorChase Mock] fetch 拦截异常，降级响应:', e); } catch (_) {}
+            return json({ success: true, preview: true, detail: 'mock fallback' });
         }
-        if (path === '/api/render_single') return Promise.resolve(new Response('preview image blob', { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
-        if (path === '/api/video_metadata') return json({ fps: 24, duration: 12.5, codec: 'h264', width: 1920, height: 1080, preview: SAMPLE_VIDEO });
-        if (path === '/api/video_transfer') return json({ success: true, task_id: 'video-preview-task', message: '静态预览任务已创建' });
-        if (path === '/api/export_video') return json({ success: true, url: SAMPLE_VIDEO, output_url: SAMPLE_VIDEO, filename: 'colorchase-preview.mp4' });
-
-        if (/^\/api\/task\/[^/]+\/progress$/.test(path)) {
-            return json({ task_id: path.split('/')[3], status: 'done', progress: 100, message: '静态预览任务完成', result_url: SAMPLE_RESULT });
-        }
-        if (/^\/api\/task\/[^/]+\/(pause|resume|cancel)$/.test(path)) return json({ success: true });
-        if (path === '/api/user_config') {
-            if (method === 'POST') return json({ success: true });
-            return json({
-                image_uploads: 'storage/uploads/images',
-                image_luts: 'storage/temp/luts',
-                image_debug: 'storage/logs/debug_output',
-                video_uploads: 'storage/uploads/videos',
-                video_results: 'storage/videos',
-                video_frames: 'storage/temp/frames'
-            });
-        }
-        if (path === '/api/pick_folder') return json({ success: false, message: '静态预览不访问本地文件夹' });
-
-        if (path === '/api/train/data_stats') return json({ file_count: 128, size_mb: 742.6, image_dir: 'storage/training/uploads/preview' });
-        if (path === '/api/train/upload') return json({ success: true, uploaded: 12, failed: 0, file_count: 140, size_mb: 780.2 });
-        if (path === '/api/train/clear_uploads' || path === '/api/train/data_clear') return json({ success: true, file_count: 0, size_mb: 0 });
-        if (path === '/api/train') return json({ success: true, task_id: 'training-preview-task', message: '静态预览训练任务已启动' });
-
-        if (path === '/api/mask/subject') return json({ success: true, mask_path: 'mock://mask/subject.png', preview_b64: SAMPLE_RESULT });
-        if (path === '/api/depth/layers') return json({ success: true, depth_path: 'mock://depth/layers.png', preview_b64: SAMPLE_RESULT });
-        if (path === '/api/semantic/match') return json({ success: true, semantic_path: 'mock://semantic/match.png', preview_b64: SAMPLE_RESULT });
-
-        return json({ success: true, preview: true, detail: 'GitHub Pages 静态预览 mock 响应：' + path });
     };
 
     function MockEventSource(url) {
@@ -364,4 +370,19 @@
         sampleSource: SAMPLE_SOURCE,
         sampleResult: SAMPLE_RESULT
     };
+
+    // 注入预览模式可视化标识
+    try {
+        var badge = document.createElement('div');
+        badge.id = 'cc-mock-badge';
+        badge.textContent = '静态预览模式';
+        badge.style.cssText = 'position:fixed;top:8px;right:12px;z-index:99999;padding:4px 12px;' +
+            'background:#f59e0b;color:#000;font-size:12px;font-weight:700;border-radius:6px;' +
+            'font-family:Inter,Segoe UI,Arial,sans-serif;pointer-events:none;opacity:0.92;';
+        if (document.body) {
+            document.body.appendChild(badge);
+        } else {
+            document.addEventListener('DOMContentLoaded', function() { document.body.appendChild(badge); });
+        }
+    } catch (_) {}
 })();

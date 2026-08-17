@@ -57,7 +57,17 @@ from config import (
     iter_known_project_asset_dirs,
     iter_known_style_dirs,
 )
-from app.services.paths import _runtime_temp_lut_dir, _runtime_upload_dir, _runtime_video_dir
+from app.services.paths import (
+    _project_assets_root_for_label,
+    _runtime_temp_lut_dir,
+    _runtime_upload_dir,
+    _runtime_user_temp_dir_for_label,
+    _runtime_video_dir,
+    _training_corpus_dir_for_label,
+    _user_assets_root_for_label,
+)
+from app.services.auth_utils import is_admin_role, is_super_admin_role
+from app.services.user_identity import build_user_storage_label, resolve_user_storage_label
 from database import get_db
 from models import Asset, Project, User
 
@@ -585,7 +595,6 @@ def _resolve_virtual_asset_path(value):
         return None
     route_roots = {
         "/assets/": USER_ASSET_DIR,
-        "/videos/": _runtime_video_result_dir(),
     }
     for prefix, root in route_roots.items():
         if not route_path.startswith(prefix):
@@ -640,6 +649,8 @@ def _add_session_cleanup(session_id, bucket):
         _runtime_temp_lut_dir() / f"{sid}.npy",
         _runtime_temp_lut_dir() / f"{sid}_result_preview.jpg",
         _runtime_temp_lut_dir() / f"{sid}_orig_preview.jpg",
+        _runtime_temp_lut_dir() / f"result_preview_{sid}.jpg",
+        _runtime_temp_lut_dir() / f"orig_preview_{sid}.jpg",
     ):
         resolved = _resolve_within_cleanup_roots(candidate)
         if resolved is not None:
@@ -671,6 +682,92 @@ def _collect_snapshot_paths(value, bucket):
             _collect_snapshot_paths(item, bucket)
         return
     _add_cleanup_value(value, bucket)
+
+
+def _training_corpus_cleanup_labels(user: User, storage_label: str = ""):
+    labels = []
+    seen = set()
+
+    def add(value):
+        label = str(value or "").strip()
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+
+    add(storage_label)
+    add(getattr(user, "storage_label", ""))
+
+    for identity in (getattr(user, "email", ""), getattr(user, "phone", "")):
+        raw = str(identity or "").strip().lower()
+        if not raw:
+            continue
+        add(build_user_storage_label(raw))
+        add(raw)
+        add(raw.replace("@", "_").replace(".", "_"))
+
+    try:
+        user_id = int(getattr(user, "id", 0) or 0)
+        if user_id > 0:
+            add(f"user_{user_id}")
+    except (TypeError, ValueError):
+        pass
+
+    return labels
+
+
+def _training_meta_belongs_to_user(meta: dict, user: User, labels) -> bool:
+    if not isinstance(meta, dict):
+        return False
+
+    try:
+        user_id = int(getattr(user, "id", 0) or 0)
+        if user_id > 0 and int(meta.get("user_id") or 0) == user_id:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    label_set = {str(item or "").strip() for item in labels if str(item or "").strip()}
+    for key in ("storage_label", "user_folder"):
+        if str(meta.get(key) or "").strip() in label_set:
+            return True
+
+    email = str(getattr(user, "email", "") or "").strip().lower()
+    if email and str(meta.get("user_email") or "").strip().lower() == email:
+        return True
+
+    return False
+
+
+def _add_training_corpus_cleanup_paths(user: User, storage_label: str, bucket):
+    labels = _training_corpus_cleanup_labels(user, storage_label)
+    for label in labels:
+        try:
+            candidate = _training_corpus_dir_for_label(label)
+        except ValueError:
+            continue
+        resolved = _resolve_within_cleanup_roots(candidate)
+        if resolved is not None:
+            bucket.add(resolved)
+
+    root = _resolve_within_cleanup_roots(STORAGE_TRAINING_CORPUS_DIR)
+    if root is None or not root.exists():
+        return
+
+    try:
+        meta_paths = list(root.rglob("meta.json"))
+    except Exception:
+        return
+
+    for meta_path in meta_paths:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not _training_meta_belongs_to_user(meta, user, labels):
+            continue
+        resolved = _resolve_within_cleanup_roots(meta_path.parent)
+        if resolved is not None:
+            bucket.add(resolved)
 
 
 async def get_current_user(
@@ -706,8 +803,14 @@ async def logout(response: Response):
 
 
 async def require_admin(user: User = Depends(get_current_user)):
-    if user.role != "admin":
+    if not is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
+async def require_super_admin(user: User = Depends(get_current_user)):
+    if not is_super_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
     return user
 
 
@@ -716,7 +819,7 @@ async def send_delete_code(
     req: SendDeleteCodeRequest,
     user: User = Depends(get_current_user),
 ):
-    if user.role == "admin":
+    if is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="管理员账号禁止注销")
     if not user.email:
         raise HTTPException(status_code=400, detail="当前账户未绑定邮箱，暂不支持邮箱二次验证注销")
@@ -852,7 +955,7 @@ async def delete_account(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if user.role == "admin":
+    if is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="管理员账号禁止注销")
     if not user.email:
         raise HTTPException(status_code=400, detail="当前账户未绑定邮箱，暂不支持邮箱二次验证注销")
@@ -884,8 +987,14 @@ async def delete_account(
     projects = result.scalars().all()
     project_ids = [item.id for item in projects]
     cleanup_paths = set()
+    try:
+        storage_label = await resolve_user_storage_label(user.id)
+    except Exception:
+        storage_label = str(getattr(user, "storage_label", "") or "").strip()
 
     for project in projects:
+        if storage_label:
+            cleanup_paths.add(_project_assets_root_for_label(storage_label) / str(project.id))
         for root in _iter_cleanup_project_roots():
             cleanup_paths.add(root / str(project.id))
         snapshot = project.workspace_snapshot or ""
@@ -923,6 +1032,12 @@ async def delete_account(
 
     cleanup_paths.add(_runtime_upload_dir() / f"user_{user.id}")
     cleanup_paths.add(_runtime_video_dir() / f"user_{user.id}")
+    if storage_label:
+        cleanup_paths.add(_project_assets_root_for_label(storage_label))
+        cleanup_paths.add(_user_assets_root_for_label(storage_label))
+        cleanup_paths.add(_runtime_user_temp_dir_for_label(storage_label))
+        cleanup_paths.add(_runtime_temp_lut_dir(storage_label))
+    _add_training_corpus_cleanup_paths(user, storage_label, cleanup_paths)
     cleanup_paths.add(STORAGE_USER_IMAGES_DIR)
     cleanup_paths.add(STORAGE_USER_REFERENCES_DIR)
     cleanup_paths.add(STORAGE_USER_PROFILES_DIR)

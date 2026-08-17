@@ -62,11 +62,10 @@ Thumbs.db
 *.log
 .cache/
 .pytest_cache/
-debug_output/
 
 # IDE caches (与 github_preflight.py 对齐)
 .trae/
-.reasonux/
+.reasonix/
 
 # Uvicorn 临时输出
 tmp_uvicorn_*.out
@@ -74,3 +73,5 @@ tmp_uvicorn_*.err
 
 # 通用备份
 *.bak
+*.bak_*
+backups/

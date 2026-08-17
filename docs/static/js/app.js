@@ -1,3 +1,1098 @@
+/* ===== 双模式存储工具函数（由部署脚本注入） ===== */
+var LOCAL_AGENT_URL = 'http://localhost:9123';
+
+// 浏览器能力检测：是否支持 File System Access API
+function supportsFileSystemAccess() {
+    return typeof window.showDirectoryPicker === 'function';
+}
+
+// 获取当前存储模式：'fsa'（浏览器原生）| 'agent'（本地代理）| 'none'（不可用）
+async function getStorageMode() {
+    if (supportsFileSystemAccess()) return 'fsa';
+    try {
+        var resp = await fetch(LOCAL_AGENT_URL + '/health', { method: 'GET' });
+        if (resp.ok) return 'agent';
+    } catch (e) {}
+    return 'none';
+}
+
+// 同步检测本地代理是否在线（兼容旧调用）
+function isLocalAgentOnline() {
+    return fetch(LOCAL_AGENT_URL + '/health', { method: 'GET' })
+        .then(function(resp) { return resp.ok; })
+        .catch(function() { return false; });
+}
+
+// 获取认证 token
+function getAuthToken() { return localStorage.getItem('cc_token') || ''; }
+
+// ===== 存储位置提醒 =====
+function _storageNoticeKey() {
+    var user = JSON.parse(localStorage.getItem('cc_user') || '{}');
+    var userId = user && user.id ? String(user.id) : 'guest';
+    return 'cc_storage_notice_shown_' + userId;
+}
+
+function _getStorageNoticeConfig() {
+    var isAdmin = typeof isCurrentUserAdmin === 'function' ? isCurrentUserAdmin() : false;
+    var supportsFSA = supportsFileSystemAccess();
+    if (isAdmin) {
+        if (supportsFSA) {
+            return {
+                title: '存储提醒',
+                body: '管理员用户数据当前保存到服务器地址目录，请尽快通过“本地授权”选择本地保存位置。',
+                actionLabel: '本地授权',
+                action: function() { showStorageSettings(); }
+            };
+        }
+        return {
+            title: '存储提醒',
+            body: '管理员用户数据当前保存到服务器地址目录，请尽快通过在 Firefox 上配置运行 ColorChaseAgent.exe 选择本地保存位置。',
+            actionLabel: '下载 ColorChaseAgent',
+            action: function() { window.open('./static/download/ColorChaseAgent.exe', '_blank'); }
+        };
+    }
+    if (supportsFSA) {
+        return {
+            title: '存储提醒',
+            body: '普通用户数据当前仅保存到临时目录，请尽快通过“本地授权”选择本地保存位置；未选择时服务器 24h 后自动清理。',
+            actionLabel: '本地授权',
+            action: function() { showStorageSettings(); }
+        };
+    }
+    return {
+        title: '存储提醒',
+        body: '普通用户数据当前仅保存到临时目录，请尽快通过在 Firefox 上配置运行 ColorChaseAgent.exe 选择本地保存位置；未选择时服务器 24h 后自动清理。',
+        actionLabel: '下载 ColorChaseAgent',
+        action: function() { window.open('./static/download/ColorChaseAgent.exe', '_blank'); }
+    };
+}
+
+function showStorageNotice(force) {
+    var modal = document.getElementById('storage-notice-modal');
+    var titleEl = document.getElementById('storage-notice-title');
+    var bodyEl = document.getElementById('storage-notice-body');
+    var actionBtn = document.getElementById('storage-notice-action-btn');
+    var closeBtn = document.getElementById('storage-notice-close-btn');
+    if (!modal || !titleEl || !bodyEl || !actionBtn || !closeBtn) return;
+    var cfg = _getStorageNoticeConfig();
+    titleEl.textContent = cfg.title;
+    bodyEl.textContent = cfg.body;
+    actionBtn.textContent = cfg.actionLabel;
+    actionBtn.onclick = function() {
+        modal.style.display = 'none';
+        cfg.action();
+    };
+    closeBtn.onclick = function() {
+        modal.style.display = 'none';
+        try { localStorage.setItem(_storageNoticeKey(), '1'); } catch (e) {}
+    };
+    modal.style.display = 'flex';
+    if (force) {
+        try { localStorage.setItem(_storageNoticeKey(), '1'); } catch (e) {}
+    }
+}
+
+function maybeShowStorageNotice() {
+    if (!localStorage.getItem('cc_token')) return;
+    try {
+        if (localStorage.getItem(_storageNoticeKey()) === '1') return;
+    } catch (e) {}
+    showStorageNotice(false);
+}
+
+// 通过本地代理写文件（multipart form 上传）
+function localAgentWriteFile(fileBlob, relativePath, projectId, projectName) {
+    var fd = new FormData();
+    fd.append('file', fileBlob);
+    fd.append('path', relativePath);
+    fd.append('project_id', String(projectId));
+    fd.append('project_name', projectName || '');
+    return fetch(LOCAL_AGENT_URL + '/write_file', {
+        method: 'POST',
+        body: fd
+    }).then(function(resp) { if (!resp.ok) throw new Error('本地代理写入失败'); return resp.json(); });
+}
+
+// 通过本地代理写文本/JSON（base64 方式，适合 snapshot/profile 等）
+function localAgentWriteText(relativePath, textContent, projectId, projectName) {
+    return fetch(LOCAL_AGENT_URL + '/write', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            path: relativePath,
+            data: btoa(unescape(encodeURIComponent(textContent))),
+            project_id: String(projectId),
+            project_name: projectName || ''
+        })
+    }).then(function(resp) { if (!resp.ok) throw new Error('本地代理写入文本失败'); return resp.json(); });
+}
+
+// 统一上传训练语料到服务器
+// 两种模式都直接 POST 到 /api/training/upload，从服务器下载 target、前端拿 reference 和 result
+async function uploadTrainingSample(img, resultBlob, fmt) {
+    try {
+        // 2026-07-16 调试：用户要求导出时自动写入训练样本库对所有登录用户开放，
+        // 不再限制只有超级管理员才能自动入库；后端 /api/training/upload 也只校验登录。
+        // 构造 meta 元数据
+        var meta = {
+            name: img.name || '',
+            rating: img.rating || 0,
+            algorithm: (function() { try { return getSelectedAIAlgorithm(); } catch (e) { return img.aiAlgo || ''; } })(),
+            sourcePath: img.sourcePath || '',
+            refSavedPath: img.refSavedPath || '',
+            params: img.params || {},
+            format: fmt,
+            createdAt: new Date().toISOString()
+        };
+        // 判断是不是视频（视频不进训练库）
+        var isVideo = (img.meta && /video/i.test(img.meta)) || (img.name && /\.(mp4|mov|avi|mkv|webm)$/i.test(img.name)) ? '1' : '0';
+
+        var token = getAuthToken();
+        var authHeaders = {};
+        if (token) authHeaders['Authorization'] = 'Bearer ' + token;
+
+        var fd = new FormData();
+        // 1. 下载 target 原图（从服务器已有的 asset_url 拉回来，必须带鉴权）
+        if (img.sourcePath) {
+            try {
+                var targetResp = await fetch(img.sourcePath, { headers: authHeaders });
+                var targetBlob = await targetResp.blob();
+                fd.append('target', targetBlob, img.name || 'target.jpg');
+            } catch (e) {
+                console.error('下载原图失败，训练语料放弃:', e);
+                return false;
+            }
+        }
+        // 2. 拿参考图：data:URL 或者服务器路径都可以
+        var refUrl = img.refDataUrl || (typeof _refDataUrl !== 'undefined' ? _refDataUrl : '');
+        var refServerUrl = img.refSavedPath || '';
+        if (refUrl && refUrl.indexOf('data:') === 0) {
+            try {
+                var refResp = await fetch(refUrl);
+                var refBlob = await refResp.blob();
+                fd.append('reference', refBlob, 'reference.jpg');
+            } catch (e) { /* 参考图拿不到不影响主流程 */ }
+        } else if (refServerUrl) {
+            try {
+                var refResp2 = await fetch(refServerUrl, { headers: authHeaders });
+                var refBlob2 = await refResp2.blob();
+                fd.append('reference', refBlob2, 'reference.jpg');
+            } catch (e) { /* 参考图拿不到不影响主流程 */ }
+        }
+        // 3. 如果有 LUT 文件（服务器路径），也下载下来一起入库
+        var lutUrl = (img.params && img.params.lutPath) || img.lutPath || img.cubePath || '';
+        if (lutUrl && typeof lutUrl === 'string') {
+            try {
+                var lutResp = await fetch(lutUrl, { headers: authHeaders });
+                var lutBlob = await lutResp.blob();
+                var lutName = lutUrl.split('/').pop().split('?')[0] || 'lut.cube';
+                fd.append('lut', lutBlob, lutName);
+            } catch (e) { /* LUT 拿不到不影响主流程 */ }
+        }
+        // 4. result 是前端渲染出来的
+        fd.append('result', resultBlob, 'result.' + fmt);
+        // 5. meta + sample_uuid + is_video
+        fd.append('meta', JSON.stringify(meta));
+        fd.append('sample_uuid', 's' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+        fd.append('is_video', isVideo);
+
+        var resp = await fetch('/api/training/upload', {
+            method: 'POST',
+            headers: authHeaders,
+            body: fd
+        });
+        return resp.ok;
+    } catch (e) {
+        console.error('训练语料上传失败:', e);
+        return false;
+    }
+}
+
+// 统一上传检测库副本（两种模式都直接 POST 到 /api/detection/upload）
+async function uploadDetectionCopy(fileBlob, fileUuid, token) {
+    try {
+        var fd = new FormData();
+        fd.append('file', fileBlob, fileBlob.name || 'original');
+        fd.append('file_uuid', fileUuid);
+        var resp = await fetch('/api/detection/upload', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+            body: fd
+        });
+        return resp.ok;
+    } catch (e) {
+        console.error('检测库上传失败:', e);
+        return false;
+    }
+}
+
+// ==================== 训练样本库浏览模态框 ====================
+
+var _allSamples = [];            // 缓存全部样本
+var _selectedSamples = [];       // 选中的 {uuid, label}，用于导入
+var _currentPreviewUuid = null;  // 当前右侧正在预览的样本
+var _pageState = {
+    page: 1,
+    pageSize: 10,
+    filterUser: '',
+    sortKey: 'uploaded_at',
+    sortDesc: true
+};
+
+function syncTrainingSampleImportPermission() {
+    // 2026-07-16 调试：用户要求普通管理员在训练样本库只能看、不能操作，
+    // 这里把所有会改变状态或触发写入的控件都禁用掉。
+    var canControl = isCurrentUserSuperAdmin();
+    var title = canControl ? '' : '需要超级管理员权限';
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = !canControl;
+        importBtn.title = title;
+    }
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.disabled = !canControl;
+        selectAll.title = title;
+    }
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.disabled = !canControl;
+        userFilter.title = title;
+    }
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.disabled = !canControl;
+        pageSize.title = title;
+    }
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.disabled = !canControl;
+        gotoInput.title = title;
+    }
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.disabled = !canControl;
+        refreshBtn.title = title;
+    }
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.disabled = !canControl;
+        viewFullBtn.title = title;
+    }
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.style.pointerEvents = canControl ? '' : 'none';
+        th.style.opacity = canControl ? '' : '0.6';
+        th.title = title;
+    });
+}
+
+function openTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (!modal) return;
+    modal.style.display = 'block';
+    _selectedSamples = [];
+    _currentPreviewUuid = null;
+    _pageState.page = 1;
+    _pageState.filterUser = '';
+    _pageState.sortKey = 'uploaded_at';
+    _pageState.sortDesc = true;
+
+    var filterEl = document.getElementById('samples-user-filter');
+    if (filterEl) filterEl.value = '';
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) pageSize.value = '10';
+
+    syncTrainingSampleImportPermission();
+    clearRightPanel();
+    loadTrainingSamples();
+}
+
+function closeTrainingSamplesModal() {
+    var modal = document.getElementById('training-samples-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function clearRightPanel() {
+    ['preview-target', 'preview-reference', 'preview-result'].forEach(function(id) {
+        var img = document.getElementById(id);
+        if (img) { img.src = ''; img.style.display = 'none'; }
+    });
+    ['preview-target-empty', 'preview-reference-empty', 'preview-result-empty'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'flex';
+    });
+    var fields = {
+        'info-uuid': '-', 'info-user': '-', 'info-algo': '-',
+        'info-rating': '-', 'info-files': '-', 'info-time': '-'
+    };
+    Object.keys(fields).forEach(function(k) {
+        var el = document.getElementById(k);
+        if (el) el.textContent = fields[k];
+    });
+    var metaJson = document.getElementById('preview-meta-json');
+    if (metaJson) metaJson.textContent = '';
+    var fileList = document.getElementById('preview-file-list');
+    if (fileList) fileList.innerHTML = '';
+    var detail = document.getElementById('sample-full-detail');
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    document.querySelectorAll('#samples-tbody tr.selected').forEach(function(tr) {
+        tr.classList.remove('selected');
+    });
+}
+
+async function loadTrainingSamples() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var filterEl = document.getElementById('samples-user-filter');
+    if (!tbody || !countEl) return;
+
+    tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">加载中...</td></tr>';
+    countEl.textContent = '加载中...';
+
+    try {
+        var resp = await fetch('/api/train/samples', { headers: getAuthHeaders() });
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + resp.status + '</td></tr>';
+            return;
+        }
+        var data = await resp.json();
+        _allSamples = data.samples || [];
+
+        // 填充用户筛选下拉
+        if (filterEl) {
+            var currentVal = filterEl.value || '';
+            filterEl.innerHTML = '<option value="">全部用户</option>';
+            (data.users || []).forEach(function(u) {
+                var opt = document.createElement('option');
+                opt.value = u;
+                opt.textContent = u;
+                filterEl.appendChild(opt);
+            });
+            filterEl.value = currentVal;
+        }
+
+        renderSamplesTable();
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell" style="color:#f44;">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function getFilteredSamples() {
+    var list = _allSamples.slice();
+    if (_pageState.filterUser) {
+        list = list.filter(function(s) { return s.storage_label === _pageState.filterUser; });
+    }
+    return list;
+}
+
+function sortSamples(list) {
+    var key = _pageState.sortKey;
+    var desc = _pageState.sortDesc;
+    list.sort(function(a, b) {
+        var av = a[key], bv = b[key];
+        if (key === 'uploaded_at') {
+            av = av || '';
+            bv = bv || '';
+        } else {
+            av = Number(av) || 0;
+            bv = Number(bv) || 0;
+        }
+        if (av < bv) return desc ? 1 : -1;
+        if (av > bv) return desc ? -1 : 1;
+        return 0;
+    });
+    return list;
+}
+
+function renderSamplesTable() {
+    var tbody = document.getElementById('samples-tbody');
+    var countEl = document.getElementById('samples-count');
+    var totalEl = document.getElementById('pagination-total');
+    if (!tbody) return;
+
+    var filtered = sortSamples(getFilteredSamples());
+    var total = filtered.length;
+    var pageSize = _pageState.pageSize;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (_pageState.page > totalPages) _pageState.page = totalPages;
+    if (_pageState.page < 1) _pageState.page = 1;
+    var start = (_pageState.page - 1) * pageSize;
+    var pageItems = filtered.slice(start, start + pageSize);
+
+    if (countEl) countEl.textContent = '共 ' + total + ' 个样本';
+    if (totalEl) totalEl.textContent = total;
+    tbody.innerHTML = '';
+
+    updateSortHeaders();
+    renderPagination(totalPages);
+
+    if (total === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="ts-empty-cell">暂无训练样本</td></tr>';
+        return;
+    }
+
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) selectAll.checked = false;
+
+    pageItems.forEach(function(s) {
+        var tr = document.createElement('tr');
+        tr.dataset.uuid = s.sample_uuid;
+        if (s.sample_uuid === _currentPreviewUuid) tr.classList.add('selected');
+
+        // 复选框
+        var checkTd = document.createElement('td');
+        checkTd.className = 'ts-col-check';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.uuid = s.sample_uuid;
+        cb.dataset.label = s.storage_label;
+        cb.disabled = !isCurrentUserSuperAdmin();
+        cb.title = cb.disabled ? '需要超级管理员权限' : '';
+        cb.checked = _selectedSamples.some(function(x) { return x.uuid === s.sample_uuid; });
+        cb.addEventListener('change', function(e) {
+            e.stopPropagation();
+            toggleSelection(s.sample_uuid, s.storage_label, this.checked);
+        });
+        checkTd.appendChild(cb);
+        tr.appendChild(checkTd);
+
+        // 样本 ID + 缩略图
+        var tdId = document.createElement('td');
+        tdId.className = 'ts-col-id';
+        var idCell = document.createElement('div');
+        idCell.className = 'ts-id-cell';
+        var thumb = document.createElement('img');
+        thumb.className = 'ts-thumb';
+        thumb.alt = '';
+        idCell.appendChild(thumb);
+        var idText = document.createElement('span');
+        idText.className = 'ts-id-text';
+        idText.textContent = s.sample_uuid.substring(0, 18) + '...';
+        idText.title = s.sample_uuid;
+        idCell.appendChild(idText);
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'ts-copy-btn';
+        copyBtn.innerHTML = '&#10697;';
+        copyBtn.title = '复制样本 ID';
+        copyBtn.disabled = !isCurrentUserSuperAdmin();
+        if (copyBtn.disabled) copyBtn.title = '需要超级管理员权限';
+        copyBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            copyToClipboard(s.sample_uuid);
+        });
+        idCell.appendChild(copyBtn);
+        tdId.appendChild(idCell);
+        tr.appendChild(tdId);
+        loadThumbnail(thumb, s.sample_uuid, s.storage_label);
+
+        // 用户
+        var tdUser = document.createElement('td');
+        tdUser.className = 'ts-col-user';
+        tdUser.textContent = s.storage_label || '-';
+        tr.appendChild(tdUser);
+
+        // 算法
+        var tdAlgo = document.createElement('td');
+        tdAlgo.className = 'ts-col-algo';
+        if (s.algorithm) {
+            var tag = document.createElement('span');
+            tag.className = 'ts-algo-tag';
+            tag.textContent = s.algorithm;
+            tdAlgo.appendChild(tag);
+        } else {
+            tdAlgo.textContent = '-';
+        }
+        tr.appendChild(tdAlgo);
+
+        // 评分
+        var tdRating = document.createElement('td');
+        tdRating.className = 'ts-col-rating';
+        var badge = document.createElement('span');
+        badge.className = 'ts-rating-badge ' + ratingClass(s.rating);
+        badge.textContent = s.rating || 0;
+        tdRating.appendChild(badge);
+        tr.appendChild(tdRating);
+
+        // 文件数
+        var tdFiles = document.createElement('td');
+        tdFiles.className = 'ts-col-files';
+        tdFiles.textContent = s.file_count || 0;
+        tr.appendChild(tdFiles);
+
+        // 上传时间
+        var tdTime = document.createElement('td');
+        tdTime.className = 'ts-col-time';
+        tdTime.textContent = formatTime(s.uploaded_at);
+        tr.appendChild(tdTime);
+
+        // 操作
+        var tdAction = document.createElement('td');
+        tdAction.className = 'ts-col-action';
+        var viewBtn = document.createElement('button');
+        viewBtn.className = 'ts-view-btn';
+        viewBtn.textContent = '查看详情';
+        viewBtn.disabled = !isCurrentUserSuperAdmin();
+        viewBtn.title = viewBtn.disabled ? '需要超级管理员权限' : '';
+        viewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+        tdAction.appendChild(viewBtn);
+        tr.appendChild(tdAction);
+
+        tr.addEventListener('click', function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || (e.target.closest && e.target.closest('button'))) return;
+            previewTrainingSample(s.sample_uuid, s.storage_label);
+        });
+
+        tbody.appendChild(tr);
+    });
+
+    // 默认预览当前页第一条
+    if (!_currentPreviewUuid && pageItems.length > 0) {
+        previewTrainingSample(pageItems[0].sample_uuid, pageItems[0].storage_label);
+    }
+}
+
+function toggleSelection(uuid, label, checked) {
+    if (!isCurrentUserSuperAdmin()) {
+        if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+        return;
+    }
+    if (checked) {
+        if (!_selectedSamples.some(function(x) { return x.uuid === uuid; })) {
+            _selectedSamples.push({uuid: uuid, label: label});
+        }
+    } else {
+        _selectedSamples = _selectedSamples.filter(function(x) { return x.uuid !== uuid; });
+    }
+}
+
+function updateSortHeaders() {
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        var key = th.dataset.sort;
+        var base = th.textContent.replace(/[↑↓↕]/g, '').trim();
+        if (key === _pageState.sortKey) {
+            th.textContent = base + ' ' + (_pageState.sortDesc ? '↓' : '↑');
+        } else {
+            th.textContent = base + ' ↕';
+        }
+    });
+}
+
+function renderPagination(totalPages) {
+    var wrap = document.getElementById('samples-page-btns');
+    var goto = document.getElementById('samples-goto');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    var current = _pageState.page;
+
+    var canControl = isCurrentUserSuperAdmin();
+    function addBtn(text, page, disabled, active) {
+        var btn = document.createElement('button');
+        btn.textContent = text;
+        btn.disabled = !!disabled || !canControl;
+        btn.title = !canControl ? '需要超级管理员权限' : '';
+        if (active) btn.classList.add('active');
+        if (canControl && !disabled && !active) {
+            btn.addEventListener('click', function() {
+                _pageState.page = page;
+                renderSamplesTable();
+            });
+        }
+        wrap.appendChild(btn);
+    }
+
+    addBtn('<', current - 1, current <= 1, false);
+    for (var p = 1; p <= totalPages; p++) {
+        addBtn(String(p), p, false, p === current);
+    }
+    addBtn('>', current + 1, current >= totalPages, false);
+
+    if (goto) goto.value = current;
+}
+
+function formatTime(iso) {
+    if (!iso) return '-';
+    return String(iso).substring(0, 19).replace('T', ' ');
+}
+
+function ratingClass(r) {
+    r = Number(r) || 0;
+    if (r === 0) return 'ts-rating-0';
+    if (r <= 2) return 'ts-rating-low';
+    if (r === 3) return 'ts-rating-mid';
+    if (r === 4) return 'ts-rating-high';
+    return 'ts-rating-best';
+}
+
+function loadThumbnail(imgEl, uuid, label) {
+    fetch('/api/train/samples/' + encodeURIComponent(uuid) + '/thumbnail?storage_label=' + encodeURIComponent(label) + '&size=48', {
+        headers: getAuthHeaders()
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        if (data.thumbnail) imgEl.src = data.thumbnail;
+    })
+    .catch(function(err) {
+        console.error('缩略图加载失败', uuid, err);
+    });
+}
+
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() { showToast('已复制'); }).catch(function() {});
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('已复制');
+    }
+}
+
+async function previewTrainingSample(sampleUuid, storageLabel) {
+    _currentPreviewUuid = sampleUuid;
+    document.querySelectorAll('#samples-tbody tr').forEach(function(tr) {
+        tr.classList.toggle('selected', tr.dataset.uuid === sampleUuid);
+    });
+
+    var targetImg = document.getElementById('preview-target');
+    var targetEmpty = document.getElementById('preview-target-empty');
+    var referenceImg = document.getElementById('preview-reference');
+    var referenceEmpty = document.getElementById('preview-reference-empty');
+    var resultImg = document.getElementById('preview-result');
+    var resultEmpty = document.getElementById('preview-result-empty');
+    var metaJson = document.getElementById('preview-meta-json');
+    var fileList = document.getElementById('preview-file-list');
+    var detail = document.getElementById('sample-full-detail');
+
+    if (targetImg) { targetImg.src = ''; targetImg.style.display = 'none'; }
+    if (targetEmpty) targetEmpty.style.display = 'flex';
+    if (referenceImg) { referenceImg.src = ''; referenceImg.style.display = 'none'; }
+    if (referenceEmpty) referenceEmpty.style.display = 'flex';
+    if (resultImg) { resultImg.src = ''; resultImg.style.display = 'none'; }
+    if (resultEmpty) resultEmpty.style.display = 'flex';
+    if (metaJson) metaJson.textContent = '';
+    if (fileList) fileList.innerHTML = '';
+    if (detail) detail.style.display = 'none';
+    var detailBtn = document.getElementById('samples-view-full-btn');
+    if (detailBtn) detailBtn.textContent = '查看全部详情';
+
+    var s = _allSamples.filter(function(x) { return x.sample_uuid === sampleUuid; })[0];
+    if (s) {
+        setInfo('info-uuid', s.sample_uuid);
+        setInfo('info-user', s.storage_label || '-');
+        setInfo('info-algo', s.algorithm || '-');
+        setInfo('info-rating', (s.rating || 0) + '');
+        setInfo('info-files', (s.file_count || 0) + '');
+        setInfo('info-time', formatTime(s.uploaded_at));
+    }
+
+    try {
+        var resp = await fetch('/api/train/samples/' + encodeURIComponent(sampleUuid) + '/preview?storage_label=' + encodeURIComponent(storageLabel), {
+            headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+            if (metaJson) metaJson.textContent = '加载失败: ' + resp.status;
+            return;
+        }
+        var data = await resp.json();
+
+        if (data.images && data.images.target && targetImg) {
+            targetImg.src = data.images.target;
+            targetImg.style.display = 'block';
+            if (targetEmpty) targetEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.reference && referenceImg) {
+            referenceImg.src = data.images.reference;
+            referenceImg.style.display = 'block';
+            if (referenceEmpty) referenceEmpty.style.display = 'none';
+        }
+        if (data.images && data.images.result && resultImg) {
+            resultImg.src = data.images.result;
+            resultImg.style.display = 'block';
+            if (resultEmpty) resultEmpty.style.display = 'none';
+        }
+
+        if (metaJson) metaJson.textContent = JSON.stringify(data.meta || {}, null, 2);
+        if (fileList) {
+            fileList.innerHTML = '';
+            (data.file_list || []).forEach(function(fn) {
+                var li = document.createElement('li');
+                li.textContent = fn;
+                fileList.appendChild(li);
+            });
+        }
+    } catch (e) {
+        if (metaJson) metaJson.textContent = '加载失败: ' + e.message;
+    }
+}
+
+function setInfo(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+async function importSelectedSamples() {
+    if (!isCurrentUserSuperAdmin()) {
+        showToast('导入训练样本需要超级管理员权限');
+        syncTrainingSampleImportPermission();
+        return;
+    }
+    if (_selectedSamples.length === 0) {
+        showToast('请先选择样本');
+        return;
+    }
+
+    var importBtn = document.getElementById('samples-import-btn');
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = '导入中...';
+    }
+
+    try {
+        var uuids = _selectedSamples.map(function(x) { return x.uuid; });
+        var labels = _selectedSamples.map(function(x) { return x.label; });
+
+        var resp = await fetch('/api/train/import', {
+            method: 'POST',
+            headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ sample_uuids: uuids, storage_labels: labels })
+        });
+
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            showToast('导入失败: ' + (err.detail || resp.status));
+            return;
+        }
+
+        var data = await resp.json();
+        showToast('已导入 ' + data.imported_count + ' 个样本，共 ' + data.training_file_count + ' 张图片');
+
+        var dirInput = document.getElementById('training-image-dir');
+        if (dirInput && data.active_dir) dirInput.value = data.active_dir;
+        if (typeof refreshTrainingDataStats === 'function') refreshTrainingDataStats();
+
+        closeTrainingSamplesModal();
+    } catch (e) {
+        showToast('导入失败: ' + e.message);
+    } finally {
+        if (importBtn) {
+            importBtn.disabled = !isCurrentUserSuperAdmin();
+            importBtn.textContent = '导入选中样本并准备训练';
+            importBtn.title = isCurrentUserSuperAdmin() ? '' : '需要超级管理员权限';
+        }
+    }
+}
+
+// 绑定事件
+document.addEventListener('DOMContentLoaded', function() {
+    var importBtn = document.getElementById('training-import-server-btn');
+    if (importBtn) {
+        importBtn.addEventListener('click', function() {
+            if (!isCurrentUserSuperAdmin()) {
+                if (typeof showToast === 'function') showToast('浏览训练样本库需要超级管理员权限');
+                return;
+            }
+            openTrainingSamplesModal();
+        });
+    }
+
+    var closeBtn = document.getElementById('samples-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeTrainingSamplesModal);
+
+    var selectAll = document.getElementById('samples-select-all');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            if (!isCurrentUserSuperAdmin()) {
+                this.checked = false;
+                if (typeof showToast === 'function') showToast('导入训练样本需要超级管理员权限');
+                return;
+            }
+            var checked = this.checked;
+            var boxes = document.querySelectorAll('#samples-tbody input[type="checkbox"]');
+            boxes.forEach(function(cb) {
+                cb.checked = checked;
+                toggleSelection(cb.dataset.uuid, cb.dataset.label, checked);
+            });
+        });
+    }
+
+    var userFilter = document.getElementById('samples-user-filter');
+    if (userFilter) {
+        userFilter.addEventListener('change', function() {
+            _pageState.filterUser = this.value;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    }
+
+    var pageSize = document.getElementById('samples-page-size');
+    if (pageSize) {
+        pageSize.addEventListener('change', function() {
+            _pageState.pageSize = parseInt(this.value, 10) || 10;
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    }
+
+    var gotoInput = document.getElementById('samples-goto');
+    if (gotoInput) {
+        gotoInput.addEventListener('change', function() {
+            var p = parseInt(this.value, 10);
+            if (!p || p < 1) return;
+            _pageState.page = p;
+            renderSamplesTable();
+        });
+    }
+
+    var refreshBtn = document.getElementById('samples-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadTrainingSamples);
+
+    var doImportBtn = document.getElementById('samples-import-btn');
+    if (doImportBtn) doImportBtn.addEventListener('click', importSelectedSamples);
+    syncTrainingSampleImportPermission();
+
+    var viewFullBtn = document.getElementById('samples-view-full-btn');
+    if (viewFullBtn) {
+        viewFullBtn.addEventListener('click', function() {
+            var detail = document.getElementById('sample-full-detail');
+            if (!detail) return;
+            var show = detail.style.display === 'none';
+            detail.style.display = show ? 'block' : 'none';
+            viewFullBtn.textContent = show ? '收起全部详情' : '查看全部详情';
+        });
+    }
+
+    document.querySelectorAll('.ts-table thead th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var key = this.dataset.sort;
+            if (_pageState.sortKey === key) {
+                _pageState.sortDesc = !_pageState.sortDesc;
+            } else {
+                _pageState.sortKey = key;
+                _pageState.sortDesc = true;
+            }
+            _pageState.page = 1;
+            renderSamplesTable();
+        });
+    });
+});
+
+// 显示下载提示 + 数据泄露风险警告弹窗
+function showAgentDownloadPrompt() {
+    var existing = document.getElementById('agent-download-overlay');
+    if (existing) { existing.style.display = 'flex'; return; }
+    var overlay = document.createElement('div');
+    overlay.id = 'agent-download-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+    overlay.innerHTML =
+        '<div style="background:#fff;border-radius:12px;padding:32px;max-width:520px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);">' +
+        '<div style="font-size:48px;margin-bottom:16px;">\u26A0\uFE0F</div>' +
+        '<h2 style="color:#c0392b;margin:0 0 16px;font-size:22px;">\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8</h2>' +
+        '<p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 12px;">\u60A8\u5F53\u524D\u4F7F\u7528\u7684\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 File System Access API\uFF0C\u65E0\u6CD5\u76F4\u63A5\u5C06\u7167\u7247\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\u5939\u3002</p>' +
+        '<p style="color:#c0392b;font-size:14px;line-height:1.6;margin:0 0 20px;font-weight:bold;">\u26A0\uFE0F \u82E5\u4E0D\u5B89\u88C5\u672C\u5730\u4EE3\u7406\uFF0C\u60A8\u7684\u9879\u76EE\u6570\u636E\u5C06\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u5668\uFF0C\u5B58\u5728\u6570\u636E\u6CC4\u9732\u98CE\u9669\uFF01</p>' +
+        '<div style="background:#f8f9fa;border-radius:8px;padding:16px;margin:0 0 20px;text-align:left;">' +
+        '<p style="margin:0 0 8px;font-size:14px;color:#555;"><b>\u89E3\u51B3\u65B9\u6848\uFF08\u4E8C\u9009\u4E00\uFF09\uFF1A</b></p>' +
+        '<p style="margin:0 0 6px;font-size:13px;color:#555;">1. \u6362\u7528 <b>Chrome</b> \u6216 <b>Edge</b> \u6D4F\u89C8\u5668\uFF08\u63A8\u8350\uFF0C\u96F6\u5B89\u88C5\uFF09</p>' +
+        '<p style="margin:0;font-size:13px;color:#555;">2. \u4E0B\u8F7D\u5E76\u8FD0\u884C <b>ColorChaseAgent</b> \u672C\u5730\u4EE3\u7406</p>' +
+        '</div>' +
+        '<button id="agent-download-btn" style="background:#27ae60;color:#fff;border:none;padding:12px 32px;border-radius:6px;font-size:16px;cursor:pointer;margin-right:12px;">\u4E0B\u8F7D ColorChaseAgent</button>' +
+        '<button id="agent-download-close" style="background:#95a5a6;color:#fff;border:none;padding:12px 24px;border-radius:6px;font-size:14px;cursor:pointer;">\u6682\u4E0D\u4E0B\u8F7D</button>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    var btn = document.getElementById('agent-download-btn');
+    if (btn) btn.addEventListener('click', function() {
+        window.open('./static/download/ColorChaseAgent.exe', '_blank');
+    });
+    var closeBtn = document.getElementById('agent-download-close');
+    if (closeBtn) closeBtn.addEventListener('click', function() {
+        overlay.style.display = 'none';
+    });
+}
+
+// 判断当前登录用户是否是管理员
+function isCurrentUserAdmin() {
+    try {
+        var role = String((window.currentUser && window.currentUser.role) || '').toLowerCase();
+        return role === 'admin' || role === 'super_admin';
+    } catch (e) {
+        return false;
+    }
+}
+
+function isCurrentUserSuperAdmin() {
+    try {
+        return String((window.currentUser && window.currentUser.role) || '').toLowerCase() === 'super_admin';
+    } catch (e) {
+        return false;
+    }
+}
+
+// 异步版下载提示弹窗：管理员可以跳过继续操作，普通用户只能下载/关闭
+// 返回 Promise<boolean>：true=跳过继续，false=不继续
+function showAgentDownloadPromptAsync(isAdmin) {
+    return new Promise(function(resolve) {
+        var existing = document.getElementById('agent-download-overlay-async');
+        if (existing) {
+            existing.style.display = 'flex';
+            var oldSkip = document.getElementById('agent-skip-btn');
+            if (oldSkip) oldSkip.onclick = function() { existing.style.display = 'none'; resolve(true); };
+            var oldClose = document.getElementById('agent-close-btn');
+            if (oldClose) oldClose.onclick = function() { existing.style.display = 'none'; resolve(false); };
+            return;
+        }
+        var overlay = document.createElement('div');
+        overlay.id = 'agent-download-overlay-async';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+        var skipBtnHtml = isAdmin
+            ? '<button id="agent-skip-btn" style="background:#2980b9;color:#fff;border:none;padding:12px 28px;border-radius:6px;font-size:15px;cursor:pointer;margin-right:12px;">\u8DF3\u8FC7\uFF0C\u7EE7\u7EED\u64CD\u4F5C</button>'
+            : '';
+        var titleText = isAdmin ? '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8\uFF08\u7BA1\u7406\u5458\u53EF\u8DF3\u8FC7\uFF09' : '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8';
+        var warnText = isAdmin
+            ? '<p style="color:#333;font-size:14px;line-height:1.6;margin:0 0 20px;">\u60A8\u662F\u7BA1\u7406\u5458\uFF0C\u53EF\u4EE5\u8DF3\u8FC7\u6B64\u63D0\u793A\u7EE7\u7EED\u64CD\u4F5C\u3002\u8DF3\u8FC7\u540E\u5BFC\u51FA\u6587\u4EF6\u5C06\u901A\u8FC7\u6D4F\u89C8\u5668\u76F4\u63A5\u4E0B\u8F7D\uFF0C\u9879\u76EE\u6570\u636E\u4FDD\u5B58\u5728\u4E91\u670D\u52A1\u5668\u4E2D\u3002</p>'
+            : '<p style="color:#c0392b;font-size:14px;line-height:1.6;margin:0 0 20px;font-weight:bold;">\u26A0\uFE0F \u82E5\u4E0D\u5B89\u88C5\u672C\u5730\u4EE3\u7406\uFF0C\u60A8\u7684\u9879\u76EE\u6570\u636E\u5C06\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u5668\uFF0C\u5B58\u5728\u6570\u636E\u6CC4\u9732\u98CE\u9669\uFF01</p>';
+        overlay.innerHTML =
+            '<div style="background:#fff;border-radius:12px;padding:32px;max-width:540px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);">' +
+            '<div style="font-size:48px;margin-bottom:16px;">\u26A0\uFE0F</div>' +
+            '<h2 style="color:#c0392b;margin:0 0 16px;font-size:22px;">' + titleText + '</h2>' +
+            '<p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 12px;">\u60A8\u5F53\u524D\u4F7F\u7528\u7684\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 File System Access API\uFF0C\u65E0\u6CD5\u76F4\u63A5\u5C06\u7167\u7247\u4FDD\u5B58\u5230\u672C\u5730\u6587\u4EF6\u5939\u3002</p>' +
+            warnText +
+            '<div style="background:#f8f9fa;border-radius:8px;padding:16px;margin:0 0 20px;text-align:left;">' +
+            '<p style="margin:0 0 8px;font-size:14px;color:#555;"><b>\u89E3\u51B3\u65B9\u6848\uFF1A</b></p>' +
+            '<p style="margin:0 0 6px;font-size:13px;color:#555;">1. \u6362\u7528 <b>Chrome</b> \u6216 <b>Edge</b> \u6D4F\u89C8\u5668\uFF08\u63A8\u8350\uFF0C\u96F6\u5B89\u88C5\uFF09</p>' +
+            '<p style="margin:0;font-size:13px;color:#555;">2. \u4E0B\u8F7D\u5E76\u8FD0\u884C <b>ColorChaseAgent</b> \u672C\u5730\u4EE3\u7406</p>' +
+            '</div>' +
+            '<div style="display:flex;justify-content:center;flex-wrap:wrap;">' +
+            skipBtnHtml +
+            '<button id="agent-download-btn-async" style="background:#27ae60;color:#fff;border:none;padding:12px 32px;border-radius:6px;font-size:16px;cursor:pointer;margin-right:12px;">\u4E0B\u8F7D ColorChaseAgent</button>' +
+            '<button id="agent-close-btn" style="background:#95a5a6;color:#fff;border:none;padding:12px 24px;border-radius:6px;font-size:14px;cursor:pointer;">\u5173\u95ED</button>' +
+            '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+        var dlBtn = document.getElementById('agent-download-btn-async');
+        if (dlBtn) dlBtn.addEventListener('click', function() {
+            window.open('./static/download/ColorChaseAgent.exe', '_blank');
+        });
+        var closeBtn = document.getElementById('agent-close-btn');
+        if (closeBtn) closeBtn.addEventListener('click', function() {
+            overlay.style.display = 'none';
+            resolve(false);
+        });
+        var skipBtn = document.getElementById('agent-skip-btn');
+        if (skipBtn) skipBtn.addEventListener('click', function() {
+            overlay.style.display = 'none';
+            resolve(true);
+        });
+    });
+}
+
+// 操作前检查存储模式：管理员 none 可跳过，普通用户 none 拦截
+async function ensureStorageReady() {
+    var mode = await getStorageMode();
+    if (mode === 'none') {
+        var isAdmin = isCurrentUserAdmin();
+        var skip = await showAgentDownloadPromptAsync(isAdmin);
+        if (!skip) return false;
+        // 管理员跳过，继续操作
+        return true;
+    }
+    // agent 模式：首次自动配置默认项目地址（已配过则跳过）
+    if (mode === 'agent') {
+        await ensureDefaultStoragePath();
+    }
+    return true;
+}
+
+// 本地代理配置读写（存储设置用）
+function localAgentGetConfig() {
+    return fetch(LOCAL_AGENT_URL + '/config', { method: 'GET' })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return {}; });
+}
+
+function localAgentSetConfig(path) {
+    return fetch(LOCAL_AGENT_URL + '/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_path: path })
+    }).then(function(r) { return r.json(); }).catch(function() { return {}; });
+}
+
+// 自动配置默认项目地址（仅 agent 模式 + cc_storage_path 为空时生效）
+// 普通用户首次用本地代理时，自动拿系统下载目录下的 ColorChase 文件夹当默认地址
+// 用户之后还能在设置里改，这里只管首次填一个合理的默认值
+async function ensureDefaultStoragePath() {
+    try {
+        var mode = await getStorageMode();
+    } catch (e) {
+        return false;
+    }
+    if (mode !== 'agent') return true;  // FSA 或 none 都不自动配
+    var existing = localStorage.getItem('cc_storage_path') || '';
+    if (existing) return true;  // 已经配过了，别覆盖用户的选择
+    try {
+        var resp = await fetch(LOCAL_AGENT_URL + '/default_path');
+        var data = await resp.json();
+        if (data && data.ok && data.path) {
+            localStorage.setItem('cc_storage_path', data.path);
+            if (typeof localAgentSetConfig === 'function') {
+                try { await localAgentSetConfig(data.path); } catch (e) {}
+            }
+            console.log('[ColorChase] 已自动配置默认项目地址: ' + data.path);
+            return true;
+        }
+    } catch (e) {
+        console.warn('[ColorChase] 自动获取默认项目地址失败（代理可能未启动）:', e);
+    }
+    return false;
+}
+// ===== 全局 fetch 拦截器：自动带 X-ColorChase-Storage-Mode 头 =====
+window.__ccStorageMode = null;
+// 页面加载时检测一次存储模式，存到全局变量
+(async function() {
+    try {
+        window.__ccStorageMode = await getStorageMode();
+        console.log('[ColorChase] 存储模式:', window.__ccStorageMode);
+    } catch (e) {
+        window.__ccStorageMode = 'none';
+    }
+})();
+// 重写 fetch，fsa/agent 模式自动注入请求头
+(function() {
+    var _origFetch = window.fetch;
+    window.fetch = function(input, init) {
+        if (!init) init = {};
+        if (!init.headers) init.headers = {};
+        var mode = window.__ccStorageMode;
+        if (mode && mode !== 'none') {
+            if (init.headers instanceof Headers) {
+                if (!init.headers.has('X-ColorChase-Storage-Mode')) {
+                    init.headers.set('X-ColorChase-Storage-Mode', mode);
+                }
+            } else if (typeof init.headers === 'object') {
+                if (!init.headers['X-ColorChase-Storage-Mode']) {
+                    init.headers['X-ColorChase-Storage-Mode'] = mode;
+                }
+            }
+        }
+        return _origFetch.call(this, input, init);
+    };
+})();
+// ===== fetch 拦截器结束 =====
+
+/* ===== 双模式存储工具函数结束 ===== */
+
 const API_BASE = '';
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -38,6 +1133,15 @@ const STYLE_TAGS = {
     'standard': 'Original',
 };
 
+function getSelectedAIAlgorithm() {
+    var select = $('#ai-algorithm-select');
+    var value = select && select.value ? select.value : window._currentSelectedAlgorithm;
+    if (!value || !ALGO_NAMES[value]) value = 'reinhard';
+    window._currentSelectedAlgorithm = value;
+    if (select && select.value !== value) select.value = value;
+    return value;
+}
+
 const BUILTIN_PROFILES = ['bw', 'warm', 'cool', 'orange_bw'];
 
 let targetImages = [];
@@ -53,6 +1157,7 @@ let _mergedSessionId = null;
 let _profileSessionId = null;
 let _modelStatusCache = null;
 let _modelStatusPromise = null;
+let _modelStatusAuthFailed = false;
 let _originalImageData = null, _stylizedImageData = null;
 let _origCanvasDataUrl = null, _resultCanvasDataUrl = null;
 let _refDataUrl = null;
@@ -115,7 +1220,7 @@ function normalizeProjectAssetUrl(value, projectId) {
     if (/^\/assets\/local_user\//i.test(raw)) {
         return '/api/user_assets/' + raw.replace(/^\/assets\/local_user\//i, '');
     }
-    if (/^(data:|blob:|https?:\/\/|\/api\/project_assets\/|\/api\/user_assets\/|\/assets\/|\/videos\/|\/styles\/)/i.test(raw)) {
+    if (/^(data:|blob:|https?:\/\/|\/api\/project_assets\/|\/api\/user_assets\/|\/api\/user_temp\/|\/assets\/|\/styles\/)/i.test(raw)) {
         return raw;
     }
     var pid = Number(projectId || window.currentProjectId || 0);
@@ -129,7 +1234,7 @@ function normalizeProjectAssetUrl(value, projectId) {
             return '/api/project_assets/' + parts[0] + '/' + parts.slice(1).map(encodeURIComponent).join('/');
         }
     }
-    // 识别迁移后的 storage/projects/assets/{pid}/... 本地绝对路径，转成 HTTP URL
+    // 识别 storage/projects/assets/{pid}/... 或 {storage_label}/{pid}/...，URL 不带目录名
     var marker2 = '/storage/projects/assets/';
     var marker2Index = normalized.toLowerCase().indexOf(marker2);
     if (marker2Index >= 0) {
@@ -137,8 +1242,12 @@ function normalizeProjectAssetUrl(value, projectId) {
         var parts2 = rest2.split('/');
         if (parts2.length >= 2) {
             var pathPid = Number(parts2[0]);
-            if (!pid || pathPid === pid) {
+            if (!isNaN(pathPid) && (!pid || pathPid === pid)) {
                 return '/api/project_assets/' + parts2[0] + '/' + parts2.slice(1).map(encodeURIComponent).join('/');
+            }
+            var labelPathPid = Number(parts2[1]);
+            if (parts2.length >= 3 && !isNaN(labelPathPid) && (!pid || labelPathPid === pid)) {
+                return '/api/project_assets/' + parts2[1] + '/' + parts2.slice(2).map(encodeURIComponent).join('/');
             }
         }
     }
@@ -149,6 +1258,7 @@ function getImageReferenceSrc(img) {
     if (!img) return '';
     // localReferencePath 在旧快照里可能存本地路径，过 normalize 转 HTTP URL
     return img.refDataUrl ||
+        img.localReferenceObjectUrl ||
         normalizeProjectAssetUrl(img.localReferencePath, window.currentProjectId) ||
         normalizeProjectAssetUrl(img.refSavedPath, window.currentProjectId) ||
         normalizeProjectAssetUrl(window._refSavedPath, window.currentProjectId) ||
@@ -158,11 +1268,41 @@ function getImageReferenceSrc(img) {
 function getImageResultSrc(img, fallbackSrc) {
     if (!img) return fallbackSrc || '';
     // localResultPath 在旧快照里可能存本地绝对路径，统一过 normalize 转 HTTP URL
-    return normalizeProjectAssetUrl(img.localResultPath, window.currentProjectId) ||
-        img.resultDataUrl ||
+    return img.resultDataUrl ||
+        img.localResultObjectUrl ||
+        normalizeProjectAssetUrl(img.localResultPath, window.currentProjectId) ||
         normalizeProjectAssetUrl(img.resultSavedPath, window.currentProjectId) ||
         fallbackSrc ||
         '';
+}
+
+function getImageThumbnailSrc(img) {
+    if (!img) return '';
+    return img.localThumbnailObjectUrl ||
+        img.localSourceObjectUrl ||
+        normalizeProjectAssetUrl(img.thumbnailUrl, window.currentProjectId) ||
+        normalizeProjectAssetUrl(img.localThumbnailPath, window.currentProjectId) ||
+        normalizeProjectAssetUrl(img.sourcePath, window.currentProjectId) ||
+        img.thumbnailUrl ||
+        img.sourcePath ||
+        '';
+}
+
+function getImageOriginalSrc(img) {
+    if (!img) return '';
+    if (img.localThumbnailObjectUrl) return img.localThumbnailObjectUrl;
+    if (img.localSourceObjectUrl) return img.localSourceObjectUrl;
+    // 优先用浏览器能直接解码的本地预览图（服务端转换后的 JPG/PNG）
+    if (img.localSourcePath) {
+        var normalizedLocal = normalizeProjectAssetUrl(img.localSourcePath, window.currentProjectId);
+        if (normalizedLocal) return normalizedLocal;
+    }
+    // sourcePath 是 RAW 等浏览器解不了的格式时，退回缩略图
+    var rawExts = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|rw2|raw|rwl|orf|pef|ptx|3fr|fff|iiq|cap|eip|mef|mos|mfw|x3f|dcr|kdc|k25|dcs|srw|erf|cs1|cs4|cs16|sti|bay|pxn|braw|r3d|ari|cine|lfp|rwz|dng)$/i;
+    if (img.sourcePath && !rawExts.test(img.sourcePath)) {
+        return normalizeProjectAssetUrl(img.sourcePath, window.currentProjectId) || img.sourcePath;
+    }
+    return getImageThumbnailSrc(img);
 }
 
 function hasImageResult(img) {
@@ -366,12 +1506,37 @@ function nextId() {
 /* ---------- helpers ---------- */
 function showToast(msg, dur = 3000) {
     const t = $('#toast');
-    if (typeof msg === 'string') {
-        t.innerHTML = '';
-        t.textContent = msg;
-    } else {
+    if (typeof Node !== 'undefined' && msg instanceof Node) {
         t.innerHTML = '';
         t.appendChild(msg);
+    } else {
+        if (msg == null) {
+            msg = '';
+        } else if (Array.isArray(msg)) {
+            msg = msg.map(function(item) {
+                if (typeof item === 'string') return item;
+                if (item && typeof item.msg === 'string') return item.msg;
+                if (item && typeof item.message === 'string') return item.message;
+                try { return JSON.stringify(item); } catch(e) { return String(item); }
+            }).join('; ');
+        } else if (typeof msg === 'object') {
+            if (typeof msg.detail === 'string') msg = msg.detail;
+            else if (Array.isArray(msg.detail)) {
+                msg = msg.detail.map(function(item) {
+                    if (typeof item === 'string') return item;
+                    if (item && typeof item.msg === 'string') return item.msg;
+                    if (item && typeof item.message === 'string') return item.message;
+                    try { return JSON.stringify(item); } catch(e) { return String(item); }
+                }).join('; ');
+            } else if (typeof msg.message === 'string') msg = msg.message;
+            else {
+                try { msg = JSON.stringify(msg); } catch(e) { msg = String(msg); }
+            }
+        } else {
+            msg = String(msg);
+        }
+        t.innerHTML = '';
+        t.textContent = msg;
     }
     t.hidden = false;
     t.onclick = null;
@@ -476,7 +1641,7 @@ function restoreCurrentState() {
     }
 
     _resultCanvasDataUrl = getImageResultSrc(img, '');
-    _origCanvasDataUrl = img.thumbnailUrl || img.sourcePath;
+    _origCanvasDataUrl = getImageThumbnailSrc(img);
     _refDataUrl = img.refDataUrl || null;
     window._refSavedPath = img.refSavedPath || '';
     _subjectMaskPath = img.subjectMaskPath || '';
@@ -592,10 +1757,19 @@ function getProjectImageDeletionPaths(images) {
     var paths = [];
     var seen = new Set();
     (images || []).forEach(function(img) {
-        ['savedPath', 'sourcePath', 'thumbnailUrl'].forEach(function(key) {
+        [
+            'savedPath',
+            'sourcePath',
+            'thumbnailUrl',
+            'resultSavedPath',
+            'refSavedPath',
+            'subjectMaskPath',
+            'depthLayerPath',
+        ].forEach(function(key) {
             var value = img && img[key] ? String(img[key]).trim() : '';
             if (!value) return;
-            if (!(value.startsWith('/assets/projects/') || value.startsWith('/uploaded/projects/'))) return;
+            value = normalizeProjectAssetUrl(value, window.currentProjectId) || value;
+            if (!(value.startsWith('/api/project_assets/') || value.startsWith('/assets/projects/') || value.startsWith('/uploaded/projects/'))) return;
             var normalized = value.split('?')[0];
             if (seen.has(normalized)) return;
             seen.add(normalized);
@@ -755,11 +1929,12 @@ function switchTarget(index) {
     $('#canvas-placeholder').hidden = true;
     $('#canvas-stack').hidden = false;
 
-    const thumbSrc = img.thumbnailUrl || img.sourcePath;
-    $('#canvas-original').src = thumbSrc;
+    const thumbSrc = getImageThumbnailSrc(img);
+    const origSrc = getImageOriginalSrc(img);
+    $('#canvas-original').src = origSrc;
     $('#canvas-result').src = getImageResultSrc(img, _resultCanvasDataUrl || thumbSrc);
     $('#canvas-reference').src = getImageReferenceSrc(img);
-    _origCanvasDataUrl = thumbSrc;
+    _origCanvasDataUrl = origSrc;
 
     _originalImageData = null;
     _stylizedImageData = null;
@@ -939,6 +2114,49 @@ function setupPressCompare() {
     var savedResultSrc = null;
     var savedCompareRightSrc = null;
 
+    function ensurePressOriginalLayer() {
+        var pane = $('#pane-result');
+        if (!pane) return null;
+        var layer = $('#press-compare-original-layer');
+        if (!layer) {
+            layer = document.createElement('img');
+            layer.id = 'press-compare-original-layer';
+            layer.className = 'canvas-layer press-compare-original-layer';
+            layer.draggable = false;
+            layer.hidden = true;
+            pane.appendChild(layer);
+        }
+        return layer;
+    }
+
+    function syncPressOriginalLayer() {
+        var layer = ensurePressOriginalLayer();
+        if (!layer) return null;
+        var originalEl = $('#canvas-original');
+        var src = (originalEl && originalEl.src) || _origCanvasDataUrl || '';
+        if (src && layer.src !== src) layer.src = src;
+        return layer;
+    }
+
+    function showPressOriginalLayer() {
+        var layer = syncPressOriginalLayer();
+        var stack = $('#canvas-stack');
+        if (!layer || !layer.src || !stack) return false;
+        layer.hidden = false;
+        stack.classList.add('press-compare-active');
+        return true;
+    }
+
+    function hidePressOriginalLayer() {
+        var layer = $('#press-compare-original-layer');
+        var stack = $('#canvas-stack');
+        if (stack) stack.classList.remove('press-compare-active');
+        if (layer) layer.hidden = true;
+    }
+
+    var originalEl = $('#canvas-original');
+    if (originalEl) originalEl.addEventListener('load', syncPressOriginalLayer);
+
     function onPressStart(e) {
         e.preventDefault();
         if (btn.disabled || isProcessing) return;
@@ -952,8 +2170,11 @@ function setupPressCompare() {
             savedCompareRightSrc = $('#compare-right-img').src;
             $('#compare-right-img').src = $('#canvas-original').src;
         } else {
-            savedResultSrc = $('#canvas-result').src;
-            if (_origCanvasDataUrl) $('#canvas-result').src = _origCanvasDataUrl;
+            savedResultSrc = null;
+            if (!showPressOriginalLayer() && _origCanvasDataUrl) {
+                savedResultSrc = $('#canvas-result').src;
+                $('#canvas-result').src = _origCanvasDataUrl;
+            }
         }
     }
 
@@ -966,6 +2187,7 @@ function setupPressCompare() {
             if (savedCompareRightSrc) { $('#compare-right-img').src = savedCompareRightSrc; }
             savedCompareRightSrc = null;
         } else {
+            hidePressOriginalLayer();
             if (savedResultSrc) $('#canvas-result').src = savedResultSrc;
             savedResultSrc = null;
         }
@@ -1142,21 +2364,23 @@ function setupZoom() {
 
         var leftFit = Math.min(leftPaneW / leftW, areaH / leftH, 1.0);
         var rightFit = Math.min(rightPaneW / rightW, areaH / rightH, 1.0);
-        _compareFitScale = Math.min(leftFit, rightFit);
-        if (_compareFitScale <= 0) _compareFitScale = 1.0;
+        if (leftFit <= 0) leftFit = 1.0;
+        if (rightFit <= 0) rightFit = 1.0;
+        // 左右各自按自己的原图尺寸 fit，避免一侧小缩略图把另一侧高清图拖小
+        _compareFitScale = leftFit;
 
-        compareState.leftScale = _compareFitScale;
-        compareState.rightScale = _compareFitScale;
-        compareState.targetLeftScale = _compareFitScale;
-        compareState.targetRightScale = _compareFitScale;
+        compareState.leftScale = leftFit;
+        compareState.rightScale = rightFit;
+        compareState.targetLeftScale = leftFit;
+        compareState.targetRightScale = rightFit;
 
-        compareState.leftOffsetX = leftPaneW - leftW * _compareFitScale;
-        compareState.leftOffsetY = (areaH - leftH * _compareFitScale) / 2;
+        compareState.leftOffsetX = leftPaneW - leftW * leftFit;
+        compareState.leftOffsetY = (areaH - leftH * leftFit) / 2;
         compareState.targetLeftOffsetX = compareState.leftOffsetX;
         compareState.targetLeftOffsetY = compareState.leftOffsetY;
 
         compareState.rightOffsetX = 0;
-        compareState.rightOffsetY = (areaH - rightH * _compareFitScale) / 2;
+        compareState.rightOffsetY = (areaH - rightH * rightFit) / 2;
         compareState.targetRightOffsetX = compareState.rightOffsetX;
         compareState.targetRightOffsetY = compareState.rightOffsetY;
         compareState.isAnimating = false;
@@ -1220,9 +2444,13 @@ function setupZoom() {
             var leftPaneW = dividerX;
             var rightPaneW = areaW - dividerX;
 
-            var oldScaleC = compareState.targetLeftScale;
+            var oldLeftScaleC = compareState.targetLeftScale;
+            var oldRightScaleC = compareState.targetRightScale;
             var zoomFactorC = Math.pow(1.15, cSteps * cDirection);
-            var newScaleC = Math.max(compareState.minScale, Math.min(compareState.maxScale, oldScaleC * zoomFactorC));
+            var newLeftScaleC = Math.max(compareState.minScale, Math.min(compareState.maxScale, oldLeftScaleC * zoomFactorC));
+            // 左右独立 fit 后 scale 可能不同，滚轮缩放时保持两侧比例一致
+            var scaleRatioC = newLeftScaleC / oldLeftScaleC;
+            var newRightScaleC = Math.max(compareState.minScale, Math.min(compareState.maxScale, oldRightScaleC * scaleRatioC));
 
             var leftMX, rightMX;
             if (paneX < dividerX) {
@@ -1233,13 +2461,13 @@ function setupZoom() {
                 rightMX = paneX - dividerX;
             }
 
-            compareState.targetLeftOffsetX = leftMX - (leftMX - compareState.targetLeftOffsetX) * (newScaleC / oldScaleC);
-            compareState.targetLeftOffsetY = paneY - (paneY - compareState.targetLeftOffsetY) * (newScaleC / oldScaleC);
-            compareState.targetLeftScale = newScaleC;
+            compareState.targetLeftOffsetX = leftMX - (leftMX - compareState.targetLeftOffsetX) * scaleRatioC;
+            compareState.targetLeftOffsetY = paneY - (paneY - compareState.targetLeftOffsetY) * scaleRatioC;
+            compareState.targetLeftScale = newLeftScaleC;
 
-            compareState.targetRightOffsetX = rightMX - (rightMX - compareState.targetRightOffsetX) * (newScaleC / oldScaleC);
-            compareState.targetRightOffsetY = paneY - (paneY - compareState.targetRightOffsetY) * (newScaleC / oldScaleC);
-            compareState.targetRightScale = newScaleC;
+            compareState.targetRightOffsetX = rightMX - (rightMX - compareState.targetRightOffsetX) * scaleRatioC;
+            compareState.targetRightOffsetY = paneY - (paneY - compareState.targetRightOffsetY) * scaleRatioC;
+            compareState.targetRightScale = newRightScaleC;
 
             if (!compareState.isAnimating) {
                 compareState.isAnimating = true;
@@ -1455,7 +2683,7 @@ function renderGallery() {
             }
 
             var thumb = document.createElement('img');
-            thumb.src = img.thumbnailUrl || img.sourcePath || '';
+            thumb.src = getImageThumbnailSrc(img);
             thumb.alt = img.name || '';
             thumb.className = 'gallery-thumb';
             thumb.draggable = false;
@@ -1623,6 +2851,18 @@ async function importBatchFiles(files) {
 
     showToast(`正在导入 ${files.length} 张图片...`);
 
+    // 上传原图副本到检测库（两种模式都直接走服务器 API）
+    var detToken = getAuthToken();
+    for (var di = 0; di < files.length; di++) {
+        var detFile = files[di];
+        var detUuid = 'u' + Date.now() + '_' + di;
+        try {
+            await uploadDetectionCopy(detFile, detUuid, detToken);
+        } catch (e) {
+            console.error('检测库上传失败:', e);
+        }
+    }
+
     try {
         const resp = await fetch(`${API_BASE}/api/upload_batch`, {
             method: 'POST',
@@ -1641,13 +2881,24 @@ async function importBatchFiles(files) {
             // 优先用 HTTP URL（asset_url/thumbnail），避免用本地路径(item.path)作为 <img src> 触发 file:// 错误
             let projectSourcePath = item.asset_url || item.thumbnail || item.path;
             let projectThumbnailUrl = item.thumbnail || item.asset_url || '';
+            let localSourcePath = '';
+            let localThumbnailPath = '';
             if (window.currentProjectId && !item.project_saved) {
                 try {
-            const projectAssetPath = await saveFileToProject(item.asset_url || '', 'source', item.name);
-            if (projectAssetPath) {
-                projectSavedPath = projectAssetPath;
-                projectSourcePath = projectAssetPath;
-                projectThumbnailUrl = projectAssetPath;
+                    const sourceInfo = await saveFileToProjectInfo(item.asset_url || '', 'source', item.name);
+                    if (sourceInfo.localPath) {
+                        localSourcePath = sourceInfo.localPath;
+                    }
+                    if (sourceInfo.serverUrl) {
+                        projectSavedPath = sourceInfo.serverUrl;
+                        projectSourcePath = sourceInfo.serverUrl;
+                    }
+                    if (item.thumbnail) {
+                        var thumbName = item.thumbnail.split('/').pop().split('?')[0] || ((sourceInfo.filename || item.name || 'thumb') + '_thumb.jpg');
+                        const thumbInfo = await saveFileToProjectInfo(item.thumbnail, 'thumbs', thumbName);
+                        if (thumbInfo.localPath) {
+                            localThumbnailPath = thumbInfo.localPath;
+                        }
                     }
                 } catch (e) {}
             }
@@ -1675,10 +2926,8 @@ async function importBatchFiles(files) {
                 rating: 0,
                 resultSavedPath: '',
                 savedPath: projectSavedPath,
-                // localSourcePath 用于 <img src> 显示，必须是浏览器可解码的 URL（JPG/PNG/HTTP）。
-                // RAW 文件（.CR2/.NEF 等）浏览器原生不能渲染，必须用后端生成的 JPG 缩略图 URL。
-                // sourcePath 字段保留原 asset_url（可能是 .CR2 URL）供追色接口解析回本地 RAW 文件。
-                localSourcePath: projectThumbnailUrl || projectSourcePath,
+                localSourcePath: localSourcePath,
+                localThumbnailPath: localThumbnailPath,
                 localReferencePath: '',
                 localResultPath: '',
             };
@@ -1695,10 +2944,11 @@ async function importBatchFiles(files) {
             $('#canvas-resolution').textContent = img.meta || '';
             $('#canvas-placeholder').hidden = true;
             $('#canvas-stack').hidden = false;
-            const thumbSrc = img.thumbnailUrl || img.sourcePath;
-            $('#canvas-original').src = thumbSrc;
+            const thumbSrc = getImageThumbnailSrc(img);
+            const origSrc = getImageOriginalSrc(img);
+            $('#canvas-original').src = origSrc;
             $('#canvas-result').src = thumbSrc;
-            _origCanvasDataUrl = thumbSrc;
+            _origCanvasDataUrl = origSrc;
             setViewMode('single');
             renderGallery();
         }
@@ -1723,6 +2973,8 @@ function switchTab(name) {
 /* ---------- AI tab ---------- */
 function updateAlgoInfo() {
     const algo = $('#ai-algorithm-select').value;
+    window._currentSelectedAlgorithm = algo;
+    console.log('[updateAlgoInfo] current algorithm:', algo);
     const info = {
         reinhard: '经典 LAB 空间统计迁移，速度极快',
         histogram: '逐通道直方图 CDF 匹配，色彩分布精确',
@@ -1747,11 +2999,23 @@ function updateAlgoInfo() {
 function fetchModelStatusCached(force) {
     if (force) {
         _modelStatusCache = null;
+        _modelStatusAuthFailed = false;
     }
     if (!force && _modelStatusCache) return Promise.resolve(_modelStatusCache);
     if (!force && _modelStatusPromise) return _modelStatusPromise;
-    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store' })
-        .then(function(resp) { return resp.json().then(function(data) { return { ok: resp.ok, data: data }; }); })
+    // 没登录或已经 401 过，就不要再发了，避免后台一直刷 401 日志
+    if (!localStorage.getItem('cc_token') || _modelStatusAuthFailed) {
+        _modelStatusCache = {};
+        return Promise.resolve(_modelStatusCache);
+    }
+    _modelStatusPromise = fetch(`${API_BASE}/api/model_status`, { method: 'GET', cache: 'no-store', headers: getAuthHeaders() })
+        .then(function(resp) {
+            if (resp.status === 401) {
+                _modelStatusAuthFailed = true;
+                return { ok: true, data: {} };
+            }
+            return resp.json().then(function(data) { return { ok: resp.ok, data: data }; });
+        })
         .then(function(result) {
             if (!result.ok) throw new Error((result.data && result.data.detail) || '模型状态读取失败');
             _modelStatusCache = result.data || {};
@@ -1809,7 +3073,7 @@ async function refreshCapabilityModelSelectors(force) {
         applyModelOptionAvailability($('#ai-mask-model'), {
             auto: { type: 'always' },
             birefnet: { type: 'model', modelKey: 'birefnet_subject_mask', requireReadyStatus: true },
-            sam: { type: 'custom', disabled: true, note: 'SAM/SAM2 推理链路尚未接入，暂不可选' },
+            sam: { type: 'model', modelKey: 'sam_subject_mask', requireReadyStatus: true },
             fallback: { type: 'always' },
         }, modelMap);
         applyModelOptionAvailability($('#ai-depth-model'), {
@@ -2106,8 +3370,9 @@ async function doAITransfer() {
     if (!img) { showToast('请先选择目标图片并上传参考图'); return; }
     if (!referenceUpload && !referencePath) { showToast('请先上传参考图'); return; }
 
-    const algorithm = $('#ai-algorithm-select').value;
     await refreshCapabilityModelSelectors(true);
+    var algorithm = getSelectedAIAlgorithm();
+    console.log('[doAITransfer] algorithm selected:', algorithm, 'cached:', window._currentSelectedAlgorithm);
     if (algorithm === 'dncm_lut' && !(await ensureDncmLutReady())) return;
     if ($('#ai-depth-enabled') && $('#ai-depth-enabled').checked) {
         if (!_depthLayerPath) {
@@ -2131,6 +3396,7 @@ async function doAITransfer() {
         algorithm: algorithm,
         image: img.name || '',
     });
+    var waitingForResultDisplay = false;
     perfTrace('start');
 
     updateProgress('canvas', 2, '准备中...');
@@ -2140,7 +3406,20 @@ async function doAITransfer() {
 
     try {
         const formData = new FormData();
-        formData.append('target', new File([], img.name));
+        var localTargetUpload = null;
+        if (!isCurrentUserAdmin() && isLocalProjectRelativePath(img.localSourcePath)) {
+            var localTargetBlob = await readBrowserProjectFileBlob(img.localSourcePath);
+            if (!localTargetBlob) {
+                try {
+                    var localMode = await getStorageMode();
+                    if (localMode === 'agent') localTargetBlob = await readAgentProjectFileBlob(img.localSourcePath);
+                } catch(e) {}
+            }
+            if (localTargetBlob) {
+                localTargetUpload = new File([localTargetBlob], img.name || 'target.jpg', { type: localTargetBlob.type || 'application/octet-stream' });
+            }
+        }
+        formData.append('target', localTargetUpload || new File([], img.name));
         formData.append('target_path', img.sourcePath);
         if (window.currentProjectId) {
             formData.append('project_id', String(window.currentProjectId));
@@ -2151,6 +3430,7 @@ async function doAITransfer() {
             formData.append('reference', referenceUpload, refFile && refFile.name ? refFile.name : 'reference.jpg');
         }
         formData.append('algorithm', algorithm);
+        console.log('[doAITransfer] submitting algorithm:', algorithm);
         formData.append('blend_strength', $('#ai-blend-slider').value / 100);
         formData.append('enable_postprocess', $('#ai-postprocess').checked);
         formData.append('enable_metrics', $('#ai-metrics').checked);
@@ -2212,10 +3492,17 @@ async function doAITransfer() {
             _resultCanvasDataUrl = resultSrc;
             _origCanvasDataUrl = targetSrc;
 
+            var localResultPath = '';
+            if (!isCurrentUserAdmin() && resultSrc) {
+                var resultBaseName = String(img.name || 'result').replace(/\.[^.]+$/, '') || 'result';
+                var resultInfo = await saveFileToProjectInfo(resultSrc, 'result', resultBaseName + '_result.jpg');
+                localResultPath = resultInfo.localPath || '';
+            }
+
             img.sessionId = data.session_id;
             img.resultDataUrl = resultSrc;
-            img.resultSavedPath = data.result_path || img.resultSavedPath || '';
-            img.localResultPath = resultSrc || img.localResultPath || '';
+            img.resultSavedPath = data.result_path || '';
+            img.localResultPath = localResultPath || '';
             img.status = 'done';
             img.aiAlgo = data.algorithm || $('#ai-algorithm-select').value || '';
             var previousRefPath = img.refSavedPath || window._refSavedPath || '';
@@ -2247,19 +3534,46 @@ async function doAITransfer() {
             saveSnapshot();
             perfTrace('after_save_snapshot');
 
-            $('#canvas-status').hidden = true;
+            // 普通用户把 LUT / 深度图 / 遮罩图等中间产物同步保存到本地项目目录
+            if (!isCurrentUserAdmin() && data.intermediate_urls && typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle) {
+                var sessionSafe = data.session_id || 'session';
+                if (data.intermediate_urls.lut) {
+                    saveFileToProject(data.intermediate_urls.lut, 'intermediate', sessionSafe + '_lut_global.npy');
+                }
+                if (data.intermediate_urls.mask) {
+                    saveFileToProject(data.intermediate_urls.mask, 'intermediate', sessionSafe + '_mask.png');
+                }
+                if (data.intermediate_urls.depth) {
+                    saveFileToProject(data.intermediate_urls.depth, 'intermediate', sessionSafe + '_depth.png');
+                }
+            }
+
             $('#canvas-original').src = targetSrc;
             var resultEl = $('#canvas-result');
-            resultEl.addEventListener('load', function onResultLoad() {
+            var resultDisplayDone = false;
+            function finishResultDisplay(kind) {
+                if (resultDisplayDone) return;
+                resultDisplayDone = true;
                 resultEl.removeEventListener('load', onResultLoad);
+                resultEl.removeEventListener('error', onResultError);
                 perfTrace('canvas_result_loaded', {
+                    kind: kind || 'load',
                     width: resultEl.naturalWidth || 0,
                     height: resultEl.naturalHeight || 0,
                 });
-            });
+                updateProgress('canvas', 100, '追色完成');
+                setTimeout(() => { $('#canvas-status').hidden = true; }, 500);
+            }
+            function onResultLoad() { finishResultDisplay('load'); }
+            function onResultError() { finishResultDisplay('error'); }
+            resultEl.addEventListener('load', onResultLoad);
+            resultEl.addEventListener('error', onResultError);
+            updateProgress('canvas', 98, '正在显示追色结果...');
+            waitingForResultDisplay = true;
             perfTrace('before_set_result_src');
             resultEl.src = resultSrc;
             perfTrace('after_set_result_src');
+            setTimeout(function() { finishResultDisplay('timeout'); }, 10000);
             deferIdle(function() {
                 perfTrace('image_data_cache_start');
                 Promise.all([
@@ -2310,14 +3624,6 @@ async function doAITransfer() {
             updateAllButtons();
             perfTrace('after_update_buttons');
 
-            deferIdle(function() {
-                perfTrace('merge_idle_start');
-                mergeAndUpdateCanvas().then(function() {
-                    perfTrace('merge_idle_done');
-                }).catch(function(err) {
-                    perfTrace('merge_idle_error', { message: err && err.message ? err.message : String(err) });
-                });
-            });
             setViewMode('single');
             perfTrace('after_set_view_mode');
             showToast(data.reusable_preset && data.reusable_preset.name
@@ -2330,7 +3636,9 @@ async function doAITransfer() {
     } finally {
         isProcessing = false; updateAllButtons();
         if (sse) sse.close();
-        setTimeout(() => { $('#canvas-status').hidden = true; }, 3500);
+        if (!waitingForResultDisplay) {
+            setTimeout(() => { $('#canvas-status').hidden = true; }, 3500);
+        }
         perfTrace('finally_done');
     }
 }
@@ -2670,7 +3978,11 @@ async function applyStyle(styleId, styleName) {
         var sid = img.sessionId || img.mergedSessionId || _lastSessionId;
         if (sid) fd.append('session_id', sid);
 
-        var resp = await fetch('/api/apply_style', { method: 'POST', body: fd });
+        var resp = await fetch('/api/apply_style', {
+            method: 'POST',
+            body: fd,
+            headers: getAuthHeaders()
+        });
         var data = await resp.json();
         if (!resp.ok) {
             showToast('风格应用失败: ' + (data.detail || '未知错误'));
@@ -2748,7 +4060,7 @@ async function applyProfile() {
         if (_lastSessionId) {
             await mergeAndUpdateCanvas();
         } else {
-            var origSrc = _origCanvasDataUrl || img.thumbnailUrl || img.sourcePath;
+            var origSrc = _origCanvasDataUrl || getImageThumbnailSrc(img);
             if (origSrc) {
                 _resultCanvasDataUrl = origSrc;
                 $('#canvas-result').src = origSrc;
@@ -2821,6 +4133,14 @@ async function applyProfile() {
 
             saveCurrentState();
             updateAllButtons();
+
+            // 普通用户把 LUT 中间产物同步保存到本地项目目录
+            if (!isCurrentUserAdmin() && data.intermediate_urls && typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle) {
+                var applySessionSafe = _lastSessionId || 'session';
+                if (data.intermediate_urls.lut) {
+                    saveFileToProject(data.intermediate_urls.lut, 'intermediate', applySessionSafe + '_lut_global.npy');
+                }
+            }
 
             await mergeAndUpdateCanvas();
             showToast('配置已应用！');
@@ -3031,7 +4351,7 @@ function openBatchModal() {
                     if (_profileBuiltin) formData.append('profile_builtin', _profileBuiltin);
                     else if (_profileSessionId) formData.append('profile_session_id', _profileSessionId);
 
-                    var resp = await fetch(API_BASE + '/api/merge_luts', { method: 'POST', body: formData });
+                    var resp = await fetch(API_BASE + '/api/merge_luts', { method: 'POST', body: formData, headers: getAuthHeaders() });
                     if (!resp.ok) {
                         console.error('Batch merge failed for', img.name);
                         img.status = 'pending';
@@ -3468,7 +4788,7 @@ async function renderSingleImageBlob(img, format, sizeMode, sizeCustomVal) {
     formData.append('project_id', String(window.currentProjectId || 0));
     formData.append('asset_name', img.name || '');
     formData.append('rating', String(img.rating || 0));
-    formData.append('algorithm', img.aiAlgo || $('#ai-algorithm-select').value || '');
+    formData.append('algorithm', getSelectedAIAlgorithm());
     formData.append('reference_path', img.refSavedPath || window._refSavedPath || '');
     if (!(img.refSavedPath || window._refSavedPath)) {
         formData.append('reference_data_url', img.refDataUrl || _refDataUrl || '');
@@ -3506,14 +4826,38 @@ async function downloadToFolder() {
     const s = readExportSettingsFromUI();
     saveExportSettings(s);
 
-    try {
-        const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-        exportFolderHandle = dirHandle;
-        exportFolderName = dirHandle.name;
-        try { localStorage.setItem(EXPORT_FOLDER_KEY, JSON.stringify({ name: dirHandle.name })); } catch {}
-        $('#export-folder-path').textContent = dirHandle.name;
-    } catch(e) {
-        if (e.name === 'AbortError') return;
+    // 双模式：先检测浏览器能力，支持用 File System Access API，不支持走本地代理
+    // 管理员在 none 模式下可以跳过，走浏览器直接下载
+    var storageMode = await getStorageMode();
+    var isAdminUser = isCurrentUserAdmin();
+    if (storageMode === 'none') {
+        var skip = await showAgentDownloadPromptAsync(isAdminUser);
+        if (!skip) return;
+    }
+    var useLocalAgent = (storageMode === 'agent');
+    var useBrowserDownload = (storageMode === 'none' && isAdminUser);
+    if (useBrowserDownload) {
+        // 管理员浏览器下载模式：不需要目录选择器，导出时直接触发浏览器下载
+        exportFolderHandle = null;
+        exportFolderName = '浏览器下载（管理员）';
+        $('#export-folder-path').textContent = exportFolderName;
+    } else if (useLocalAgent) {
+        // 本地代理模式：不需要目录选择器，直接用本地代理的项目地址
+        var localBasePath = localStorage.getItem('cc_storage_path') || '';
+        exportFolderHandle = null;
+        exportFolderName = localBasePath || '本地代理';
+        $('#export-folder-path').textContent = exportFolderName;
+    } else {
+        // FSA 模式：用 showDirectoryPicker 选目录
+        try {
+            const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            exportFolderHandle = dirHandle;
+            exportFolderName = dirHandle.name;
+            try { localStorage.setItem(EXPORT_FOLDER_KEY, JSON.stringify({ name: dirHandle.name })); } catch {}
+            $('#export-folder-path').textContent = dirHandle.name;
+        } catch(e) {
+            if (e.name === 'AbortError') return;
+        }
     }
 
     const progressDiv = $('#batch-progress');
@@ -3544,9 +4888,12 @@ async function downloadToFolder() {
         const orgParts = getOrganizationPath(img);
         const formats = s.format === 'both' ? ['jpg', 'png'] : [s.format];
 
-        let subDir = exportFolderHandle;
-        for (const part of orgParts) {
-            subDir = await subDir.getDirectoryHandle(part, { create: true });
+        var relDirParts = orgParts.slice();
+        var subDir = exportFolderHandle;
+        if (!useLocalAgent && subDir) {
+            for (const part of orgParts) {
+                subDir = await subDir.getDirectoryHandle(part, { create: true });
+            }
         }
 
         for (const fmt of formats) {
@@ -3554,23 +4901,49 @@ async function downloadToFolder() {
             currentFileName.textContent = fileName;
             currentFileEl.hidden = false;
 
-            let suffix = 0, finalName = fileName;
-            const base = fileName.replace(/\.[^.]+$/, '');
-            const ext = '.' + fmt;
-            while (true) {
-                try { await subDir.getFileHandle(finalName); suffix++; finalName = base + '_' + suffix + ext; }
-                catch { break; }
+            var finalName = fileName;
+            if (!useLocalAgent && subDir) {
+                let suffix = 0;
+                const base = fileName.replace(/\.[^.]+$/, '');
+                const ext = '.' + fmt;
+                while (true) {
+                    try { await subDir.getFileHandle(finalName); suffix++; finalName = base + '_' + suffix + ext; }
+                    catch { break; }
+                }
             }
 
         const blob = await renderSingleImageBlob(img, fmt, sizeMode, s.sizeCustom);
         exportedBytes += blob.size || 0;
-        const fh = await subDir.getFileHandle(finalName, { create: true });
-        const wr = await fh.createWritable();
-        await wr.write(blob);
-        await wr.close();
-        if (browserProjectRootHandle) {
-            await writeBrowserProjectResult(finalName, blob);
+        if (useBrowserDownload) {
+            // 管理员浏览器下载模式：直接触发浏览器下载
+            var dlUrl = URL.createObjectURL(blob);
+            var dlA = document.createElement('a');
+            dlA.href = dlUrl;
+            dlA.download = finalName;
+            document.body.appendChild(dlA);
+            dlA.click();
+            document.body.removeChild(dlA);
+            setTimeout(function() { URL.revokeObjectURL(dlUrl); }, 2000);
+        } else if (useLocalAgent) {
+            // 本地代理模式：写到本地代理的项目地址目录
+            var relPath = relDirParts.concat([finalName]).join('/');
+            try {
+                await localAgentWriteFile(blob, relPath, window.currentProjectId || 0, window.currentProjectName || '');
+            } catch (e) {
+                console.error('本地代理写入失败:', e);
+            }
+        } else {
+            // FSA 模式：用 File System Access API 写
+            const fh = await subDir.getFileHandle(finalName, { create: true });
+            const wr = await fh.createWritable();
+            await wr.write(blob);
+            await wr.close();
+            if (browserProjectRootHandle) {
+                await writeBrowserProjectResult(finalName, blob);
+            }
         }
+        // 三种模式都上传训练语料到服务器
+        try { await uploadTrainingSample(img, blob, fmt); } catch (e) { console.error('训练语料上传失败:', e); }
 
         if (i === checked.length - 1) lastFilePaths.push(finalName);
         completed++;
@@ -3678,6 +5051,8 @@ function setupRefUpload() {
         if (currentImg) {
             currentImg.refDataUrl = null;
             currentImg.refSavedPath = '';
+            currentImg.localReferencePath = '';
+            currentImg.localReferenceObjectUrl = '';
         }
         $('#canvas-reference').src = '';
         preview.hidden = true; placeholder.hidden = false; clearBtn.hidden = true;
@@ -3697,15 +5072,21 @@ function setupRefUpload() {
             if (currentImg) {
                 currentImg.refDataUrl = e.target.result;
                 currentImg.refSavedPath = '';
+                currentImg.localReferencePath = '';
+                currentImg.localReferenceObjectUrl = '';
             }
             $('#canvas-reference').src = e.target.result;
             preview.hidden = false; placeholder.hidden = true; clearBtn.hidden = false;
             if (window.currentProjectId) {
-                saveFileToProject(file, 'reference', file.name).then(function(savedPath) {
-                    if (!savedPath) return;
-                    window._refSavedPath = savedPath;
+                saveFileToProjectInfo(file, 'reference', file.name).then(function(info) {
+                    var savedPath = info.serverUrl || info.url || '';
+                    if (!savedPath && !info.localPath) return;
+                    window._refSavedPath = savedPath || window._refSavedPath || '';
                     var activeImg = getCurrentImage();
-                    if (activeImg) activeImg.refSavedPath = savedPath;
+                    if (activeImg) {
+                        activeImg.refSavedPath = savedPath || activeImg.refSavedPath || '';
+                        activeImg.localReferencePath = info.localPath || activeImg.localReferencePath || '';
+                    }
                     saveLocalProjectSnapshot();
                 }).catch(function() {});
             }
@@ -3852,7 +5233,12 @@ function init() {
     });
 
     $('#ai-transfer-btn').addEventListener('click', doAITransfer);
-    $('#ai-algorithm-select').addEventListener('change', updateAlgoInfo);
+    $('#ai-algorithm-select').addEventListener('change', function(e) {
+        var selected = e.target.value || '';
+        window._currentSelectedAlgorithm = selected;
+        console.log('[algorithm-select] changed to:', selected);
+        updateAlgoInfo();
+    });
     $('#ai-blend-slider').addEventListener('input', (e) => { $('#ai-blend-value').textContent = e.target.value; });
     if ($('#ai-mask-generate')) $('#ai-mask-generate').addEventListener('click', generateSubjectMask);
     if ($('#ai-mask-clear-points')) $('#ai-mask-clear-points').addEventListener('click', function() { clearSubjectMask({ clearPoints: true }); });
@@ -3985,6 +5371,16 @@ function init() {
                 var statusText = $('#profile-status-text');
                 statusText.textContent = '已捕获: ' + (data.style.name || '') + ' (' + (data.style.camera || '') + ')';
                 $('#apply-profile-btn').disabled = false;
+                // 普通用户把提取的风格同步保存到本地项目目录，方便自己管理
+                if (!isCurrentUserAdmin()) {
+                    var styleSafeName = safeLocalProjectName(data.style.name || 'captured_style', 'captured_style');
+                    saveFileToProject(data.npy_path, 'styles', styleSafeName + '.npy');
+                    saveFileToProject(data.cube_path, 'styles', styleSafeName + '.cube');
+                    saveFileToProject(data.ccs_path, 'styles', styleSafeName + '.ccs');
+                    if (data.thumbnail_path) {
+                        saveFileToProject(data.thumbnail_path, 'styles', styleSafeName + '_thumb.jpg');
+                    }
+                }
             }
             showToast('相机风格提取成功！');
             loadStyleGallery();
@@ -4172,6 +5568,9 @@ function init() {
     updateAlgoInfo();
     updateAllButtons();
 
+    // 页面加载时尝试恢复本地授权目录，避免每次刷新都要重新配置
+    restoreBrowserProjectRootHandle();
+
     loadStyleGallery();
 }
 
@@ -4188,6 +5587,8 @@ window.exitWorkspace = function() {
 
 var videoFileUrl = null;
 var currentVideoFile = null;
+var _localVideoFilePath = '';
+var _localVideoResultPath = '';
 var videoDuration = 0;
 var videoFps = 0;
 var _originalVideoFps = 0;
@@ -4499,6 +5900,16 @@ function initVideoChaseUI() {
             var data = await resp.json();
             if (!resp.ok) throw new Error(data.detail || '提取失败');
             if (vCapStatus) vCapStatus.textContent = '风格提取成功: ' + (data.style.name || '');
+            // 普通用户把提取的风格同步保存到本地项目目录
+            if (data.npy_path && !isCurrentUserAdmin()) {
+                var vStyleSafeName = safeLocalProjectName(data.style.name || 'captured_style', 'captured_style');
+                saveFileToProject(data.npy_path, 'styles', vStyleSafeName + '.npy');
+                saveFileToProject(data.cube_path, 'styles', vStyleSafeName + '.cube');
+                saveFileToProject(data.ccs_path, 'styles', vStyleSafeName + '.ccs');
+                if (data.thumbnail_path) {
+                    saveFileToProject(data.thumbnail_path, 'styles', vStyleSafeName + '_thumb.jpg');
+                }
+            }
             loadVideoStyleGallery();
         } catch (err) {
             var msg = err.message || '未知错误';
@@ -4596,11 +6007,10 @@ function handleVideoFileSelect(e) {
     document.getElementById('vinfo-size').textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
 
     if (window.currentProjectId) {
-        saveFileToProject(file, 'video_source', file.name).then(function(savedPath) {
-            if (savedPath) {
-                window._videoSavedPath = savedPath;
-                saveLocalProjectSnapshot();
-            }
+        saveFileToProjectInfo(file, 'video_source', file.name).then(function(info) {
+            if (info.localPath) _localVideoFilePath = info.localPath;
+            if (info.serverUrl || info.url) window._videoSavedPath = info.serverUrl || info.url;
+            if (info.localPath || info.serverUrl || info.url) saveLocalProjectSnapshot();
         });
     }
 
@@ -5075,6 +6485,10 @@ function seekFrame(offset) {
 
 function startVideoChase() {
     _resultVideoLoading = false;
+    if (!window.currentProjectId) {
+        alert('请先创建或选择项目后再进行视频追色');
+        return;
+    }
     if (!currentVideoFile && !window._videoSavedPath) {
         alert('请先上传视频');
         return;
@@ -5100,9 +6514,7 @@ function startVideoChase() {
     formData.append('transition_frames', blendFrames);
     formData.append('algorithm', mode);
     formData.append('enable_scene_detect', document.getElementById('enable-scene-detect').checked);
-    if (window.currentProjectId) {
-        formData.append('project_id', String(window.currentProjectId));
-    }
+    formData.append('project_id', String(window.currentProjectId));
     var customKeyframes = [];
     var kfNodes = document.querySelectorAll('.keyframe-node');
     var totalFrameCount = Math.ceil(videoDuration * videoFps);
@@ -5224,9 +6636,10 @@ function startProgressTracking() {
                     if (data.result_url) {
                         window._lastResultUrl = data.result_url;
                         if (window.currentProjectId) {
-                            saveFileToProject(data.result_url, 'result', 'video_result.mp4').then(function(savedPath) {
-                                if (savedPath) {
-                                    window._lastResultUrl = savedPath;
+                            saveFileToProjectInfo(data.result_url, 'result', 'video_result.mp4').then(function(info) {
+                                if (info.localPath) _localVideoResultPath = info.localPath;
+                                if (info.serverUrl || info.url) {
+                                    window._lastResultUrl = info.serverUrl || info.url;
                                     saveLocalProjectSnapshot();
                                 } else {
                                     saveSnapshot();
@@ -5369,8 +6782,192 @@ function dataURLtoBlob(dataurl) {
 var BROWSER_PROJECT_ROOT_KEY = 'colorchase_browser_project_root';
 var browserProjectRootHandle = null;
 
+// IndexedDB 句柄持久化：FileSystemDirectoryHandle 不能放 localStorage，得用 IndexedDB
+var BROWSER_PROJECT_ROOT_DB_NAME = 'colorchase_fs_handles';
+var BROWSER_PROJECT_ROOT_DB_VERSION = 1;
+var BROWSER_PROJECT_ROOT_STORE_NAME = 'handles';
+
+function _openFsHandleDB() {
+    return new Promise(function(resolve, reject) {
+        if (!window.indexedDB) {
+            reject(new Error('IndexedDB 不可用'));
+            return;
+        }
+        var request = window.indexedDB.open(BROWSER_PROJECT_ROOT_DB_NAME, BROWSER_PROJECT_ROOT_DB_VERSION);
+        request.onupgradeneeded = function(e) {
+            var db = e.target.result;
+            if (!db.objectStoreNames.contains(BROWSER_PROJECT_ROOT_STORE_NAME)) {
+                db.createObjectStore(BROWSER_PROJECT_ROOT_STORE_NAME);
+            }
+        };
+        request.onsuccess = function(e) { resolve(e.target.result); };
+        request.onerror = function(e) { reject(e); };
+    });
+}
+
+async function _saveBrowserProjectRootHandle(handle) {
+    try {
+        var db = await _openFsHandleDB();
+        return new Promise(function(resolve, reject) {
+            var tx = db.transaction([BROWSER_PROJECT_ROOT_STORE_NAME], 'readwrite');
+            var store = tx.objectStore(BROWSER_PROJECT_ROOT_STORE_NAME);
+            var req = store.put(handle, BROWSER_PROJECT_ROOT_KEY);
+            req.onsuccess = function() { resolve(true); };
+            req.onerror = function(e) { reject(e); };
+            tx.oncomplete = function() { db.close(); };
+        });
+    } catch (e) {
+        console.warn('[ColorChase] 保存本地授权句柄失败:', e);
+        return false;
+    }
+}
+
+async function _loadBrowserProjectRootHandle() {
+    try {
+        var db = await _openFsHandleDB();
+        return new Promise(function(resolve, reject) {
+            var tx = db.transaction([BROWSER_PROJECT_ROOT_STORE_NAME], 'readonly');
+            var store = tx.objectStore(BROWSER_PROJECT_ROOT_STORE_NAME);
+            var req = store.get(BROWSER_PROJECT_ROOT_KEY);
+            req.onsuccess = function(e) { resolve(e.target.result || null); };
+            req.onerror = function(e) { reject(e); };
+            tx.oncomplete = function() { db.close(); };
+        });
+    } catch (e) {
+        console.warn('[ColorChase] 读取本地授权句柄失败:', e);
+        return null;
+    }
+}
+
+async function _clearBrowserProjectRootHandle() {
+    try {
+        var db = await _openFsHandleDB();
+        return new Promise(function(resolve, reject) {
+            var tx = db.transaction([BROWSER_PROJECT_ROOT_STORE_NAME], 'readwrite');
+            var store = tx.objectStore(BROWSER_PROJECT_ROOT_STORE_NAME);
+            var req = store.delete(BROWSER_PROJECT_ROOT_KEY);
+            req.onsuccess = function() { resolve(true); };
+            req.onerror = function(e) { reject(e); };
+            tx.oncomplete = function() { db.close(); };
+        });
+    } catch (e) {
+        return false;
+    }
+}
+
+// 页面加载时从 IndexedDB 恢复本地授权目录句柄
+async function restoreBrowserProjectRootHandle() {
+    if (browserProjectRootHandle) return;
+    if (!window.showDirectoryPicker) return;
+    try {
+        var handle = await _loadBrowserProjectRootHandle();
+        if (!handle) return;
+        browserProjectRootHandle = handle;
+        try { localStorage.setItem(BROWSER_PROJECT_ROOT_KEY, JSON.stringify({ name: handle.name })); } catch(e) {}
+        updateBrowserProjectRootUI();
+        console.log('[ColorChase] 已从 IndexedDB 恢复本地授权目录：' + handle.name);
+    } catch (e) {
+        console.warn('[ColorChase] 恢复本地授权目录失败:', e);
+        await _clearBrowserProjectRootHandle();
+    }
+}
+
 function safeLocalProjectName(name, fallback) {
     return String(name || fallback || 'file.bin').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+}
+
+var _localProjectObjectUrlCache = {};
+
+function localProjectRelativePath(bucket, fileName) {
+    var safeBucket = String(bucket || '').replace(/[\\]+/g, '/').replace(/^\/+|\/+$/g, '');
+    var safeName = safeLocalProjectName(fileName);
+    return safeBucket ? safeBucket + '/' + safeName : safeName;
+}
+
+function isLocalProjectRelativePath(value) {
+    var raw = String(value || '').trim().replace(/\\/g, '/');
+    if (!raw) return false;
+    if (/^(data:|blob:|https?:\/\/|\/|[A-Za-z]:)/i.test(raw)) return false;
+    var parts = raw.split('/');
+    for (var i = 0; i < parts.length; i++) {
+        if (!parts[i] || parts[i] === '.' || parts[i] === '..') return false;
+    }
+    return true;
+}
+
+async function writeLocalProjectFile(bucket, fileName, content) {
+    if (!content) return '';
+    var relPath = localProjectRelativePath(bucket, fileName);
+    if (browserProjectRootHandle) {
+        try {
+            var ok = await writeBrowserProjectFile(bucket, fileName, content);
+            return ok ? relPath : '';
+        } catch(e) {
+            return '';
+        }
+    }
+    try {
+        var storageMode = await getStorageMode();
+        if (storageMode === 'agent') {
+            await localAgentWriteFile(
+                content instanceof Blob ? content : new Blob([content], { type: 'application/octet-stream' }),
+                relPath,
+                window.currentProjectId || 0,
+                window.currentProjectName || ''
+            );
+            return relPath;
+        }
+    } catch(e) {}
+    return '';
+}
+
+async function readBrowserProjectFileBlob(relativePath) {
+    if (!browserProjectRootHandle || !isLocalProjectRelativePath(relativePath)) return null;
+    var projectDir = await getBrowserProjectDirectory();
+    if (!projectDir) return null;
+    try {
+        var parts = String(relativePath).replace(/\\/g, '/').split('/');
+        var dir = projectDir;
+        for (var i = 0; i < parts.length - 1; i++) {
+            dir = await dir.getDirectoryHandle(parts[i], { create: false });
+        }
+        var handle = await dir.getFileHandle(parts[parts.length - 1], { create: false });
+        return await handle.getFile();
+    } catch(e) {
+        return null;
+    }
+}
+
+async function readAgentProjectFileBlob(relativePath) {
+    if (!isLocalProjectRelativePath(relativePath)) return null;
+    try {
+        var url = LOCAL_AGENT_URL + '/read'
+            + '?path=' + encodeURIComponent(relativePath)
+            + '&project_id=' + encodeURIComponent(String(window.currentProjectId || 0))
+            + '&project_name=' + encodeURIComponent(window.currentProjectName || '');
+        var resp = await fetch(url, { method: 'GET' });
+        if (!resp.ok) return null;
+        return await resp.blob();
+    } catch(e) {
+        return null;
+    }
+}
+
+async function readLocalProjectFileUrl(relativePath) {
+    if (!isLocalProjectRelativePath(relativePath)) return '';
+    var cacheKey = String(window.currentProjectId || 0) + ':' + relativePath;
+    if (_localProjectObjectUrlCache[cacheKey]) return _localProjectObjectUrlCache[cacheKey];
+    var blob = await readBrowserProjectFileBlob(relativePath);
+    if (!blob) {
+        try {
+            var storageMode = await getStorageMode();
+            if (storageMode === 'agent') blob = await readAgentProjectFileBlob(relativePath);
+        } catch(e) {}
+    }
+    if (!blob) return '';
+    var objectUrl = URL.createObjectURL(blob);
+    _localProjectObjectUrlCache[cacheKey] = objectUrl;
+    return objectUrl;
 }
 
 function updateBrowserProjectRootUI() {
@@ -5402,6 +6999,7 @@ async function chooseBrowserProjectRoot() {
     try {
         browserProjectRootHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
         try { localStorage.setItem(BROWSER_PROJECT_ROOT_KEY, JSON.stringify({ name: browserProjectRootHandle.name })); } catch(e) {}
+        await _saveBrowserProjectRootHandle(browserProjectRootHandle);
         updateBrowserProjectRootUI();
         showToast('本地项目目录已授权：' + browserProjectRootHandle.name);
     } catch(e) {
@@ -5445,25 +7043,157 @@ async function writeBrowserProjectResult(fileName, content) {
 }
 
 function writeBrowserProjectSnapshot(snap) {
-    getBrowserProjectDirectory().then(async function(projectDir) {
-        if (!projectDir) return;
-        try {
-            var handle = await projectDir.getFileHandle('snapshot.json', { create: true });
-            var writer = await handle.createWritable();
-            await writer.write(new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
-            await writer.close();
-        } catch(e) {}
+    var snapText = JSON.stringify(snap, null, 2);
+    if (browserProjectRootHandle) {
+        getBrowserProjectDirectory().then(async function(projectDir) {
+            if (!projectDir) return;
+            try {
+                var handle = await projectDir.getFileHandle('snapshot.json', { create: true });
+                var writer = await handle.createWritable();
+                await writer.write(new Blob([snapText], { type: 'application/json' }));
+                await writer.close();
+            } catch(e) {}
+        });
+        return;
+    }
+    getStorageMode().then(function(mode) {
+        if (mode === 'agent' && window.currentProjectId) {
+            localAgentWriteText('snapshot.json', snapText, window.currentProjectId, window.currentProjectName || '')
+                .catch(function(e) { console.error('本地代理写入项目快照失败:', e); });
+        }
     });
+}
+
+// 把用户空间资料同步写到本地授权根目录的 profile/ 下，方便用户自己管理
+async function writeBrowserUserProfile(snap) {
+    var snapText = JSON.stringify(snap, null, 2);
+    if (browserProjectRootHandle) {
+        try {
+            var profileDir = await browserProjectRootHandle.getDirectoryHandle('profile', { create: true });
+            var handle = await profileDir.getFileHandle('profile.json', { create: true });
+            var writer = await handle.createWritable();
+            await writer.write(new Blob([snapText], { type: 'application/json' }));
+            await writer.close();
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    var mode = await getStorageMode();
+    if (mode === 'agent' && window.currentProjectId) {
+        try {
+            await localAgentWriteText('profile/profile.json', snapText, window.currentProjectId, window.currentProjectName || '');
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    return false;
+}
+
+async function writeBrowserUserAvatar(fileName, content) {
+    if (!content) return false;
+    var safeFileName = safeLocalProjectName(fileName);
+    if (browserProjectRootHandle) {
+        try {
+            var profileDir = await browserProjectRootHandle.getDirectoryHandle('profile', { create: true });
+            var avatarDir = await profileDir.getDirectoryHandle('avatar', { create: true });
+            var handle = await avatarDir.getFileHandle(safeFileName, { create: true });
+            var writer = await handle.createWritable();
+            await writer.write(content);
+            await writer.close();
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    var mode = await getStorageMode();
+    if (mode === 'agent' && window.currentProjectId) {
+        try {
+            await localAgentWriteFile(
+                content instanceof Blob ? content : new Blob([content], { type: 'application/octet-stream' }),
+                'profile/avatar/' + safeFileName,
+                window.currentProjectId,
+                window.currentProjectName || ''
+            );
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+    return false;
+}
+
+// 方案 A：前端统计本地项目地址的存储占用
+// FSA 模式：递归遍历 File System Access API 目录句柄，汇总文件大小与数量
+async function calculateLocalDirectorySizeFsa(dirHandle) {
+    var totalBytes = 0;
+    var fileCount = 0;
+    async function walk(handle) {
+        for await (var entry of handle.values()) {
+            if (entry.kind === 'file') {
+                try {
+                    var file = await entry.getFile();
+                    totalBytes += file.size || 0;
+                    fileCount += 1;
+                } catch (e) {
+                    // 某个文件读不到，跳过，别一棵树上吊死
+                }
+            } else if (entry.kind === 'directory') {
+                await walk(entry);
+            }
+        }
+    }
+    await walk(dirHandle);
+    return { size_bytes: totalBytes, file_count: fileCount };
+}
+
+// Agent 模式：通过本地代理 /list 接口递归扫描项目目录
+async function calculateLocalDirectorySizeAgent() {
+    var totalBytes = 0;
+    var fileCount = 0;
+    async function walk(relPath) {
+        var url = LOCAL_AGENT_URL + '/list?path=' + encodeURIComponent(relPath);
+        var resp = await fetch(url, { method: 'GET' });
+        if (!resp.ok) throw new Error('本地代理列出目录失败：' + resp.status);
+        var data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '本地代理返回错误');
+        if (!Array.isArray(data.entries)) throw new Error('本地代理返回格式异常');
+        for (var i = 0; i < data.entries.length; i++) {
+            var entry = data.entries[i];
+            if (entry.is_dir) {
+                var childRel = (relPath ? relPath + '/' : '') + entry.name;
+                await walk(childRel);
+            } else {
+                totalBytes += entry.size || 0;
+                fileCount += 1;
+            }
+        }
+    }
+    await walk('');
+    return { size_bytes: totalBytes, file_count: fileCount };
+}
+
+// 根据当前存储模式，自动选择 FSA 或 Agent 统计本地项目地址大小
+// 返回值：{ size_bytes, file_count }
+async function getLocalProjectStorageSize() {
+    var mode = await getStorageMode();
+    if (mode === 'fsa') {
+        if (typeof browserProjectRootHandle !== 'undefined' && browserProjectRootHandle) {
+            return await calculateLocalDirectorySizeFsa(browserProjectRootHandle);
+        }
+        throw new Error('本地授权目录尚未选择');
+    }
+    if (mode === 'agent') {
+        var savedPath = localStorage.getItem('cc_storage_path') || '';
+        if (!savedPath) throw new Error('本地项目地址尚未配置');
+        return await calculateLocalDirectorySizeAgent();
+    }
+    throw new Error('当前浏览器不支持本地存储，无法统计');
 }
 
 var STORAGE_FIELDS = {
     'sc-project-assets': 'project_assets',
-    'sc-image-uploads': 'image_uploads',
-    'sc-image-luts': 'image_luts',
-    'sc-image-debug': 'image_debug',
-    'sc-video-uploads': 'video_uploads',
-    'sc-video-results': 'video_results',
-    'sc-video-frames': 'video_frames',
 };
 
 function getStorageRequestHeaders() {
@@ -5477,6 +7207,41 @@ function showStorageSettings() {
     var modal = document.getElementById('storage-settings-modal');
     if (!modal) return;
     modal.style.display = 'flex';
+
+    // 普通用户不允许修改服务器存储路径，只能看/选本地授权目录
+    var isAdmin = isCurrentUserAdmin();
+    var notice = document.getElementById('non-admin-storage-notice');
+    if (notice) notice.style.display = isAdmin ? 'none' : 'block';
+    // 普通用户隐藏服务器项目文件路径行
+    var adminStorageRow = document.getElementById('admin-storage-row');
+    if (adminStorageRow) adminStorageRow.style.display = isAdmin ? '' : 'none';
+    Object.keys(STORAGE_FIELDS).forEach(function(fid) {
+        var el = document.getElementById(fid);
+        if (el) {
+            el.disabled = !isAdmin;
+            el.title = isAdmin ? '' : '普通用户数据不保存到服务器持久化目录';
+        }
+        // 对应的 ... 选择按钮也禁用（本地授权按钮除外）
+        var pickBtn = document.querySelector('.storage-pick-btn[data-target="' + fid + '"]');
+        if (pickBtn) {
+            pickBtn.disabled = !isAdmin;
+            pickBtn.style.opacity = isAdmin ? '1' : '0.5';
+            pickBtn.style.cursor = isAdmin ? 'pointer' : 'not-allowed';
+        }
+    });
+    var saveBtn = document.getElementById('storage-save-btn');
+    var resetBtn = document.getElementById('storage-reset-btn');
+    if (saveBtn) {
+        saveBtn.disabled = !isAdmin;
+        saveBtn.style.opacity = isAdmin ? '1' : '0.5';
+        saveBtn.style.cursor = isAdmin ? 'pointer' : 'not-allowed';
+    }
+    if (resetBtn) {
+        resetBtn.disabled = !isAdmin;
+        resetBtn.style.opacity = isAdmin ? '1' : '0.5';
+        resetBtn.style.cursor = isAdmin ? 'pointer' : 'not-allowed';
+    }
+
     fetch('/api/user_config', {
         headers: (function() {
             var token = localStorage.getItem('cc_token');
@@ -5566,12 +7331,21 @@ document.addEventListener('DOMContentLoaded', function() {
     if (resetBtn) resetBtn.addEventListener('click', resetStorageSettings);
     if (projectRootBtn) projectRootBtn.addEventListener('click', chooseBrowserProjectRoot);
     document.querySelectorAll('.storage-pick-btn').forEach(function(btn) {
+        // "本地授权"按钮单独走 chooseBrowserProjectRoot，不要重复绑定
+        if (btn.id === 'browser-project-root-btn') return;
         btn.addEventListener('click', function() {
             var targetId = btn.getAttribute('data-target');
             fetch('/api/pick_folder', { method: 'POST' })
                 .then(function(r) { return r.json(); })
                 .then(function(d) {
-                    if (d.path) document.getElementById(targetId).value = d.path;
+                    if (d.path) {
+                        document.getElementById(targetId).value = d.path;
+                    } else {
+                        showToast(d.message || '此功能仅在本地客户端可用，网页版请直接填写路径或使用"本地授权"选择文件夹');
+                    }
+                })
+                .catch(function(e) {
+                    showToast('无法打开文件夹选择器：' + (e && e.message ? e.message : '请直接输入路径'));
                 });
         });
     });
@@ -5591,7 +7365,7 @@ function buildSnapshotData() {
                 status: img.status || 'pending',
                 sessionId: img.sessionId,
                 mergedSessionId: img.mergedSessionId,
-                resultDataUrl: img.resultDataUrl && !String(img.resultDataUrl).startsWith('data:') ? img.resultDataUrl : '',
+                resultDataUrl: img.resultDataUrl && !/^(data:|blob:)/i.test(String(img.resultDataUrl)) ? img.resultDataUrl : '',
                 refSavedPath: img.refSavedPath || '',
                 subjectMaskPath: img.subjectMaskPath || '',
                 subjectMaskUrl: img.subjectMaskUrl || '',
@@ -5607,17 +7381,20 @@ function buildSnapshotData() {
                 resultSavedPath: img.resultSavedPath || '',
                 savedPath: img.savedPath || '',
                 localSourcePath: img.localSourcePath || '',
+                localThumbnailPath: img.localThumbnailPath || '',
                 localReferencePath: img.localReferencePath || '',
                 localResultPath: img.localResultPath || '',
             };
         }),
         currentTargetIndex: currentTargetIndex,
         refSavedPath: window._refSavedPath || '',
-        algorithm: $('#ai-algorithm-select') ? $('#ai-algorithm-select').value : '',
+        algorithm: getSelectedAIAlgorithm(),
         profileBuiltin: _profileBuiltin,
         lutAI: lutAI, lutProfile: lutProfile,
         videoFileSavedPath: window._videoSavedPath || '',
         videoRefSavedPath: window._videoRefSavedPath || '',
+        localVideoFilePath: _localVideoFilePath || '',
+        localVideoResultPath: _localVideoResultPath || '',
         adjustSliders: (function() {
             var s = {};
             ADJUST_PARAMS.forEach(function(p) {
@@ -5659,42 +7436,185 @@ function saveLocalProjectSnapshot() {
     if (window.currentProjectId) saveSnapshot(window.currentProjectId);
 }
 
-async function saveFileToProject(file, bucket, fileName) {
+async function saveFileToProjectInfo(file, bucket, fileName) {
     var pid = window.currentProjectId;
-    if (!pid || !file) return '';
-    var fd = new FormData();
+    if (!pid || !file) return { url: '', serverUrl: '', localPath: '', filename: '' };
     var safeBucket = bucket || 'source';
     var safeName = fileName || '';
     var localContent = file;
+    var sourceUrl = '';
+    var token = localStorage.getItem('cc_token');
+    var authHeaders = {};
+    if (token) authHeaders['Authorization'] = 'Bearer ' + token;
+
     if (typeof file === 'string') {
+        sourceUrl = file;
         try {
-            var sourceResp = await fetch(file);
-            if (!sourceResp.ok) return '';
+            // 拉取原文件内容，必须带鉴权头，否则 /api/user_temp/ 等接口在生产环境会 401
+            var sourceResp = await fetch(file, { headers: authHeaders });
+            if (!sourceResp.ok) return { url: '', serverUrl: sourceUrl || '', localPath: '', filename: safeName || '' };
             var blob = await sourceResp.blob();
             var sourceName = file.split('/').pop().split('?')[0] || 'asset.bin';
             safeName = safeName || sourceName;
             localContent = blob;
-            fd.append('file', new File([blob], sourceName, { type: blob.type || 'application/octet-stream' }));
         } catch(e) {
-            return '';
+            return { url: '', serverUrl: sourceUrl || '', localPath: '', filename: safeName || '' };
         }
     } else {
         safeName = safeName || file.name || 'asset.bin';
         localContent = file;
-        fd.append('file', file);
     }
+    safeName = safeLocalProjectName(safeName);
+
+    // 普通用户优先保存到本地项目目录，不落盘到服务器；管理员才走 /api/projects/{pid}/upload
+    var isAdmin = isCurrentUserAdmin();
+    if (!isAdmin) {
+        var localPath = await writeLocalProjectFile(safeBucket, safeName, localContent);
+        return {
+            url: sourceUrl || '',
+            serverUrl: sourceUrl || '',
+            localPath: localPath,
+            filename: safeName,
+        };
+    }
+
     try {
-        var token = localStorage.getItem('cc_token');
-        var headers = {};
-        if (token) headers['Authorization'] = 'Bearer ' + token;
+        var fd = new FormData();
+        fd.append('file', localContent instanceof Blob ? localContent : new File([localContent], safeName, { type: localContent.type || 'application/octet-stream' }), safeName);
         fd.append('bucket', safeBucket);
-        var r = await fetch('/api/projects/' + pid + '/upload', { method: 'POST', body: fd, headers: headers });
+        var r = await fetch('/api/projects/' + pid + '/upload', { method: 'POST', body: fd, headers: authHeaders });
         var d = await r.json();
+        var localPathAdmin = '';
         if (browserProjectRootHandle) {
-            await writeBrowserProjectFile(safeBucket, safeName, localContent);
+            localPathAdmin = await writeLocalProjectFile(safeBucket, safeName, localContent);
         }
-        return d.asset_url || d.path || '';
-    } catch(e) { return ''; }
+        return {
+            url: d.asset_url || d.path || '',
+            serverUrl: d.asset_url || d.path || '',
+            localPath: localPathAdmin,
+            filename: safeName,
+        };
+    } catch(e) {
+        return { url: '', serverUrl: sourceUrl || '', localPath: '', filename: safeName };
+    }
+}
+
+async function saveFileToProject(file, bucket, fileName) {
+    var info = await saveFileToProjectInfo(file, bucket, fileName);
+    return info.url || info.serverUrl || '';
+}
+
+async function hydrateLocalProjectSnapshotImages(pid) {
+    if (isCurrentUserAdmin() || !Array.isArray(targetImages) || !targetImages.length) return;
+    var changed = false;
+    var missingLocal = false;
+    for (var i = 0; i < targetImages.length; i++) {
+        var img = targetImages[i];
+        if (!img) continue;
+        if (isLocalProjectRelativePath(img.localThumbnailPath) && !img.localThumbnailObjectUrl) {
+            var thumbUrl = await readLocalProjectFileUrl(img.localThumbnailPath);
+            if (thumbUrl) {
+                img.localThumbnailObjectUrl = thumbUrl;
+                changed = true;
+            } else {
+                missingLocal = true;
+            }
+        }
+        if (isLocalProjectRelativePath(img.localSourcePath) && !img.localSourceObjectUrl) {
+            var sourceUrl = await readLocalProjectFileUrl(img.localSourcePath);
+            if (sourceUrl) {
+                img.localSourceObjectUrl = sourceUrl;
+                changed = true;
+            } else {
+                missingLocal = true;
+            }
+        }
+        if (isLocalProjectRelativePath(img.localResultPath) && !img.localResultObjectUrl) {
+            var resultUrl = await readLocalProjectFileUrl(img.localResultPath);
+            if (resultUrl) {
+                img.localResultObjectUrl = resultUrl;
+                changed = true;
+            }
+        }
+        if (isLocalProjectRelativePath(img.localReferencePath) && !img.localReferenceObjectUrl) {
+            var refUrl = await readLocalProjectFileUrl(img.localReferencePath);
+            if (refUrl) {
+                img.localReferenceObjectUrl = refUrl;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        renderGallery();
+        if (currentTargetIndex >= 0 && currentTargetIndex < targetImages.length) {
+            var current = targetImages[currentTargetIndex];
+            var original = getImageOriginalSrc(current);
+            var result = getImageResultSrc(current, getImageThumbnailSrc(current));
+            if (original) {
+                $('#canvas-original').src = original;
+                _origCanvasDataUrl = original;
+            }
+            if (result) {
+                $('#canvas-result').src = result;
+                _resultCanvasDataUrl = result;
+            }
+        }
+    }
+    if (missingLocal) {
+        var hasTempFallback = targetImages.some(function(img) {
+            return String((img && (img.sourcePath || img.thumbnailUrl)) || '').indexOf('/api/user_temp/') === 0;
+        });
+        if (hasTempFallback) {
+            showToast('本地文件未连接，请重新选择项目目录；已暂用服务器临时文件');
+        }
+    }
+}
+
+async function hydrateLocalVideoSnapshot(snap) {
+    if (isCurrentUserAdmin() || !snap) return;
+    var player = document.getElementById('video-player');
+    var resultPlayer = document.getElementById('video-result-player');
+    var placeholder = document.getElementById('video-placeholder');
+    var missingLocal = false;
+
+    if (isLocalProjectRelativePath(_localVideoFilePath)) {
+        var sourceBlob = await readBrowserProjectFileBlob(_localVideoFilePath);
+        if (!sourceBlob) {
+            try {
+                var storageMode = await getStorageMode();
+                if (storageMode === 'agent') sourceBlob = await readAgentProjectFileBlob(_localVideoFilePath);
+            } catch(e) {}
+        }
+        if (sourceBlob) {
+            currentVideoFile = new File([sourceBlob], _localVideoFilePath.split('/').pop() || 'video.mp4', { type: sourceBlob.type || 'video/mp4' });
+            if (videoFileUrl) URL.revokeObjectURL(videoFileUrl);
+            videoFileUrl = URL.createObjectURL(sourceBlob);
+            if (player) {
+                player.src = videoFileUrl;
+                player.style.display = '';
+                player.load();
+            }
+            if (placeholder) placeholder.style.display = 'none';
+        } else {
+            missingLocal = true;
+        }
+    }
+
+    if (isLocalProjectRelativePath(_localVideoResultPath)) {
+        var resultUrl = await readLocalProjectFileUrl(_localVideoResultPath);
+        if (resultUrl) {
+            if (resultPlayer) {
+                resultPlayer.src = resultUrl;
+                resultPlayer.load();
+            }
+        } else {
+            missingLocal = true;
+        }
+    }
+
+    if (missingLocal && (window._videoSavedPath || window._lastResultUrl)) {
+        showToast('本地视频文件未连接，请重新选择项目目录；已暂用服务器临时文件');
+    }
 }
 
 function loadSnapshot(pid) {
@@ -5702,10 +7622,13 @@ function loadSnapshot(pid) {
     var token = localStorage.getItem('cc_token');
     var headers = {};
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    fetch('/api/projects/', { headers: headers })
-        .then(function(r) { return r.json(); })
-        .then(function(projects) {
-            var p = projects.find(function(x) { return x.id === pid; });
+    // 优先请求单个项目 detail，减少带宽；失败时 fallback 到全量列表
+    fetch('/api/projects/' + pid + '/detail', { headers: headers })
+        .then(function(r) {
+            if (!r.ok) throw new Error('detail_failed');
+            return r.json();
+        })
+        .then(function(p) {
             if (!p || !p.snapshot) {
                 clearWorkspaceState();
                 return;
@@ -5714,6 +7637,22 @@ function loadSnapshot(pid) {
                 var snap = JSON.parse(p.snapshot);
                 loadSnapshotData(snap, pid);
             } catch(e) {}
+        })
+        .catch(function() {
+            // fallback: 拉全量列表再前端过滤
+            fetch('/api/projects/', { headers: headers })
+                .then(function(r) { return r.json(); })
+                .then(function(projects) {
+                    var p = projects.find(function(x) { return x.id === pid; });
+                    if (!p || !p.snapshot) {
+                        clearWorkspaceState();
+                        return;
+                    }
+                    try {
+                        var snap = JSON.parse(p.snapshot);
+                        loadSnapshotData(snap, pid);
+                    } catch(e) {}
+                });
         });
 }
 
@@ -5740,6 +7679,8 @@ function clearWorkspaceState() {
     window._videoSavedPath = '';
     window._videoRefSavedPath = '';
     window._lastResultUrl = '';
+    _localVideoFilePath = '';
+    _localVideoResultPath = '';
     window._refSavedPath = '';
     currentVideoFile = null;
     videoDuration = 0;
@@ -5776,6 +7717,8 @@ function loadSnapshotData(snap, pid) {
     if (snap.algorithm) {
         var sel = $('#ai-algorithm-select');
         if (sel) sel.value = snap.algorithm;
+        window._currentSelectedAlgorithm = snap.algorithm;
+        console.log('[loadSnapshotData] restored algorithm:', snap.algorithm);
         updateAlgoInfo();
     }
     if (snap.profileBuiltin) {
@@ -5812,6 +7755,8 @@ function loadSnapshotData(snap, pid) {
         window._videoSavedPath = snap.videoFileSavedPath || '';
         window._videoRefSavedPath = snap.videoRefSavedPath || '';
         window._lastResultUrl = snap.videoResultUrl || snap.videoResultSavedPath || '';
+        _localVideoFilePath = snap.localVideoFilePath || '';
+        _localVideoResultPath = snap.localVideoResultPath || '';
         if (snap.videoMeta) {
             _originalVideoFps = snap.videoMeta.fps || 25;
             _originalVideoWidth = snap.videoMeta.width || 1920;
@@ -5844,6 +7789,7 @@ function loadSnapshotData(snap, pid) {
             document.getElementById('vinfo-resolution').textContent = (snap.videoMeta ? snap.videoMeta.width + ' x ' + snap.videoMeta.height : '');
             document.getElementById('vinfo-fps').textContent = (snap.videoMeta ? snap.videoMeta.fps.toFixed(2) + ' fps' : '');
         }
+        hydrateLocalVideoSnapshot(snap);
         return;
     }
 
@@ -5889,7 +7835,7 @@ function loadSnapshotData(snap, pid) {
             // sourcePath 用于追色 target_path，后端能解析 .CR2 URL 回本地 RAW 文件，所以保留原值不过滤
             var _src = _norm(img.localSourcePath) || _norm(img.savedPath) || _norm(img.sourcePath) || '';
             // 显示用 _thumb 必须是浏览器可解码的 URL（JPG/PNG/HTTP/data:），过滤 RAW 扩展名
-            var _thumb = _dispUrl(img.thumbnailUrl) || _dispUrl(img.localSourcePath) || _dispUrl(img.savedPath) || _dispUrl(img.sourcePath) || _src;
+            var _thumb = _dispUrl(img.thumbnailUrl) || _dispUrl(img.localThumbnailPath) || _dispUrl(img.localSourcePath) || _dispUrl(img.savedPath) || _dispUrl(img.sourcePath) || _src;
             return {
                 id: 'img_' + Date.now() + '_' + idx,
                 name: img.name || '',
@@ -5916,6 +7862,7 @@ function loadSnapshotData(snap, pid) {
                 resultSavedPath: img.resultSavedPath || '',
                 savedPath: img.savedPath || '',
                 localSourcePath: img.localSourcePath || '',
+                localThumbnailPath: img.localThumbnailPath || '',
                 localReferencePath: img.localReferencePath || '',
                 localResultPath: img.localResultPath || '',
             };
@@ -5937,11 +7884,13 @@ function loadSnapshotData(snap, pid) {
             $('#canvas-placeholder').hidden = true;
             $('#canvas-stack').hidden = false;
             // 显示用 thumbSrc 必须过滤 RAW 扩展名（浏览器不能直接解码 .CR2 等）
-            var thumbSrc = _dispUrl(img.thumbnailUrl) || _dispUrl(img.localSourcePath) || _dispUrl(img.sourcePath) || '';
-            $('#canvas-original').src = thumbSrc;
-            $('#canvas-result').src = normalizeProjectAssetUrl(img.localResultPath, pid) || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
-            _origCanvasDataUrl = thumbSrc;
-            _resultCanvasDataUrl = normalizeProjectAssetUrl(img.localResultPath, pid) || img.resultDataUrl || normalizeProjectAssetUrl(img.resultSavedPath || '', pid) || thumbSrc;
+            var thumbSrc = getImageThumbnailSrc(img) || _dispUrl(img.localThumbnailPath) || _dispUrl(img.localSourcePath) || _dispUrl(img.sourcePath) || '';
+            var origSrc = getImageOriginalSrc(img) || thumbSrc;
+            $('#canvas-original').src = origSrc;
+            $('#canvas-result').src = getImageResultSrc(img, thumbSrc);
+            $('#canvas-reference').src = getImageReferenceSrc(img);
+            _origCanvasDataUrl = origSrc;
+            _resultCanvasDataUrl = getImageResultSrc(img, thumbSrc);
             setViewMode('single');
             restoreCurrentState();
             if (img.localResultPath || img.resultDataUrl || img.resultSavedPath) {
@@ -5952,6 +7901,7 @@ function loadSnapshotData(snap, pid) {
         updateProfileStatus();
         updateAllButtons();
         updateExportPreview();
+        hydrateLocalProjectSnapshotImages(pid);
     }
 }
 

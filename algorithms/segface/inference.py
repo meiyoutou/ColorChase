@@ -121,6 +121,45 @@ def parse_face_semantics(img_bgr: np.ndarray, device: str = "cuda") -> dict:
     }
 
 
+# ---- mediapipe 人脸前置检测 ----
+# 2026-07-23 调试记录：用户拿风景图测 AI 人像追色，SegFace 硬是分割出
+# skin 20.7% / lip 3.8% / hair 37.3%，靠 skin_pct>2% 的阈值完全挡不住。
+# 改成先用 mediapipe 跑一遍人脸检测（CPU 上几十毫秒，比 SegFace 快几百倍），
+# 没人脸直接拦掉，既准又能省掉非人像白跑 SegFace 的时间。
+_mediapipe_fd_cache = None
+
+
+def has_human_face(img_bgr: np.ndarray, min_confidence: float = 0.5) -> bool:
+    """用 mediapipe 检测图片里有没有人脸，返回 True/False。
+
+    model_selection=1 覆盖 2 米以内的人脸（半身/全身都算），
+    0 适合自拍近距离。追色场景距离不定，用 1 更稳。
+    """
+    global _mediapipe_fd_cache
+    import mediapipe as mp
+
+    if _mediapipe_fd_cache is None:
+        # 懒加载：第一次调用才初始化，免得启动时被 mediapipe 拖慢
+        _mediapipe_fd_cache = mp.solutions.face_detection.FaceDetection(
+            model_selection=1,
+            min_detection_confidence=min_confidence,
+        )
+        print("[FaceDetect] mediapipe FaceDetection 初始化完成 (model_selection=1)")
+
+    fd = _mediapipe_fd_cache
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    results = fd.process(rgb)
+
+    if not results.detections:
+        print("[FaceDetect] mediapipe 未检测到人脸 -> 判定为非人像")
+        return False
+
+    n = len(results.detections)
+    best_conf = max(float(d.score[0]) for d in results.detections)
+    print(f"[FaceDetect] mediapipe 检测到 {n} 张人脸，最高置信度 {best_conf:.2f}")
+    return True
+
+
 if __name__ == '__main__':
     import sys
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

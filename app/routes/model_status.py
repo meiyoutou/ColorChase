@@ -4,7 +4,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.routes.auth import require_admin
+from app.routes.auth import get_current_user
+from app.services.auth_utils import is_admin_role
 
 
 def create_model_status_router(
@@ -22,7 +23,9 @@ def create_model_status_router(
     router = APIRouter()
 
     @router.get("/api/model_status")
-    async def api_model_status(admin=Depends(require_admin)):
+    async def api_model_status(user=Depends(get_current_user)):
+        is_admin = is_admin_role(getattr(user, "role", None))
+
         def file_info(path):
             path_str = str(path)
             exists = os.path.exists(path_str)
@@ -40,6 +43,17 @@ def create_model_status_router(
 
         def model_entry(key, name, kind, ready, files, used_by, status=None, note=""):
             missing = [item["path"] for item in files if item.get("required", True) and not item["exists"]]
+            display_files = files
+            if not is_admin:
+                # 普通用户不暴露具体文件路径，仅保留存在性、大小等脱敏信息
+                display_files = []
+                for item in files:
+                    display_files.append({
+                        "exists": item.get("exists", False),
+                        "size_mb": item.get("size_mb", 0.0),
+                        "required": item.get("required", True),
+                    })
+                missing = []
             return {
                 "key": key,
                 "name": name,
@@ -47,7 +61,7 @@ def create_model_status_router(
                 "ready": bool(ready),
                 "status": status or ("ready" if ready else "missing"),
                 "used_by": used_by,
-                "files": files,
+                "files": display_files,
                 "missing_files": missing,
                 "note": note,
             }

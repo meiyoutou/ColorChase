@@ -1,16 +1,20 @@
+from typing import Optional
+
 import asyncio
 import io
-import os
 import struct
 import uuid
 import zipfile
+from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.services.paths import _resolve_local_file_path, _runtime_temp_lut_dir
+from app.services.auth_utils import _get_request_user_id
+from app.services.user_identity import resolve_user_storage_label
 from app.security import ensure_upload_file_size
 from core.color.lut_ops import _build_identity_lut, _generate_builtin_profile, _trilinear_lookup
 from core.io.image_utils import _cv2_imread, _img_to_base64
@@ -18,6 +22,15 @@ from core.io.lut_session import _load_lut_for_session
 from core.render.full_render import apply_lut
 
 router = APIRouter()
+
+
+def _save_lut_matrix(path: Path, lut_matrix: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        np.save(path, lut_matrix)
+    except FileNotFoundError:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, lut_matrix)
 
 
 def _create_minimal_dng(width=64, height=64):
@@ -107,19 +120,22 @@ async def api_merge_luts(
     profile_session_id: str = Form(None),
     profile_builtin: str = Form(None),
     target_path: str = Form(None),
+    authorization: Optional[str] = Header(None),
 ):
+    request_user_id = _get_request_user_id(authorization)
+    request_storage_label = await resolve_user_storage_label(request_user_id) if request_user_id else None
     lut_ai = None
     lut_profile = None
 
     if ai_session_id:
         try:
-            lut_ai = await asyncio.to_thread(_load_lut_for_session, ai_session_id)
+            lut_ai = await asyncio.to_thread(_load_lut_for_session, ai_session_id, request_storage_label)
         except FileNotFoundError:
             pass
 
     if profile_session_id:
         try:
-            lut_profile = await asyncio.to_thread(_load_lut_for_session, profile_session_id)
+            lut_profile = await asyncio.to_thread(_load_lut_for_session, profile_session_id, request_storage_label)
         except FileNotFoundError:
             pass
     elif profile_builtin:
@@ -144,11 +160,15 @@ async def api_merge_luts(
     lut_merged = merged_flat.reshape(size, size, size, 3)
 
     merged_id = uuid.uuid4().hex
-    merged_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_id}.npy")
-    await asyncio.to_thread(np.save, merged_path, lut_merged)
+    merged_path = _runtime_temp_lut_dir(request_storage_label) / f"{merged_id}.npy"
+    await asyncio.to_thread(_save_lut_matrix, merged_path, lut_merged)
 
     result_b64 = None
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_target_path:
         target_path = str(resolved_target_path)
         target_img = await asyncio.to_thread(_cv2_imread, target_path, target_size=1024)
@@ -161,6 +181,6 @@ async def api_merge_luts(
     return JSONResponse({
         "success": True,
         "merged_session_id": merged_id,
-        "merged_lut_path": merged_path,
+        "merged_lut_path": str(merged_path),
         "result_b64": result_b64,
     })

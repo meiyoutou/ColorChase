@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import uuid
 import time
@@ -12,9 +12,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
+
+# 先加载 .env，确保 database.py 等读取环境变量的模块能拿到配置
+import auth
+
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -59,9 +63,11 @@ from app.routes.projects import _user_profile_record, run_startup_legacy_asset_m
 from progress import progress_manager
 from database import async_session
 from models import User, Project
-from app.settings import IS_PRODUCTION, USER_SPACE_TZ, allowed_hosts, allowed_origins
+from app.settings import IS_PRODUCTION, USER_SPACE_TZ, allowed_hosts, allowed_origins, int_env
 from app.security import (
+    DEFAULT_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES,
     DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES as IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
+    DEFAULT_VIDEO_UPLOAD_MAX_BYTES as VIDEO_UPLOAD_MAX_BYTES,
     begin_request_limits,
     ensure_upload_file_size,
 )
@@ -86,6 +92,7 @@ from app.services.auth_utils import (
     _get_request_user_role,
     _resolve_runtime_user_id_from_request,
     _task_elapsed_ms,
+    is_admin_role,
 )
 from app.services.model_management import (
     _disabled_model_error,
@@ -95,23 +102,63 @@ from app.services.model_management import (
     _resolve_semantic_model_choice,
     _resolve_transfer_model_runtime,
 )
+from app.services.user_identity import resolve_user_storage_label
 from app.services.paths import (
     _ensure_project_access,
+    _is_admin_request,
     _normalize_project_id,
     _project_bucket_file,
     _resolve_local_file_path,
-    _safe_session_dir,
     _resolve_style_extracted_file,
     _runtime_temp_lut_dir,
     _runtime_upload_dir,
-    _runtime_video_dir,
+    _runtime_user_temp_dir,
+    _runtime_user_temp_url,
     _safe_project_bucket_dir,
+    _safe_session_dir,
     _safe_user_asset_file,
     _save_project_image,
+    _save_to_runtime_user_temp,
+    _user_assets_root_for_label,
+    cleanup_runtime_user_temp,
+    cleanup_temp_luts,
+    cleanup_misc_temp,
 )
 from app.services.task_logging import create_task_log_writer
 from app.routes.training import create_training_router
 from app.routes.task import create_task_router
+
+
+async def _require_storage_label_for_user(user_id: Optional[int]) -> str:
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    return await resolve_user_storage_label(user_id)
+
+
+async def _require_local_storage(request: Request):
+    """强制要求客户端具备本地存储能力（fsa 或 agent 模式）。
+    管理员账号直接放行，不需要本地存储。
+    前端在 fsa/agent 模式下会通过 fetch 拦截器自动注入 X-ColorChase-Storage-Mode 头。
+    none 模式不发此头，请求被拒绝（管理员除外）。
+    """
+    # 管理员放行：从 JWT token 解码 role，admin 直接 return
+    authorization = request.headers.get("authorization")
+    if authorization:
+        try:
+            role = _get_request_user_role(authorization)
+            if is_admin_role(role):
+                return
+        except Exception:
+            pass
+    # 非管理员校验存储模式
+    storage_mode = request.headers.get("X-ColorChase-Storage-Mode", "")
+    if storage_mode not in ("fsa", "agent"):
+        raise HTTPException(
+            status_code=400,
+            detail="请先启动 ColorChaseAgent 或使用 Chrome/Edge 浏览器（需要 File System Access API）。Firefox 用户请下载并运行 ColorChaseAgent。"
+        )
+
+from local_storage_api import router as local_storage_router
 
 @lru_cache(maxsize=1)
 def _load_neural_preset_transfer():
@@ -233,16 +280,22 @@ from config import (
     STATIC_DIR,
     ensure_runtime_dirs,
     get_neuralpreset_weight_status,
+    get_image_debug_dir,
     get_project_assets_dir,
     get_user_assets_dir,
     get_user_images_dir,
     get_user_profiles_dir,
     get_user_references_dir,
     reset_current_runtime_user,
+    reset_current_runtime_storage_label,
+    set_current_runtime_storage_label,
     set_current_runtime_user,
 )
 ensure_runtime_dirs()
 os.makedirs(str(MODEL_DIR), exist_ok=True)
+
+# 记录已经创建过 user_{id} 子目录的用户，避免每个请求都 mkdir
+_ensured_user_dirs: set = set()
 
 os.makedirs(str(STORAGE_STYLES_EXTRACTED_DIR), exist_ok=True)
 STYLES_DIR = BASE_DIR / "styles"
@@ -267,6 +320,14 @@ async def serve_style_extracted_file(file_path: str):
     return FileResponse(str(target))
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon():
+    favicon_path = STATIC_DIR / "assets" / "favicon.jpg"
+    if not favicon_path.exists():
+        raise HTTPException(status_code=404, detail="Favicon not found")
+    return FileResponse(str(favicon_path), media_type="image/jpeg")
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if not IS_PRODUCTION:
     app.mount("/assets", StaticFiles(directory=str(USER_ASSETS_DIR)), name="assets")
@@ -282,7 +343,13 @@ async def serve_user_asset(
     request_user_id = _resolve_runtime_user_id_from_request(request)
     if request_user_id is None and IS_PRODUCTION:
         raise HTTPException(status_code=401, detail="Authentication required")
-    target = _safe_user_asset_file(asset_group, file_path)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+    target = _safe_user_asset_file(
+        asset_group,
+        file_path,
+        storage_label=request_storage_label,
+        user_id=request_user_id,
+    )
     suffix = target.suffix.lower()
     media_type = {
         ".jpg": "image/jpeg",
@@ -299,18 +366,41 @@ async def serve_user_asset(
 async def no_cache_static(request: Request, call_next):
     request_user_id = _resolve_runtime_user_id_from_request(request)
     runtime_user_token = set_current_runtime_user(request_user_id)
+
+    # 2026-07-23 修复：把 storage_label（user_邮箱）也塞进 ContextVar，
+    # 这样 _resolve_user_label 就能返回 user_邮箱 而不是 user_id。
+    # resolve_user_storage_label 有内存缓存，不会每个请求都查库。
+    runtime_label_token = None
+    request_storage_label = None
+    if request_user_id is not None:
+        try:
+            from app.services.user_identity import resolve_user_storage_label
+            request_storage_label = await resolve_user_storage_label(request_user_id)
+        except Exception:
+            request_storage_label = None
+        runtime_label_token = set_current_runtime_storage_label(request_storage_label)
+
+    # 首次访问时为该用户创建按用户隔离的子目录
+    if request_user_id is not None and request_user_id not in _ensured_user_dirs:
+        try:
+            ensure_runtime_dirs(request_user_id)
+        except Exception:
+            pass
+        _ensured_user_dirs.add(request_user_id)
     limit_lease = None
     try:
         limit_lease = await begin_request_limits(request, request_user_id)
         if limit_lease.response is not None:
             return limit_lease.response
         response = await call_next(request)
-        if request.url.path.startswith(("/static/", "/assets/", "/videos/", "/api/project_assets/", "/api/user_assets/")):
+        if request.url.path.startswith(("/static/", "/assets/", "/api/project_assets/", "/api/user_assets/", "/api/user_temp/")):
             response.headers["Cache-Control"] = "no-store, must-revalidate"
         return response
     finally:
         if limit_lease is not None:
             await limit_lease.release()
+        if runtime_label_token is not None:
+            reset_current_runtime_storage_label(runtime_label_token)
         reset_current_runtime_user(runtime_user_token)
 
 from app.routes.style_capture import router as style_capture_router
@@ -332,6 +422,26 @@ from app.routes.portal import router as portal_router
 app.include_router(portal_router, prefix="/api", tags=["portal"])
 
 
+async def _periodic_cleanup_user_temp(interval_seconds: float = 3600):
+    """后台任务：每小时清理一次所有临时目录。"""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            deleted = cleanup_runtime_user_temp()
+            if deleted:
+                print(f"[Temp Cleanup] cleaned {deleted} expired user temp files")
+            lut_deleted = cleanup_temp_luts()
+            if lut_deleted:
+                print(f"[Temp Cleanup] cleaned {lut_deleted} expired luts temp files")
+            misc_deleted = cleanup_misc_temp()
+            if misc_deleted:
+                print(f"[Temp Cleanup] cleaned {misc_deleted} expired misc temp files")
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            print(f"[Temp Cleanup] error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await init_db()
@@ -343,9 +453,20 @@ async def lifespan(_app: FastAPI):
                 snapshots=migration_stats.get("updated_project_snapshots", 0),
             )
         )
+    # 启动时先清理一次过期临时文件（普通用户上传 + luts 中间文件 + 其他临时目录）
+    startup_deleted = cleanup_runtime_user_temp()
+    if startup_deleted:
+        print(f"[Temp Cleanup] startup cleaned {startup_deleted} expired user temp files")
+    startup_lut_deleted = cleanup_temp_luts()
+    if startup_lut_deleted:
+        print(f"[Temp Cleanup] startup cleaned {startup_lut_deleted} expired luts temp files")
+    startup_misc_deleted = cleanup_misc_temp()
+    if startup_misc_deleted:
+        print(f"[Temp Cleanup] startup cleaned {startup_misc_deleted} expired misc temp files")
     _app.state.training_corpus_backfill_task = asyncio.create_task(
         run_startup_training_corpus_backfill(_resolve_local_file_path)
     )
+    _app.state.user_temp_cleanup_task = asyncio.create_task(_periodic_cleanup_user_temp())
     yield
     backfill_task = getattr(_app.state, "training_corpus_backfill_task", None)
     if backfill_task is not None and not backfill_task.done():
@@ -354,19 +475,26 @@ async def lifespan(_app: FastAPI):
             await backfill_task
         except asyncio.CancelledError:
             pass
+    cleanup_task = getattr(_app.state, "user_temp_cleanup_task", None)
+    if cleanup_task is not None and not cleanup_task.done():
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app.router.lifespan_context = lifespan
 
 
-def _runtime_mask_dir() -> Path:
-    path = _runtime_temp_lut_dir() / "masks"
+def _runtime_mask_dir(storage_label: Optional[str] = None) -> Path:
+    path = _runtime_temp_lut_dir(storage_label) / "masks"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _runtime_depth_dir() -> Path:
-    path = _runtime_temp_lut_dir() / "depth"
+def _runtime_depth_dir(storage_label: Optional[str] = None) -> Path:
+    path = _runtime_temp_lut_dir(storage_label) / "depth"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -382,6 +510,16 @@ def _write_session_depth_meta(session_dir: str, strength: float, source_path: st
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _save_lut_file(path: str | Path, lut_3d: np.ndarray) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        np.save(target, lut_3d)
+    except FileNotFoundError:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        np.save(target, lut_3d)
 
 
 def _apply_cached_depth_layers_if_any(target_img: np.ndarray, result_img: np.ndarray, session_dir: Optional[str]) -> np.ndarray:
@@ -704,13 +842,13 @@ app.include_router(
         build_semantic_cache_key,
         summarize_semantic_matches,
         _save_upload,
+        _get_request_user_role,
     ),
     tags=["analysis"],
 )
 app.include_router(
     create_files_router(
         _ensure_project_access,
-        _runtime_video_dir,
         _runtime_temp_lut_dir,
     ),
     tags=["files"],
@@ -748,16 +886,20 @@ app.include_router(
     tags=["model-status"],
 )
 app.include_router(create_task_router(_get_request_user_id, _get_request_user_role, _write_task_log), tags=["tasks"])
+app.include_router(local_storage_router)
 
 
 @app.post("/api/upload_batch")
 async def api_upload_batch(
+    storage_check=Depends(_require_local_storage),
     files: List[UploadFile] = File(...),
     project_id: int = Form(0),
     authorization: Optional[str] = Header(None),
 ):
     request_user_id = _get_request_user_id(authorization)
     project_id = await _ensure_project_access(project_id, request_user_id)
+    is_admin = _is_admin_request(authorization)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     results = []
     for file in files:
         if not file.filename:
@@ -768,28 +910,43 @@ async def api_upload_batch(
         ext = os.path.splitext(file.filename)[1] or ".jpg"
         uid = uuid.uuid4().hex
         save_name = f"{uid}{ext}"
-        if project_id > 0:
-            save_dir = _safe_project_bucket_dir(project_id, "source")
-            thumb_dir = _safe_project_bucket_dir(project_id, "thumbs")
+        # 普通用户强制走临时目录，不落盘到 project/user 目录；管理员保持原逻辑
+        if is_admin and project_id > 0:
+            save_dir = _safe_project_bucket_dir(project_id, "source", storage_label=request_storage_label)
+            thumb_dir = _safe_project_bucket_dir(project_id, "thumbs", storage_label=request_storage_label)
             save_path = save_dir / save_name
             asset_url = f"/api/project_assets/{project_id}/source/{save_name}"
-        else:
-            save_path = Path(USER_IMAGES_DIR) / save_name
-            thumb_dir = Path(USER_IMAGES_DIR)
+        elif is_admin:
+            user_images_dir = _user_assets_root_for_label(request_storage_label) / "images"
+            user_images_dir.mkdir(parents=True, exist_ok=True)
+            save_path = user_images_dir / save_name
+            thumb_dir = user_images_dir
             asset_url = f"/api/user_assets/images/{save_name}?t={uid}"
+        else:
+            save_path = _save_to_runtime_user_temp(
+                b"",
+                request_user_id,
+                save_name,
+                storage_label=request_storage_label,
+            )
+            thumb_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
+            asset_url = _runtime_user_temp_url(request_user_id, save_name)
 
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail=f"上传文件为空: {file.filename}")
         with open(save_path, "wb") as f:
             f.write(content)
-        await _ensure_training_target_sample(
-            _resolve_local_file_path,
-            user_id=request_user_id,
-            target_path=str(save_path),
-            project_id=project_id,
-            asset_name=file.filename or save_name,
-        )
+
+        # 只有管理员才复制到训练语料库；普通用户数据不落盘到服务器训练目录
+        if is_admin:
+            await _ensure_training_target_sample(
+                _resolve_local_file_path,
+                user_id=request_user_id,
+                target_path=str(save_path),
+                project_id=project_id,
+                asset_name=file.filename or save_name,
+            )
 
         try:
             img = await asyncio.to_thread(_cv2_imread, str(save_path), target_size=512)
@@ -809,17 +966,20 @@ async def api_upload_batch(
         if ok:
             thumb_buf.tofile(thumb_path)
 
+        if is_admin and project_id > 0:
+            thumb_url = f"/api/project_assets/{project_id}/thumbs/{thumb_name}?t={uid}"
+        elif is_admin:
+            thumb_url = f"/api/user_assets/images/{thumb_name}?t={uid}"
+        else:
+            thumb_url = _runtime_user_temp_url(request_user_id, thumb_name)
+
         results.append({
             "id": uid,
             "name": file.filename,
             "path": str(save_path),
             "asset_url": asset_url,
-            "thumbnail": (
-                f"/api/project_assets/{project_id}/thumbs/{thumb_name}?t={uid}"
-                if project_id > 0
-                else f"/api/user_assets/images/{thumb_name}?t={uid}"
-            ),
-            "project_saved": bool(project_id > 0),
+            "thumbnail": thumb_url,
+            "project_saved": bool(is_admin and project_id > 0),
             "meta": f"{w}×{h}",
         })
     return JSONResponse({"images": results})
@@ -827,6 +987,7 @@ async def api_upload_batch(
 
 @app.post("/api/apply_profile")
 async def api_apply_profile(
+    storage_check=Depends(_require_local_storage),
     target_path: str = Form(...),
     session_id: str = Form(None),
     profile_file: UploadFile = File(None),
@@ -837,11 +998,17 @@ async def api_apply_profile(
 ):
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    is_admin = is_admin_role(request_user_role)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
     if request_user_id is not None:
         record_user_usage(request_user_id)
     project_id = await _ensure_project_access(project_id, request_user_id)
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标图片不存在")
     target_path = str(resolved_target_path)
@@ -852,17 +1019,21 @@ async def api_apply_profile(
 
     session_dir = None
     if session_id:
-        session_dir = str(_safe_session_dir(session_id))
+        session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label))
 
     if profile_builtin:
         record_model_call("neural_preset")
         lut_3d = await asyncio.to_thread(_generate_builtin_profile, profile_builtin)
     elif profile_file and profile_file.filename:
-        ensure_upload_file_size(profile_file, 10 * 1024 * 1024, label="风格文件")
+        ensure_upload_file_size(
+            profile_file,
+            int_env("COLORCHASE_UPLOAD_MAX_BYTES", UPLOAD_MAX_BYTES),
+            label="风格文件",
+        )
         record_model_call("neural_preset")
         lut_ext = os.path.splitext(profile_file.filename)[1].lower()
         lut_bytes = await profile_file.read()
-        tmp_path = os.path.join(str(_runtime_temp_lut_dir()), f"profile_{uuid.uuid4().hex}{lut_ext}")
+        tmp_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"profile_{uuid.uuid4().hex}{lut_ext}")
         with open(tmp_path, "wb") as f:
             f.write(lut_bytes)
         from core.io.lut_parser import parse_lut_file
@@ -877,12 +1048,12 @@ async def api_apply_profile(
 
     if not session_dir:
         profile_session_id = uuid.uuid4().hex
-        session_dir = str(_safe_session_dir(profile_session_id))
+        session_dir = str(_safe_session_dir(profile_session_id, storage_label=request_storage_label))
 
     lut_save_path = os.path.join(session_dir, "lut_global.npy")
     if os.path.exists(lut_save_path):
         os.remove(lut_save_path)
-    await asyncio.to_thread(np.save, lut_save_path, lut_3d)
+    await asyncio.to_thread(_save_lut_file, lut_save_path, lut_3d)
 
     result_b64 = await asyncio.to_thread(_img_to_base64, result_img, ".png")
     original_b64 = await asyncio.to_thread(_img_to_base64, target_img, ".png")
@@ -901,16 +1072,27 @@ async def api_apply_profile(
         meta={"source": "apply_profile"},
     )
 
-    return JSONResponse({
+    response = {
         "success": True,
         "result_b64": f"data:image/png;base64,{result_b64}",
         "original_b64": f"data:image/png;base64,{original_b64}",
         "lut_path": result_lut_path,
-    })
+    }
+    # 普通用户：把 LUT 中间产物暴露为临时 URL，方便前端拉回本地
+    if not is_admin and os.path.exists(result_lut_path):
+        lut_name = f"{os.path.basename(session_dir)}_lut_global.npy"
+        shutil.copy(
+            result_lut_path,
+            _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label) / lut_name,
+        )
+        response["intermediate_urls"] = {"lut": _runtime_user_temp_url(request_user_id, lut_name)}
+
+    return JSONResponse(response)
 
 
 @app.post("/api/transfer")
 async def api_transfer(
+    storage_check=Depends(_require_local_storage),
     target: UploadFile = File(None),
     reference: UploadFile = File(None),
     algorithm: str = Form("luminance_partition"),
@@ -961,7 +1143,9 @@ async def api_transfer(
 
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    is_admin = is_admin_role(request_user_role)
     project_id = await _ensure_project_access(project_id, request_user_id)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     request_started_at = time.time()
     trace_started_at = time.perf_counter()
     trace_last_at = trace_started_at
@@ -1053,8 +1237,6 @@ async def api_transfer(
     has_progress = task_id is not None
     if has_progress:
         pm.register_task(task_id)
-    request_user_id = _get_request_user_id(authorization)
-
     async def prog(stage, progress, message=""):
         if has_progress:
             await pm.send(task_id, stage, progress, message)
@@ -1073,11 +1255,15 @@ async def api_transfer(
     await prog("upload", 5, "读取图片中...")
     await asyncio.sleep(0.01)
 
-    target_load_size = 2048 if not generate_lut_only else None
+    target_load_size = 2048
     if algorithm == "dncm_lut" and str(lut_mode or "").lower() == "fast":
         target_load_size = 1024
 
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_target_path and resolved_target_path.exists():
         target_path = str(resolved_target_path)
         target_img = await trace_to_thread("load_target", _cv2_imread, target_path, target_size=target_load_size)
@@ -1086,22 +1272,38 @@ async def api_transfer(
     elif target is not None and target.filename:
         if getattr(target, "size", None) == 0:
             raise_task_http_error(400, "目标文件为空")
-        ensure_upload_file_size(target, 300 * 1024 * 1024, label="追色原图")
-        target_path = _save_upload(target, project_id=project_id, bucket="source")
-        await _ensure_training_target_sample(
-            _resolve_local_file_path,
-            user_id=request_user_id,
-            target_path=target_path,
-            project_id=project_id,
-            asset_name=target.filename,
+        ensure_upload_file_size(
+            target,
+            int_env("COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES", IMAGE_ORIGINAL_UPLOAD_MAX_BYTES),
+            label="追色原图",
         )
+        target_path = _save_upload(
+            target,
+            project_id=project_id,
+            bucket="source",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
+        if is_admin:
+            await _ensure_training_target_sample(
+                _resolve_local_file_path,
+                user_id=request_user_id,
+                target_path=target_path,
+                project_id=project_id,
+                asset_name=target.filename,
+            )
         target_img = await trace_to_thread("load_target", _cv2_imread, target_path, target_size=target_load_size)
     else:
         await prog("error", 0, "未提供目标图片")
         raise_task_http_error(400, "请提供目标图片")
 
     reference_img = None
-    resolved_reference_path = _resolve_local_file_path(reference_path)
+    resolved_reference_path = _resolve_local_file_path(
+        reference_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
@@ -1109,7 +1311,14 @@ async def api_transfer(
         if getattr(reference, "size", None) == 0:
             raise_task_http_error(400, "参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
-        reference_path = _save_upload(reference, project_id=project_id, bucket="reference")
+        reference_path = _save_upload(
+            reference,
+            project_id=project_id,
+            bucket="reference",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
         reference_img = await trace_to_thread("load_reference", _cv2_imread_full, reference_path)
 
     if reference_img is None and (profile_file is None or not profile_file.filename) and not generate_lut_only:
@@ -1262,10 +1471,13 @@ async def api_transfer(
     elif algorithm == "ai_portrait":
         session_id = str(uuid.uuid4())
 
-        _debug_dir = os.path.join(str(BASE_DIR), "debug_output")
+        _debug_dir = str(get_image_debug_dir())
         os.makedirs(_debug_dir, exist_ok=True)
 
         def _debug_save(img, name):
+            # 调试文件只在管理员请求时落盘，避免普通用户数据泄漏到服务器
+            if not is_admin:
+                return
             try:
                 path = os.path.join(_debug_dir, name)
                 _, buf = cv2.imencode(".jpg" if name.endswith(".jpg") else ".png", img)
@@ -1320,10 +1532,10 @@ async def api_transfer(
             from core.color.color_refine import refine_color_distribution
             result_img = await asyncio.to_thread(
                 refine_color_distribution, result_global, reference_img,
-                l_mean_strength=0.3, a_mean_strength=0.0, b_mean_strength=0.8,
-                l_std_strength=0.25, a_std_strength=0.15, b_std_strength=0.3
+                l_mean_strength=0.3, a_mean_strength=0.3, b_mean_strength=0.6,
+                l_std_strength=0.25, a_std_strength=0.2, b_std_strength=0.3
             )
-            print("[Color Refine] L_mean=0.3 a_mean=0.0 b_mean=0.8 L_std=0.25 a_std=0.15 b_std=0.3")
+            print("[Color Refine] L_mean=0.3 a_mean=0.3 b_mean=0.6 L_std=0.25 a_std=0.2 b_std=0.3")
         except Exception as e:
             print(f"[Color Refine] failed: {e}, using raw ModFlows output")
             result_img = result_global
@@ -1334,6 +1546,15 @@ async def api_transfer(
         skin_mask = None
         lip_mask = None
         hair_mask = None
+        portrait_subject_mask = None
+        portrait_subject_meta = None
+        # 2026-07-23 修复：先用 mediapipe 快速检测人脸，挡掉风景/物体图
+        # 调试发现 SegFace 对风景图会误检出 skin 20.7%，靠 skin_pct 阈值挡不住
+        # mediapipe 在 CPU 上几十毫秒，先跑这步还能省掉非人像白跑 SegFace 的时间
+        from algorithms.segface import has_human_face
+        has_face = await asyncio.to_thread(has_human_face, target_img)
+        if not has_face:
+            raise_task_http_error(400, "AI人像追色仅支持人物照片，请选择包含清晰人脸的图片或切换至其他追色模式")
         try:
             if not model_runtime["segface_enabled"]:
                 raise RuntimeError("SegFace 已在后台禁用")
@@ -1349,7 +1570,43 @@ async def api_transfer(
             print(f"[SegFace] skin: {skin_pct:.1f}%, lip: {lip_mask.sum()/lip_mask.size*100:.1f}%, hair: {hair_mask.sum()/hair_mask.size*100:.1f}%")
             has_skin = skin_pct > 2.0
 
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            if model_runtime["subject_mask_enabled"]:
+                await prog("subject_segment", 64, "SAM2 人物轮廓分割...")
+                try:
+                    portrait_subject_mask, portrait_subject_meta = await asyncio.to_thread(
+                        generate_subject_mask,
+                        target_img,
+                        "subject",
+                        [],
+                        False,
+                        "sam2",
+                        BASE_DIR,
+                    )
+                    subject_source = portrait_subject_meta.get("source", "")
+                    subject_coverage = float(portrait_subject_meta.get("coverage", 0.0) or 0.0)
+                    if subject_source == "sam2" and 0.02 <= subject_coverage <= 0.9:
+                        subject_mask_soft = np.clip(portrait_subject_mask, 0.0, 1.0)
+                        skin_mask = np.clip(skin_mask * subject_mask_soft, 0.0, 1.0)
+                        lip_mask = np.clip(lip_mask * subject_mask_soft, 0.0, 1.0)
+                        hair_mask = np.clip(hair_mask * subject_mask_soft, 0.0, 1.0)
+                        skin_pct = skin_mask.sum() / skin_mask.size * 100
+                        has_skin = skin_pct > 2.0
+                        print(
+                            f"[SAM2] subject mask applied: coverage={subject_coverage:.3f}, "
+                            f"skin={skin_pct:.1f}%"
+                        )
+                    else:
+                        portrait_subject_mask = None
+                        print(
+                            f"[SAM2] subject mask skipped: source={subject_source or 'unknown'} "
+                            f"coverage={subject_coverage:.3f}"
+                        )
+                except Exception as exc:
+                    portrait_subject_mask = None
+                    portrait_subject_meta = {"source": "sam2_error", "error": str(exc)}
+                    print(f"[SAM2] portrait subject mask failed, keeping SegFace masks: {exc}")
+
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
 
             def _save_mask(p, m):
@@ -1364,6 +1621,12 @@ async def api_transfer(
                 os.path.join(session_dir, "lip_mask.png"), lip_mask)
             await asyncio.to_thread(_save_mask,
                 os.path.join(session_dir, "hair_mask.png"), hair_mask)
+            if portrait_subject_mask is not None:
+                await asyncio.to_thread(
+                    _save_mask,
+                    os.path.join(session_dir, "subject_mask.png"),
+                    portrait_subject_mask,
+                )
             await asyncio.to_thread(_debug_save,
                 (skin_mask * 255).astype(np.uint8), "3_skin_mask.png")
             await asyncio.to_thread(_debug_save,
@@ -1379,12 +1642,15 @@ async def api_transfer(
                 float(a_ref_full.mean()), float(b_ref_full.mean()),
                 float(ref_hsv[:, :, 2].mean()),
             ], dtype=np.float32)
-            await asyncio.to_thread(np.save,
+            await asyncio.to_thread(_save_lut_file,
                 os.path.join(session_dir, "ref_stats.npy"), ref_stats)
             print(f"[Ref Stats] a={ref_stats[0]:.1f} b={ref_stats[1]:.1f} V={ref_stats[2]:.0f}")
         except Exception as e:
             print(f"[SegFace] segmentation failed: {e}")
             has_skin = False
+
+        if not has_skin:
+            raise_task_http_error(400, "AI人像追色仅支持人物照片，请选择包含清晰人脸的图片或切换至其他追色模式")
 
         if has_skin and skin_mask is not None:
             await prog("skin_reconstruct", 68, "肤色重建(保留血色底子)...")
@@ -1421,6 +1687,7 @@ async def api_transfer(
                     colorize_highlights,
                     result_img=result_img,
                     hair_mask=hair_mask,
+                    highlight_shift=-6,
                 )
                 print("[Highlights] applied in preview")
             except Exception as e:
@@ -1434,13 +1701,13 @@ async def api_transfer(
             result_rgb_lut = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             lut_3d = await asyncio.to_thread(extract_lut_from_pair,
                 target_rgb_lut, result_rgb_lut, 33)
-            await asyncio.to_thread(np.save,
+            await asyncio.to_thread(_save_lut_file,
                 os.path.join(session_dir, "lut_global.npy"), lut_3d)
             print("[LUT] extracted from final result (with skin/makeup/highlights)")
         except Exception as e:
             print(f"[LUT] extract failed: {e}")
 
-        print("[DEBUG] Diagnostic images saved to debug_output/")
+        print(f"[DEBUG] Diagnostic images saved to {_debug_dir}")
     elif algorithm == "dncm_lut":
         weight_status = get_neuralpreset_weight_status()
         if not weight_status["ready"]:
@@ -1549,7 +1816,7 @@ async def api_transfer(
                     print(f"[DNCM] enhanced LUT extraction failed: {exc}")
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             if dncm_applied_depth_path:
                 await trace_to_thread(
@@ -1581,13 +1848,16 @@ async def api_transfer(
                     dncm_applied_mask_path,
                 )
             lut_path = os.path.join(session_dir, "lut_global.npy")
-            await asyncio.to_thread(np.save, lut_path, session_lut_3d)
-            reusable_preset = await asyncio.to_thread(
-                _save_lut_as_style_preset,
-                session_lut_3d,
-                result_img,
-                "DNCM 快速 LUT" if dncm_mode == "fast" else "DNCM 高质量 LUT",
-            )
+            await asyncio.to_thread(_save_lut_file, lut_path, session_lut_3d)
+            # 风格预设只保存到服务器风格库，普通用户不生成服务器预设
+            reusable_preset = None
+            if is_admin:
+                reusable_preset = await asyncio.to_thread(
+                    _save_lut_as_style_preset,
+                    session_lut_3d,
+                    result_img,
+                    "DNCM 快速 LUT" if dncm_mode == "fast" else "DNCM 高质量 LUT",
+                )
 
             await prog("encode_output", 85, "编码输出图片...")
             await asyncio.sleep(0.01)
@@ -1599,7 +1869,8 @@ async def api_transfer(
             result_b64 = await asyncio.to_thread(_img_to_base64, result_img, ".png")
             project_result_path = ""
             project_result_url = ""
-            if project_id > 0:
+            # 普通用户结果图不落盘服务器 project 目录
+            if project_id > 0 and is_admin:
                 project_result_path, project_result_url = await trace_to_thread(
                     "project_dncm_result_save",
                     _save_project_image,
@@ -1609,6 +1880,7 @@ async def api_transfer(
                     result_img,
                     ".png",
                     [cv2.IMWRITE_PNG_COMPRESSION, 3],
+                    storage_label=request_storage_label,
                 )
 
             await prog("done", 100, f"追色完成！耗时 {round(elapsed, 2)}s")
@@ -1662,7 +1934,7 @@ async def api_transfer(
             lut_3d = await asyncio.to_thread(_generate_builtin_profile, profile_builtin)
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
         else:
             await prog("parse_lut", 25, "解析 LUT 文件中...")
@@ -1672,7 +1944,7 @@ async def api_transfer(
             lut_bytes = await profile_file.read()
 
             session_id = str(uuid.uuid4())
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
 
             import_lut_path = os.path.join(session_dir, f"imported_lut{lut_ext}")
@@ -1685,7 +1957,7 @@ async def api_transfer(
             except Exception as e:
                 raise_task_http_error(400, f"LUT 文件解析失败: {str(e)}")
 
-        await asyncio.to_thread(np.save, os.path.join(session_dir, "lut_global.npy"), lut_3d)
+        await asyncio.to_thread(_save_lut_file, os.path.join(session_dir, "lut_global.npy"), lut_3d)
 
         await prog("apply_lut", 50, "极速 LUT 渲染中...")
         await asyncio.sleep(0.01)
@@ -1861,7 +2133,7 @@ async def api_transfer(
 
     if applied_depth_path:
         try:
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             session_depth_path = os.path.join(session_dir, "depth_layers.png")
             await trace_to_thread("copy_depth_layers", shutil.copyfile, applied_depth_path, session_depth_path)
@@ -1877,7 +2149,7 @@ async def api_transfer(
 
     if applied_mask_path:
         try:
-            session_dir = os.path.join(str(_runtime_temp_lut_dir()), session_id)
+            session_dir = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), session_id)
             os.makedirs(session_dir, exist_ok=True)
             session_mask_path = os.path.join(session_dir, "subject_mask.png")
             await trace_to_thread("copy_subject_mask", shutil.copyfile, applied_mask_path, session_mask_path)
@@ -1902,16 +2174,16 @@ async def api_transfer(
             result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             trace_mark("lut_prepare_rgb_done")
             lut_3d = await trace_to_thread("extract_lut_ai_portrait", extract_lut_from_pair, target_rgb, result_rgb, 33)
-            lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-            await trace_to_thread("save_lut_ai_portrait", np.save, lut_path, lut_3d)
+            lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy")
+            await trace_to_thread("save_lut_ai_portrait", _save_lut_file, lut_path, lut_3d)
         else:
             trace_mark("lut_prepare_rgb_start")
             target_rgb = cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB)
             result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
             trace_mark("lut_prepare_rgb_done")
             lut_3d = await trace_to_thread("extract_lut", extract_lut_from_pair, target_rgb, result_rgb, 33)
-            lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy")
-            await trace_to_thread("save_lut", np.save, lut_path, lut_3d)
+            lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy")
+            await trace_to_thread("save_lut", _save_lut_file, lut_path, lut_3d)
     except Exception as e:
         trace_mark("lut_pipeline_error", error=type(e).__name__)
         print(f"[LUT] extract failed: {e}")
@@ -1919,6 +2191,11 @@ async def api_transfer(
 
     project_result_path = ""
     project_result_url = ""
+    result_preview_url = ""
+    target_preview_url = ""
+    preview_token = int(time.time() * 1000)
+    result_preview_name = f"result_preview_{session_id}.jpg"
+    orig_preview_name = f"orig_preview_{session_id}.jpg"
     try:
         def _display_preview(img, max_edge=2048):
             h, w = img.shape[:2]
@@ -1928,25 +2205,45 @@ async def api_transfer(
             scale = max_edge / float(longest)
             return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-        preview_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}_result_preview.jpg")
-        trace_mark("preview_result_encode_start")
-        cv2.imencode('.jpg', _display_preview(result_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(preview_path)
-        trace_mark("preview_result_encode_done")
-        orig_preview_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}_orig_preview.jpg")
-        trace_mark("preview_target_encode_start")
-        cv2.imencode('.jpg', _display_preview(target_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(orig_preview_path)
-        trace_mark("preview_target_encode_done")
-        if project_id > 0:
-            project_result_path, project_result_url = await trace_to_thread(
-                "project_result_preview_save",
-                _save_project_image,
-                project_id,
-                "result",
-                f"{session_id}_result_preview.jpg",
-                _display_preview(result_img),
-                ".jpg",
-                [cv2.IMWRITE_JPEG_QUALITY, 90],
-            )
+        if is_admin:
+            # 管理员：结果预览存项目 result/（永久），无项目时存 luts/；原图预览存 luts/
+            trace_mark("preview_result_encode_start")
+            if project_id > 0:
+                project_result_path, project_result_url = await trace_to_thread(
+                    "project_result_preview_save",
+                    _save_project_image,
+                    project_id,
+                    "result",
+                    result_preview_name,
+                    _display_preview(result_img),
+                    ".jpg",
+                    [cv2.IMWRITE_JPEG_QUALITY, 90],
+                    storage_label=request_storage_label,
+                )
+            else:
+                preview_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), result_preview_name)
+                cv2.imencode('.jpg', _display_preview(result_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(preview_path)
+            trace_mark("preview_result_encode_done")
+            trace_mark("preview_target_encode_start")
+            orig_preview_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), orig_preview_name)
+            cv2.imencode('.jpg', _display_preview(target_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(orig_preview_path)
+            trace_mark("preview_target_encode_done")
+            result_preview_url = project_result_url or f"/temp_luts/{result_preview_name}?t={preview_token}"
+            target_preview_url = f"/temp_luts/{orig_preview_name}?t={preview_token}"
+        else:
+            # 普通用户：结果预览和原图预览都存 user_uploads/（24h 自动清理）
+            # 不再落盘到 luts/，避免无清理机制导致磁盘堆积
+            trace_mark("preview_result_encode_start")
+            user_temp_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
+            result_preview_path = user_temp_dir / result_preview_name
+            cv2.imencode('.jpg', _display_preview(result_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(str(result_preview_path))
+            trace_mark("preview_result_encode_done")
+            trace_mark("preview_target_encode_start")
+            orig_preview_path = user_temp_dir / orig_preview_name
+            cv2.imencode('.jpg', _display_preview(target_img), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tofile(str(orig_preview_path))
+            trace_mark("preview_target_encode_done")
+            result_preview_url = _runtime_user_temp_url(request_user_id, result_preview_name)
+            target_preview_url = _runtime_user_temp_url(request_user_id, orig_preview_name)
     except Exception as e:
         trace_mark("preview_encode_error", error=type(e).__name__)
         print(f"[Cache] Failed to save result preview: {e}")
@@ -1979,9 +2276,6 @@ async def api_transfer(
     trace_mark("sse_done_sent", elapsed_s=round(elapsed, 3))
     mark_task_success()
     trace_mark("task_log_done")
-    preview_token = int(time.time() * 1000)
-    result_preview_url = project_result_url or f"/temp_luts/{session_id}_result_preview.jpg?t={preview_token}"
-    target_preview_url = f"/temp_luts/{session_id}_orig_preview.jpg?t={preview_token}"
     response_images = {
         "target_url": target_preview_url,
         "reference_url": "",
@@ -2032,6 +2326,25 @@ async def api_transfer(
             "meta": semantic_meta,
         }
 
+    # 普通用户：把 LUT / 深度图 / 遮罩图等中间产物暴露为临时 URL，方便前端拉回本地
+    if not is_admin:
+        intermediate_urls = {}
+        user_temp_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
+        if os.path.exists(lut_path):
+            lut_name = f"{session_id}_lut_global.npy"
+            shutil.copy(lut_path, user_temp_dir / lut_name)
+            intermediate_urls["lut"] = _runtime_user_temp_url(request_user_id, lut_name)
+        if applied_mask_path and os.path.exists(applied_mask_path):
+            mask_name = f"{session_id}_mask.png"
+            shutil.copy(applied_mask_path, user_temp_dir / mask_name)
+            intermediate_urls["mask"] = _runtime_user_temp_url(request_user_id, mask_name)
+        if applied_depth_path and os.path.exists(applied_depth_path):
+            depth_name = f"{session_id}_depth.png"
+            shutil.copy(applied_depth_path, user_temp_dir / depth_name)
+            intermediate_urls["depth"] = _runtime_user_temp_url(request_user_id, depth_name)
+        if intermediate_urls:
+            response["intermediate_urls"] = intermediate_urls
+
     if metrics:
         response["metrics"] = metrics
 
@@ -2041,6 +2354,7 @@ async def api_transfer(
 
 @app.post("/api/video_transfer")
 async def api_video_transfer(
+    storage_check=Depends(_require_local_storage),
     video: UploadFile = File(None),
     video_path: str = Form(None),
     reference: UploadFile = File(None),
@@ -2070,7 +2384,11 @@ async def api_video_transfer(
 
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    is_admin = is_admin_role(request_user_role)
     project_id = await _ensure_project_access(project_id, request_user_id)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+    if _normalize_project_id(project_id) <= 0:
+        raise HTTPException(status_code=400, detail="请先创建或选择项目后再进行视频追色")
     if request_user_id is not None:
         record_user_usage(request_user_id)
 
@@ -2079,25 +2397,51 @@ async def api_video_transfer(
     pm = progress_manager
     pm.register_task(task_id)
 
-    resolved_video_path = _resolve_local_file_path(video_path)
+    resolved_video_path = _resolve_local_file_path(
+        video_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_video_path and resolved_video_path.exists():
         video_path = str(resolved_video_path)
     elif video is not None and video.filename:
         if getattr(video, "size", None) == 0:
             raise HTTPException(status_code=400, detail="视频文件为空")
-        ensure_upload_file_size(video, 300 * 1024 * 1024, label="视频文件")
-        video_path = _save_upload(video, project_id=project_id, bucket="video_source")
+        ensure_upload_file_size(
+            video,
+            int_env("COLORCHASE_VIDEO_UPLOAD_MAX_BYTES", VIDEO_UPLOAD_MAX_BYTES),
+            label="视频文件",
+        )
+        video_path = _save_upload(
+            video,
+            project_id=project_id,
+            bucket="video_source",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
     else:
         raise HTTPException(status_code=400, detail="请提供视频文件")
 
-    resolved_reference_path = _resolve_local_file_path(reference_path)
+    resolved_reference_path = _resolve_local_file_path(
+        reference_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if resolved_reference_path and resolved_reference_path.exists():
         reference_path = str(resolved_reference_path)
     elif reference is not None and reference.filename:
         if getattr(reference, "size", None) == 0:
             raise HTTPException(status_code=400, detail="参考图为空")
         ensure_upload_file_size(reference, IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, label="参考图")
-        reference_path = _save_upload(reference, project_id=project_id, bucket="video_reference")
+        reference_path = _save_upload(
+            reference,
+            project_id=project_id,
+            bucket="video_reference",
+            user_id=request_user_id,
+            is_admin=is_admin,
+            storage_label=request_storage_label,
+        )
     else:
         reference_path = None
 
@@ -2105,13 +2449,30 @@ async def api_video_transfer(
     if profile_file is not None and profile_file.filename:
         if getattr(profile_file, "size", None) == 0:
             raise HTTPException(status_code=400, detail="风格文件为空")
-        ensure_upload_file_size(profile_file, 10 * 1024 * 1024, label="风格文件")
+        ensure_upload_file_size(
+            profile_file,
+            int_env("COLORCHASE_UPLOAD_MAX_BYTES", UPLOAD_MAX_BYTES),
+            label="风格文件",
+        )
         profile_ext = os.path.splitext(profile_file.filename)[1].lower()
         profile_name = f"profile_{uuid.uuid4().hex}{profile_ext}"
-        if project_id > 0:
-            profile_path = str(_safe_project_bucket_dir(project_id, "video_profile") / profile_name)
+        if is_admin and _normalize_project_id(project_id) > 0:
+            profile_path = str(
+                _safe_project_bucket_dir(
+                    project_id,
+                    "video_profile",
+                    storage_label=request_storage_label,
+                ) / profile_name
+            )
         else:
-            profile_path = os.path.join(str(_runtime_upload_dir()), profile_name)
+            profile_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    profile_name,
+                    storage_label=request_storage_label,
+                )
+            )
         profile_content = await profile_file.read()
         with open(profile_path, "wb") as f:
             f.write(profile_content)
@@ -2126,6 +2487,7 @@ async def api_video_transfer(
         request_user_role,
         model_runtime,
         project_id,
+        request_storage_label,
     ))
 
     _write_task_log(
@@ -2161,6 +2523,7 @@ async def _background_video_transfer(
     request_user_id=None, user_role="",
     model_runtime=None,
     project_id=0,
+    request_storage_label=None,
 ):
     pm = progress_manager
     frames_dir = None
@@ -2238,12 +2601,29 @@ async def _background_video_transfer(
         await asyncio.sleep(0.01)
 
         output_filename = f"{uuid.uuid4().hex}_result.mp4"
-        if _normalize_project_id(project_id) > 0:
-            output_path = str(_safe_project_bucket_dir(project_id, "video_results") / output_filename)
+        if _normalize_project_id(project_id) <= 0:
+            await prog("error", 0, "未关联项目，无法保存视频结果")
+            mark_video_task_failure()
+            return
+        if is_admin_role(user_role):
+            output_path = str(
+                _safe_project_bucket_dir(
+                    project_id,
+                    "video_results",
+                    storage_label=request_storage_label,
+                ) / output_filename
+            )
             result_url = f"/api/project_assets/{_normalize_project_id(project_id)}/video_results/{output_filename}"
         else:
-            output_path = os.path.join(str(_runtime_video_dir()), output_filename)
-            result_url = f"/videos/{output_filename}"
+            output_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    output_filename,
+                    storage_label=request_storage_label,
+                )
+            )
+            result_url = _runtime_user_temp_url(request_user_id, output_filename)
 
         from algorithms.video.processor import extract_frames, assemble_video
         from algorithms.postprocess import regional_transfer, enhance_transfer_result
@@ -2544,21 +2924,46 @@ async def _background_video_transfer(
 
 
 @app.post("/api/preview_upload")
-async def api_preview_upload(file: UploadFile = File(...)):
-    ensure_upload_file_size(file, 10 * 1024 * 1024, label="预览文件")
+async def api_preview_upload(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    request_user_id = _get_request_user_id(authorization)
+    request_user_role = _get_request_user_role(authorization)
+    is_admin = is_admin_role(request_user_role)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+
+    preview_upload_max_bytes = int_env(
+        "COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES",
+        IMAGE_ORIGINAL_UPLOAD_MAX_BYTES,
+    )
+    ensure_upload_file_size(file, preview_upload_max_bytes, label="预览文件")
     ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".jpg"
     allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".mp4", ".mov", ".avi"}
     if ext not in allowed_exts:
         raise HTTPException(status_code=400, detail="不支持的文件类型")
     filename = f"preview_{uuid.uuid4().hex}{ext}"
-    filepath = os.path.join(str(_runtime_upload_dir()), filename)
     content = await file.read()
-    with open(filepath, "wb") as f:
-        f.write(content)
+    # 普通用户预览文件也走临时目录，不落盘服务器上传目录
+    if is_admin:
+        base_dir = _runtime_upload_dir()
+        filepath = os.path.join(str(base_dir), filename)
+        with open(filepath, "wb") as f:
+            f.write(content)
+    else:
+        filepath = str(
+            _save_to_runtime_user_temp(
+                content,
+                request_user_id,
+                filename,
+                storage_label=request_storage_label,
+            )
+        )
+        base_dir = _runtime_user_temp_dir(request_user_id, storage_label=request_storage_label)
 
     raw_exts = {'.dng', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.rw2', '.raw', '.rwl', '.orf', '.pef', '.ptx', '.3fr', '.fff', '.iiq', '.cap', '.eip', '.mef', '.mos', '.mfw', '.x3f', '.dcr', '.kdc', '.k25', '.dcs', '.srw', '.erf', '.cs1', '.cs4', '.cs16', '.sti', '.bay', '.pxn', '.braw', '.r3d', '.ari', '.cine', '.lfp', '.rwz'}
     if ext in raw_exts:
-        preview_path = filepath + ".jpg"
+        preview_path = os.path.join(str(base_dir), f"{filename}.jpg")
         preview_ok = False
 
         try:
@@ -2662,6 +3067,7 @@ async def api_preview_upload(file: UploadFile = File(...)):
 
 @app.post("/api/download_full")
 async def api_download_full(
+    storage_check=Depends(_require_local_storage),
     target_path: str = Form(...),
     session_id: str = Form(None),
     format: str = Form("png"),
@@ -2682,6 +3088,7 @@ async def api_download_full(
     has_progress = task_id is not None
     request_user_id = _get_request_user_id(authorization)
     request_user_role = _get_request_user_role(authorization)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
     recorded_export_event = False
     export_size_bytes = 0
     if has_progress:
@@ -2720,10 +3127,10 @@ async def api_download_full(
         raise HTTPException(status_code=400, detail="缺少 session_id，请先预览追色")
 
     has_merged = bool(merged_session_id)
-    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
+    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{merged_session_id}.npy") if has_merged else None
 
-    session_dir = str(_safe_session_dir(session_id)) if session_id else None
-    lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
+    session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label)) if session_id else None
+    lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)
         and os.path.exists(os.path.join(session_dir, "lut_global.npy"))
@@ -2746,7 +3153,11 @@ async def api_download_full(
     if has_merged and not os.path.exists(merged_lut_path):
         raise HTTPException(status_code=404, detail="合并 LUT 数据已过期，请重新追色")
 
-    resolved_target_path = _resolve_local_file_path(target_path)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标文件不存在")
     target_path = str(resolved_target_path)
@@ -2882,7 +3293,19 @@ async def api_download_full(
     except Exception as e:
         print(f"[Download] imencode failed: {e}, falling back to file write")
         output_filename = f"{uuid.uuid4().hex}_full.png"
-        output_path = os.path.join(str(_runtime_upload_dir()), output_filename)
+        # 普通用户异常回退也不落盘服务器上传目录
+        is_admin_download = is_admin_role(request_user_role)
+        if is_admin_download:
+            output_path = os.path.join(str(_runtime_upload_dir()), output_filename)
+        else:
+            output_path = str(
+                _save_to_runtime_user_temp(
+                    b"",
+                    request_user_id,
+                    output_filename,
+                    storage_label=request_storage_label,
+                )
+            )
         ok, buf = await asyncio.to_thread(cv2.imencode, '.png', result_img)
         if ok:
             buf.tofile(output_path)
@@ -2915,6 +3338,7 @@ async def api_download_full(
 
 @app.post("/api/render_single")
 async def api_render_single(
+    storage_check=Depends(_require_local_storage),
     target_path: str = Form(...),
     session_id: str = Form(None),
     merged_session_id: str = Form(None),
@@ -2940,15 +3364,20 @@ async def api_render_single(
 
     request_user_id = _get_request_user_id(authorization)
     project_id = await _ensure_project_access(project_id, request_user_id)
-    resolved_target_path = _resolve_local_file_path(target_path)
+    request_storage_label = await _require_storage_label_for_user(request_user_id)
+    resolved_target_path = _resolve_local_file_path(
+        target_path,
+        request_user_id=request_user_id,
+        request_storage_label=request_storage_label,
+    )
     if not resolved_target_path:
         raise HTTPException(status_code=400, detail="目标文件不存在")
     target_path = str(resolved_target_path)
 
     has_merged = bool(merged_session_id)
-    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{merged_session_id}.npy") if has_merged else None
-    session_dir = str(_safe_session_dir(session_id)) if session_id else None
-    lut_path = os.path.join(str(_runtime_temp_lut_dir()), f"{session_id}.npy") if session_id else None
+    merged_lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{merged_session_id}.npy") if has_merged else None
+    session_dir = str(_safe_session_dir(session_id, storage_label=request_storage_label)) if session_id else None
+    lut_path = os.path.join(str(_runtime_temp_lut_dir(request_storage_label)), f"{session_id}.npy") if session_id else None
     has_portrait_cache = (
         session_id and os.path.isdir(session_dir)
         and os.path.exists(os.path.join(session_dir, "lut_global.npy"))
@@ -3054,40 +3483,40 @@ async def api_render_single(
             result_name_source = Path(str(asset_name or Path(target_path).name)).stem or "export"
             result_name_source = re.sub(r"[^A-Za-z0-9._-]+", "_", result_name_source).strip("._-") or "export"
             export_name = f"{result_name_source}_{uuid.uuid4().hex[:10]}{result_ext}"
-            export_path, project_export_url = _project_bucket_file(project_id, "exports", export_name)
-            export_path.write_bytes(output_bytes)
+            # export_path, project_export_url = _project_bucket_file(project_id, "exports", export_name)
+            # export_path.write_bytes(output_bytes)  # 不写服务器，只返回字节流给前端
         except Exception as exc:
             print(f"[Project Assets] image export save failed: {exc}")
-    if rating > 0:
-        try:
-            await _archive_training_sample(
-                user_id=request_user_id,
-                project_id=project_id,
-                asset_name=asset_name,
-                target_path=target_path,
-                reference_path=reference_path,
-                reference_data_url=reference_data_url,
-                result_bytes=output_bytes,
-                result_ext=result_ext,
-                rating=rating,
-                algorithm=algorithm,
-                session_id=session_id or "",
-                merged_session_id=merged_session_id or "",
-                export_format=format,
-                size_mode=size_mode,
-                params={
-                    "intensity": intensity,
-                    "exposure": exposure,
-                    "contrast": contrast,
-                    "highlight": highlight,
-                    "shadow": shadow,
-                    "vibrance": vibrance,
-                    "custom_long_edge": custom_long_edge,
-                    "export_both": bool(export_both),
-                },
-            )
-        except Exception as exc:
-            print(f"[Training Corpus] archive failed: {exc}")
+#     if rating > 0:
+#         try:
+#             await _archive_training_sample(
+#                 user_id=request_user_id,
+#                 project_id=project_id,
+#                 asset_name=asset_name,
+#                 target_path=target_path,
+#                 reference_path=reference_path,
+#                 reference_data_url=reference_data_url,
+#                 result_bytes=output_bytes,
+#                 result_ext=result_ext,
+#                 rating=rating,
+#                 algorithm=algorithm,
+#                 session_id=session_id or "",
+#                 merged_session_id=merged_session_id or "",
+#                 export_format=format,
+#                 size_mode=size_mode,
+#                 params={
+#                     "intensity": intensity,
+#                     "exposure": exposure,
+#                     "contrast": contrast,
+#                     "highlight": highlight,
+#                     "shadow": shadow,
+#                     "vibrance": vibrance,
+#                     "custom_long_edge": custom_long_edge,
+#                     "export_both": bool(export_both),
+#                 },
+#             )
+#         except Exception as exc:
+#             print(f"[Training Corpus] archive failed: {exc}")
 
     del target_img, result_img, result_rgb, target_rgb
     gc.collect()

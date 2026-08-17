@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .sam2_subject import get_sam2_status, predict_sam2_subject_mask
+
 
 BIREFNET_MODEL_ID = "ZhengPeng7/BiRefNet"
 SAM_WEIGHT_CANDIDATES = (
@@ -23,6 +25,7 @@ BIREFNET_ERROR = None
 
 
 def get_subject_mask_status(base_dir: Path) -> Dict:
+    sam2_status = get_sam2_status(base_dir)
     files = []
     for rel_path in SAM_WEIGHT_CANDIDATES:
         path = base_dir / rel_path
@@ -35,17 +38,18 @@ def get_subject_mask_status(base_dir: Path) -> Dict:
     has_sam_weight = any(item["exists"] for item in files)
     for index, item in enumerate(files):
         item["required"] = (not has_sam_weight and index == 0)
-    has_sam_runtime = (
-        importlib.util.find_spec("segment_anything") is not None
-        or importlib.util.find_spec("sam2") is not None
-    )
-    sam_ready = has_sam_weight and has_sam_runtime
+    has_sam_runtime = sam2_status["runtime_ready"]
+    sam_ready = sam2_status["ready"]
     mediapipe_ready = importlib.util.find_spec("mediapipe") is not None
     birefnet_status = get_birefnet_status(base_dir)
 
     return {
         "ready": sam_ready or mediapipe_ready or birefnet_status["model_ready"],
         "sam_ready": sam_ready,
+        "sam2_ready": sam2_status["ready"],
+        "sam2_device": sam2_status["device"],
+        "sam2_model": sam2_status["selected_model"],
+        "sam2_last_error": sam2_status["last_error"],
         "sam_runtime_ready": has_sam_runtime,
         "birefnet_ready": birefnet_status["model_ready"],
         "birefnet_runtime_ready": birefnet_status["runtime_ready"],
@@ -53,9 +57,9 @@ def get_subject_mask_status(base_dir: Path) -> Dict:
         "files": files,
         "missing_files": [item["path"] for item in files if item.get("required", True) and not item["exists"]],
         "note": (
-            "SAM/SAM2 权重和运行库已发现，可升级为 SAM 主体分割入口。"
+            "SAM2 真实推理已接入，默认优先使用 SAM2 Small 生成主体 mask。"
             if sam_ready else
-            "SAM/SAM2 权重或运行库未完整接入，当前使用 MediaPipe 人像分割 + GrabCut/中心主体降级。"
+            "SAM2 权重或运行库未完整，当前使用 BiRefNet/MediaPipe + GrabCut 兼容方案。"
         ),
     }
 
@@ -177,17 +181,39 @@ def generate_subject_mask(
     points: Optional[List[Dict]] = None,
     prefer_birefnet: bool = True,
     model_choice: str = "auto",
+    base_dir: Optional[Path] = None,
 ) -> Tuple[np.ndarray, Dict]:
     mode = (mode or "subject").lower()
     model_choice = str(model_choice or "auto").lower()
     points = points or []
+    sam2_error = None
 
-    if mode in ("local", "point", "points") and points:
+    if mode in ("local", "point", "points") and points and model_choice not in ("sam", "sam2", "sam_subject_mask"):
         mask = _grabcut_from_points(img_bgr, points)
         source = "grabcut_points"
     else:
-        use_birefnet = prefer_birefnet and model_choice not in ("fallback", "mediapipe", "grabcut", "fast")
-        mask, source = _birefnet_subject_mask(img_bgr) if use_birefnet else (None, "birefnet_disabled")
+        mask = None
+        source = "uninitialized"
+        if model_choice in ("sam", "sam2", "sam_subject_mask"):
+            try:
+                mask, sam_meta = predict_sam2_subject_mask(
+                    img_bgr,
+                    points=points,
+                    base_dir=base_dir,
+                    model_choice="sam2",
+                )
+                source = sam_meta.get("source", "sam2")
+            except Exception as exc:
+                sam2_error = f"{type(exc).__name__}: {exc}"
+                source = "sam2_error"
+
+        use_birefnet = (
+            mask is None
+            and prefer_birefnet
+            and model_choice not in ("fallback", "mediapipe", "grabcut", "fast", "sam", "sam2", "sam_subject_mask")
+        )
+        if mask is None:
+            mask, source = _birefnet_subject_mask(img_bgr) if use_birefnet else (None, "birefnet_disabled")
         if mask is None or float(mask.max()) <= 0:
             mask = _person_or_subject_mask(img_bgr)
             source = "mediapipe_person" if float(mask.max()) > 0 else "grabcut_center"
@@ -206,6 +232,9 @@ def generate_subject_mask(
         "mode": mode,
         "points": len(points),
     }
+    if sam2_error:
+        meta["sam2_error"] = sam2_error
+        meta["fallback_from"] = "sam2"
     return mask, meta
 
 

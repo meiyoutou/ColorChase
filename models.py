@@ -1,14 +1,18 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import LONGTEXT
 from database import Base
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ux_users_storage_label", "storage_label", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     phone = Column(String(64), unique=True, nullable=True)
     email = Column(String(255), unique=True, nullable=True)
+    storage_label = Column(String(128), nullable=True)
     qq_id = Column(String(128), unique=True, nullable=True)
     wechat_id = Column(String(128), unique=True, nullable=True)
     hashed_password = Column(String(255), nullable=True)
@@ -28,6 +32,7 @@ class Project(Base):
     deleted_at = Column(DateTime, nullable=True, default=None)
     reference_path = Column(Text().with_variant(LONGTEXT(), "mysql"), nullable=True)
     workspace_snapshot = Column(Text().with_variant(LONGTEXT(), "mysql"), nullable=True)
+    local_path = Column(String(512), nullable=True)
 
 
 class Asset(Base):

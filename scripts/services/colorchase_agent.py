@@ -443,17 +443,19 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_bytes(content)
 
     def _handle_list(self, qs):
-        """列目录，返回 files 和 dirs 两个列表。"""
+        """列目录，返回统一的 entries 列表（前端契约：{name, is_dir, size}）。"""
         rel = qs.get("path", [""])[0]
         project_id = qs.get("project_id", [""])[0]
         project_name = qs.get("project_name", [""])[0]
         full = _resolve_path(project_id, rel, project_name)
-        files, dirs = [], []
+        entries = []
         if os.path.isdir(full):
             for name in os.listdir(full):
                 p = os.path.join(full, name)
-                (dirs if os.path.isdir(p) else files).append(name)
-        self._send_json({"ok": True, "files": files, "dirs": dirs})
+                is_dir = os.path.isdir(p)
+                size = 0 if is_dir else os.path.getsize(p)
+                entries.append({"name": name, "is_dir": is_dir, "size": size})
+        self._send_json({"ok": True, "entries": entries})
 
     def _handle_write(self):
         """写文件，内容是 base64。"""

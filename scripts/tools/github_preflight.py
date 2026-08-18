@@ -11,6 +11,7 @@ BLOCKED_PATTERNS = [
     re.compile(r"(^|/)\.env$"),
     re.compile(r"(^|/)colorchase\.db"),
     re.compile(r"(^|/)生产环境密钥\.md$"),
+    re.compile(r"密钥.*\.md$"),
     re.compile(r"(^|/)\.venv312(/|$)"),
     re.compile(r"(^|/)storage/"),
     re.compile(r"(^|/)uploads/"),

@@ -44,7 +44,6 @@ def test_training_upload_uses_storage_label_dir(monkeypatch, tmp_path):
 
     assert payload["ok"] is True
     assert payload["tier"] == "high_rating"
-    assert payload["path"] == str(sample_dir)
     assert (sample_dir / "target.jpg").read_bytes() == b"target"
     assert (sample_dir / "reference.jpg").read_bytes() == b"reference"
     assert (sample_dir / "result.jpg").read_bytes() == b"result"

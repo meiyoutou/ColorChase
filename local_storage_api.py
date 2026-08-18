@@ -103,7 +103,7 @@ async def api_detection_upload(
         save_path = save_dir / f"original{ext}"
         with open(save_path, "wb") as f:
             f.write(content)
-        return JSONResponse({"ok": True, "path": str(save_path), "uuid": fid})
+        return JSONResponse({"ok": True, "uuid": fid})
 
     # 普通用户：只写入临时目录，返回临时 URL，后续由清理任务回收
     save_name = f"{fid}{ext}"
@@ -116,7 +116,6 @@ async def api_detection_upload(
     )
     return JSONResponse({
         "ok": True,
-        "path": str(temp_path),
         "uuid": fid,
         "temp_url": _runtime_user_temp_url(request_user_id, save_name),
     })
@@ -207,7 +206,6 @@ async def api_training_upload(
     return JSONResponse({
         "ok": True,
         "tier": tier,
-        "path": str(sample_dir),
         "sample_id": sample_id,
     })
 

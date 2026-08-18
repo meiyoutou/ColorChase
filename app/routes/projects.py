@@ -25,6 +25,7 @@ from app.services.paths import (
     _safe_user_asset_file,
     _save_to_runtime_user_temp,
     _user_assets_root_for_label,
+    to_relative_storage_path,
 )
 from app.services.user_identity import resolve_user_storage_label
 from config import (
@@ -2172,7 +2173,7 @@ async def upload_project_asset(
         asset_url = _runtime_user_temp_url(user.id, fname)
 
     return {
-        "path": str(fpath).replace("\\", "/"),
+        "path": to_relative_storage_path(fpath),
         "asset_url": asset_url,
         "filename": file.filename,
     }

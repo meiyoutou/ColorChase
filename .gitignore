@@ -3,6 +3,7 @@ start.bat
 user_config.json
 .env
 生产环境密钥.md
+*密钥*.md
 
 # Databases and backups
 colorchase.db
@@ -75,3 +76,5 @@ tmp_uvicorn_*.err
 *.bak
 *.bak_*
 backups/
+scripts/services/build_agent/
+scripts/services/dist_agent/

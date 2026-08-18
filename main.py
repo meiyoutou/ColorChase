@@ -123,6 +123,7 @@ from app.services.paths import (
     cleanup_runtime_user_temp,
     cleanup_temp_luts,
     cleanup_misc_temp,
+    to_relative_storage_path,
 )
 from app.services.task_logging import create_task_log_writer
 from app.routes.training import create_training_router
@@ -976,7 +977,7 @@ async def api_upload_batch(
         results.append({
             "id": uid,
             "name": file.filename,
-            "path": str(save_path),
+            "path": to_relative_storage_path(save_path),
             "asset_url": asset_url,
             "thumbnail": thumb_url,
             "project_saved": bool(is_admin and project_id > 0),

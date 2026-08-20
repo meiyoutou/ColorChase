@@ -1,30 +1,76 @@
 /* ===== 双模式存储工具函数（由部署脚本注入） ===== */
 var LOCAL_AGENT_URL = 'http://localhost:9123';
+// Agent 协议版本门槛：低于此版本的 Agent（含没有 protocol_version 字段的旧版）一律视为不可用，
+// 强制用户重新下载新版 Agent，不再对旧协议做兼容处理。
+var MIN_AGENT_PROTOCOL_VERSION = 2;
 
 // 浏览器能力检测：是否支持 File System Access API
 function supportsFileSystemAccess() {
     return typeof window.showDirectoryPicker === 'function';
 }
 
-// 获取当前存储模式：'fsa'（浏览器原生）| 'agent'（本地代理）| 'none'（不可用）
-async function getStorageMode() {
-    if (supportsFileSystemAccess()) return 'fsa';
+// 探测本地 Agent 健康状态与协议版本，返回 {online, outdated, info}
+async function probeLocalAgent() {
     try {
         var resp = await fetch(LOCAL_AGENT_URL + '/health', { method: 'GET' });
-        if (resp.ok) return 'agent';
-    } catch (e) {}
+        if (!resp.ok) return { online: false, outdated: false, info: null };
+        var info = await resp.json();
+        var protocolVersion = Number(info && info.protocol_version);
+        var outdated = !info || !info.ok || !(protocolVersion >= MIN_AGENT_PROTOCOL_VERSION);
+        return { online: true, outdated: outdated, info: info };
+    } catch (e) {
+        return { online: false, outdated: false, info: null };
+    }
+}
+
+// 获取当前存储模式：'fsa'（浏览器原生）| 'agent'（本地代理）| 'agent_outdated'（需升级）| 'none'（不可用）
+async function getStorageMode() {
+    if (supportsFileSystemAccess()) return 'fsa';
+    var probe = await probeLocalAgent();
+    if (probe.online && probe.outdated) return 'agent_outdated';
+    if (probe.online) return 'agent';
     return 'none';
 }
 
-// 同步检测本地代理是否在线（兼容旧调用）
+// 同步检测本地代理是否在线且协议版本达标（兼容旧调用）
 function isLocalAgentOnline() {
-    return fetch(LOCAL_AGENT_URL + '/health', { method: 'GET' })
-        .then(function(resp) { return resp.ok; })
-        .catch(function() { return false; });
+    return probeLocalAgent().then(function(probe) { return probe.online && !probe.outdated; });
 }
 
 // 获取认证 token
 function getAuthToken() { return localStorage.getItem('cc_token') || ''; }
+
+// ===== ColorChaseAgent 下载（按操作系统/架构选择 Release 资产） =====
+var AGENT_RELEASE_BASE = 'https://github.com/meiyoutou/ColorChase/releases/download/agent-v2.0.1/';
+
+function getAgentDownloadUrl() {
+    var ua = navigator.userAgent || '';
+    var platform = navigator.platform || '';
+    if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) {
+        // 区分 Apple 芯片与 Intel：浏览器 UA 不直接暴露 arm64，
+        // 优先用 userAgentData；不可判定时默认 Apple 芯片（2020 后新机主流），
+        // 页面上同时给出另一架构的直链供用户自行选择。
+        return AGENT_RELEASE_BASE + 'ColorChaseAgent-macos-arm64.zip';
+    }
+    // Windows 与其它平台默认给 Windows 包（Linux 用户属于开发场景，走文档）
+    return AGENT_RELEASE_BASE + 'ColorChaseAgent-windows-x64.exe';
+}
+
+function openAgentDownload() {
+    var ua = navigator.userAgent || '';
+    var platform = navigator.platform || '';
+    var isMac = /Mac/i.test(platform) || /Macintosh/i.test(ua);
+    if (isMac) {
+        // Mac 无法可靠探测 CPU 架构，弹出双选项让用户明确选择
+        var pick = window.confirm(
+            '检测到 macOS。\n\n点击“确定”下载 Apple 芯片版（M1/M2/M3/M4）；\n点击“取消”下载 Intel 芯片版。\n\n不确定芯片类型：点左上角苹果菜单→“关于本机”查看。'
+        );
+        var asset = pick ? 'ColorChaseAgent-macos-arm64.zip' : 'ColorChaseAgent-macos-x64.zip';
+        window.open(AGENT_RELEASE_BASE + asset, '_blank');
+        return;
+    }
+    window.open(AGENT_RELEASE_BASE + 'ColorChaseAgent-windows-x64.exe', '_blank');
+}
 
 // ===== 存储位置提醒 =====
 function _storageNoticeKey() {
@@ -49,7 +95,7 @@ function _getStorageNoticeConfig() {
             title: '存储提醒',
             body: '管理员用户数据当前保存到服务器地址目录，请尽快通过在 Firefox 上配置运行 ColorChaseAgent.exe 选择本地保存位置。',
             actionLabel: '下载 ColorChaseAgent',
-            action: function() { window.open('./static/download/ColorChaseAgent.exe', '_blank'); }
+            action: function() { openAgentDownload(); }
         };
     }
     if (supportsFSA) {
@@ -64,7 +110,7 @@ function _getStorageNoticeConfig() {
         title: '存储提醒',
         body: '普通用户数据当前仅保存到临时目录，请尽快通过在 Firefox 上配置运行 ColorChaseAgent.exe 选择本地保存位置；未选择时服务器 24h 后自动清理。',
         actionLabel: '下载 ColorChaseAgent',
-        action: function() { window.open('./static/download/ColorChaseAgent.exe', '_blank'); }
+        action: function() { openAgentDownload(); }
     };
 }
 
@@ -913,7 +959,7 @@ function showAgentDownloadPrompt() {
     document.body.appendChild(overlay);
     var btn = document.getElementById('agent-download-btn');
     if (btn) btn.addEventListener('click', function() {
-        window.open('./static/download/ColorChaseAgent.exe', '_blank');
+        openAgentDownload();
     });
     var closeBtn = document.getElementById('agent-download-close');
     if (closeBtn) closeBtn.addEventListener('click', function() {
@@ -941,7 +987,7 @@ function isCurrentUserSuperAdmin() {
 
 // 异步版下载提示弹窗：管理员可以跳过继续操作，普通用户只能下载/关闭
 // 返回 Promise<boolean>：true=跳过继续，false=不继续
-function showAgentDownloadPromptAsync(isAdmin) {
+function showAgentDownloadPromptAsync(isAdmin, outdated) {
     return new Promise(function(resolve) {
         var existing = document.getElementById('agent-download-overlay-async');
         if (existing) {
@@ -955,13 +1001,21 @@ function showAgentDownloadPromptAsync(isAdmin) {
         var overlay = document.createElement('div');
         overlay.id = 'agent-download-overlay-async';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
-        var skipBtnHtml = isAdmin
+        // \u65E7\u534F\u8BAE Agent \u5F3A\u5236\u5347\u7EA7\uFF1A\u65E0\u8BBA\u7BA1\u7406\u5458\u4E0E\u5426\u90FD\u4E0D\u5141\u8BB8\u8DF3\u8FC7\uFF0C\u5FC5\u987B\u5148\u5347\u7EA7
+        var skipBtnHtml = (isAdmin && !outdated)
             ? '<button id="agent-skip-btn" style="background:#2980b9;color:#fff;border:none;padding:12px 28px;border-radius:6px;font-size:15px;cursor:pointer;margin-right:12px;">\u8DF3\u8FC7\uFF0C\u7EE7\u7EED\u64CD\u4F5C</button>'
             : '';
-        var titleText = isAdmin ? '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8\uFF08\u7BA1\u7406\u5458\u53EF\u8DF3\u8FC7\uFF09' : '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8';
-        var warnText = isAdmin
-            ? '<p style="color:#333;font-size:14px;line-height:1.6;margin:0 0 20px;">\u60A8\u662F\u7BA1\u7406\u5458\uFF0C\u53EF\u4EE5\u8DF3\u8FC7\u6B64\u63D0\u793A\u7EE7\u7EED\u64CD\u4F5C\u3002\u8DF3\u8FC7\u540E\u5BFC\u51FA\u6587\u4EF6\u5C06\u901A\u8FC7\u6D4F\u89C8\u5668\u76F4\u63A5\u4E0B\u8F7D\uFF0C\u9879\u76EE\u6570\u636E\u4FDD\u5B58\u5728\u4E91\u670D\u52A1\u5668\u4E2D\u3002</p>'
-            : '<p style="color:#c0392b;font-size:14px;line-height:1.6;margin:0 0 20px;font-weight:bold;">\u26A0\uFE0F \u82E5\u4E0D\u5B89\u88C5\u672C\u5730\u4EE3\u7406\uFF0C\u60A8\u7684\u9879\u76EE\u6570\u636E\u5C06\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u5668\uFF0C\u5B58\u5728\u6570\u636E\u6CC4\u9732\u98CE\u9669\uFF01</p>';
+        var titleText = outdated
+            ? '\u672C\u5730\u4EE3\u7406\u7248\u672C\u8FC7\u65E7\uFF0C\u9700\u8981\u5347\u7EA7'
+            : (isAdmin ? '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8\uFF08\u7BA1\u7406\u5458\u53EF\u8DF3\u8FC7\uFF09' : '\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u672C\u5730\u5B58\u50A8');
+        var warnText;
+        if (outdated) {
+            warnText = '<p style="color:#c0392b;font-size:14px;line-height:1.6;margin:0 0 20px;font-weight:bold;">\u26A0\uFE0F \u68C0\u6D4B\u5230\u5DF2\u5B89\u88C5\u7684 ColorChaseAgent \u7248\u672C\u8FC7\u65E7\uFF0C\u65E7\u7248\u5DF2\u505C\u6B62\u670D\u52A1\uFF0C\u8BF7\u4E0B\u8F7D\u5E76\u91CD\u65B0\u5B89\u88C5\u6700\u65B0\u7248\u672C\u3002</p>';
+        } else {
+            warnText = isAdmin
+                ? '<p style="color:#333;font-size:14px;line-height:1.6;margin:0 0 20px;">\u60A8\u662F\u7BA1\u7406\u5458\uFF0C\u53EF\u4EE5\u8DF3\u8FC7\u6B64\u63D0\u793A\u7EE7\u7EED\u64CD\u4F5C\u3002\u8DF3\u8FC7\u540E\u5BFC\u51FA\u6587\u4EF6\u5C06\u901A\u8FC7\u6D4F\u89C8\u5668\u76F4\u63A5\u4E0B\u8F7D\uFF0C\u9879\u76EE\u6570\u636E\u4FDD\u5B58\u5728\u4E91\u670D\u52A1\u5668\u4E2D\u3002</p>'
+                : '<p style="color:#c0392b;font-size:14px;line-height:1.6;margin:0 0 20px;font-weight:bold;">\u26A0\uFE0F \u82E5\u4E0D\u5B89\u88C5\u672C\u5730\u4EE3\u7406\uFF0C\u60A8\u7684\u9879\u76EE\u6570\u636E\u5C06\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u5668\uFF0C\u5B58\u5728\u6570\u636E\u6CC4\u9732\u98CE\u9669\uFF01</p>';
+        }
         overlay.innerHTML =
             '<div style="background:#fff;border-radius:12px;padding:32px;max-width:540px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);">' +
             '<div style="font-size:48px;margin-bottom:16px;">\u26A0\uFE0F</div>' +
@@ -973,6 +1027,11 @@ function showAgentDownloadPromptAsync(isAdmin) {
             '<p style="margin:0 0 6px;font-size:13px;color:#555;">1. \u6362\u7528 <b>Chrome</b> \u6216 <b>Edge</b> \u6D4F\u89C8\u5668\uFF08\u63A8\u8350\uFF0C\u96F6\u5B89\u88C5\uFF09</p>' +
             '<p style="margin:0;font-size:13px;color:#555;">2. \u4E0B\u8F7D\u5E76\u8FD0\u884C <b>ColorChaseAgent</b> \u672C\u5730\u4EE3\u7406</p>' +
             '</div>' +
+            '<div style="background:#fffaf0;border:1px solid #f0d9a8;border-radius:8px;padding:14px 16px;margin:0 0 20px;text-align:left;">' +
+            '<p style="margin:0 0 8px;font-size:13px;color:#8a6d3b;"><b>\u26A0\uFE0F ColorChaseAgent \u5C1A\u672A\u7533\u8BF7\u4EE3\u7801\u7B7E\u540D\u8BC1\u4E66\uFF0C\u9996\u6B21\u8FD0\u884C\u65F6\u53EF\u80FD\u4F1A\u88AB\u7CFB\u7EDF\u62E6\u622A\uFF0C\u8FD9\u4E0D\u8868\u793A\u8F6F\u4EF6\u6709\u95EE\u9898\uFF1A</b></p>' +
+            '<p style="margin:0 0 4px;font-size:12px;color:#8a6d3b;">Windows\uFF1A\u770B\u5230\u201C Windows \u5DF2\u4FDD\u62A4\u60A8\u7684\u7535\u8111 \u201D \u65F6\uFF0C\u70B9\u51FB\u201C\u66F4\u591A\u4FE1\u606F\u201D \u2192 \u201C\u4ECD\u8981\u8FD0\u884C\u201D \u5373\u53EF\u3002</p>' +
+            '<p style="margin:0;font-size:12px;color:#8a6d3b;">macOS\uFF1A\u82E5\u63D0\u793A\u201C\u5DF2\u635F\u574F\u6216\u6765\u81EA\u8EAB\u4EFD\u4E0D\u660E\u7684\u5F00\u53D1\u8005\u201D\uFF0C\u8BF7\u5728\u201C\u7CFB\u7EDF\u8BBE\u7F6E \u2192 \u9690\u79C1\u4E0E\u5B89\u5168\u6027\u201D\u4E2D\u5141\u8BB8\u8FD0\u884C\uFF0C\u6216\u53F3\u952E\u70B9\u51FB\u5E94\u7528\u9009\u62E9\u201C\u6253\u5F00\u201D\u3002</p>' +
+            '</div>' +
             '<div style="display:flex;justify-content:center;flex-wrap:wrap;">' +
             skipBtnHtml +
             '<button id="agent-download-btn-async" style="background:#27ae60;color:#fff;border:none;padding:12px 32px;border-radius:6px;font-size:16px;cursor:pointer;margin-right:12px;">\u4E0B\u8F7D ColorChaseAgent</button>' +
@@ -982,7 +1041,7 @@ function showAgentDownloadPromptAsync(isAdmin) {
         document.body.appendChild(overlay);
         var dlBtn = document.getElementById('agent-download-btn-async');
         if (dlBtn) dlBtn.addEventListener('click', function() {
-            window.open('./static/download/ColorChaseAgent.exe', '_blank');
+            openAgentDownload();
         });
         var closeBtn = document.getElementById('agent-close-btn');
         if (closeBtn) closeBtn.addEventListener('click', function() {
@@ -997,12 +1056,16 @@ function showAgentDownloadPromptAsync(isAdmin) {
     });
 }
 
-// 操作前检查存储模式：管理员 none 可跳过，普通用户 none 拦截
+// 操作前检查存储模式：管理员 none 可跳过，普通用户 none 拦截；agent_outdated 强制升级不可跳过
 async function ensureStorageReady() {
     var mode = await getStorageMode();
+    if (mode === 'agent_outdated') {
+        await showAgentDownloadPromptAsync(false, true);
+        return false;
+    }
     if (mode === 'none') {
         var isAdmin = isCurrentUserAdmin();
-        var skip = await showAgentDownloadPromptAsync(isAdmin);
+        var skip = await showAgentDownloadPromptAsync(isAdmin, false);
         if (!skip) return false;
         // 管理员跳过，继续操作
         return true;

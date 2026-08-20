@@ -22,6 +22,8 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 UPLOAD_LIMIT_PATHS = {
     "/api/upload_batch",
     "/api/train/upload",
+    "/api/training/upload",
+    "/api/detection/upload",
     "/api/prepare_lr_preset",
     "/api/apply_profile",
     "/api/apply_style",
@@ -56,6 +58,8 @@ UPLOAD_RATE_LIMIT_PATHS = UPLOAD_LIMIT_PATHS | VIDEO_UPLOAD_LIMIT_PATHS
 IMAGE_ORIGINAL_UPLOAD_LIMIT_PATHS = {
     "/api/upload_batch",
     "/api/train/upload",
+    "/api/training/upload",
+    "/api/detection/upload",
     "/api/transfer",
     "/api/video_transfer",
     "/api/export_video",

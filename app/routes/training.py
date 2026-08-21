@@ -11,10 +11,13 @@ from typing import List, Optional
 
 import numpy as np
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.security import DEFAULT_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES, ensure_upload_file_size, get_upload_file_size
+from app.services import storage_quota as storage_quota_svc
 from app.services.paths import (
     _is_admin_request,
     _is_super_admin_request,
@@ -25,6 +28,7 @@ from app.services.user_identity import resolve_user_storage_label
 from app.settings import int_env
 from config import get_training_corpus_dir
 from core.io.loaders.universal_loader import RAW_EXTS, is_supported, load_image_bgr
+from database import get_db
 
 
 def _append_upload_index(training_path: Path, records: list):
@@ -246,6 +250,7 @@ def create_training_router(
         file: UploadFile = File(...),
         file_uuid: str = Form(""),
         authorization: Optional[str] = Header(None),
+        db: AsyncSession = Depends(get_db),
     ):
         """用户上传原图时自动保存一份检测库副本，按用户邮箱隔离，持久化保存。"""
         request_user_id = get_request_user_id(authorization)
@@ -256,7 +261,6 @@ def create_training_router(
         detection_dir = _user_assets_root_for_label(storage_label) / "detection"
         safe_uuid = _safe_filename(str(file_uuid or uuid.uuid4().hex))
         target_dir = detection_dir / safe_uuid
-        target_dir.mkdir(parents=True, exist_ok=True)
 
         ext = Path(file.filename or "").suffix.lower() or ".jpg"
         save_path = target_dir / f"original{ext}"
@@ -267,8 +271,84 @@ def create_training_router(
         )
         ensure_upload_file_size(file, max_bytes, label="检测库原图")
         content = await file.read()
-        with open(save_path, "wb") as f:
-            f.write(content)
+
+        # 配额未启用（默认）：走原路径，零行为改变。
+        if not storage_quota_svc.is_quota_enabled():
+            target_dir.mkdir(parents=True, exist_ok=True)
+            with open(save_path, "wb") as f:
+                f.write(content)
+            return JSONResponse({
+                "success": True,
+                "file_uuid": safe_uuid,
+                "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
+            })
+
+        # ---- 配额启用：按覆盖前后净差额一次结算，staging+replace 原子写入 ----
+        old_size = save_path.stat().st_size if save_path.exists() else 0
+        net_delta = len(content) - old_size
+        reservation_id = None
+        force = not storage_quota_svc.is_dry_run()
+
+        if net_delta > 0:
+            try:
+                outcome = await storage_quota_svc.reserve_quota(
+                    db,  # 真实 AsyncSession
+                    user_id=request_user_id,
+                    role=None,
+                    storage_label=storage_label,
+                    kind="detection",
+                    sample_key=safe_uuid,
+                    incoming_bytes=net_delta,
+                )
+                reservation_id = outcome.reservation_id
+                if not outcome.allowed:
+                    # 强制模式且配额足够却仍被拒（如 DB fail-closed）
+                    return JSONResponse(
+                        status_code=503,
+                        content={"error": "storage quota unavailable", "detail": "quota check failed"},
+                    )
+                if outcome.would_deny:
+                    # dry-run：不拒绝，仅统计
+                    pass
+            except Exception:
+                if force:
+                    return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
+                # dry-run fail-open：放行
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        staging = target_dir / (save_path.name + ".staging")
+        try:
+            with open(staging, "wb") as f:
+                f.write(content)
+            os.replace(staging, save_path)  # 原子替换
+        except Exception:
+            try:
+                if staging.exists():
+                    staging.unlink()
+            except OSError:
+                pass
+            if not force:
+                # dry-run 尽管放行，但写盘失败仍不做预留结算
+                pass
+            if reservation_id:
+                try:
+                    await storage_quota_svc.release_reservation(
+                        db, reservation_id=reservation_id,
+                        user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                    )
+                except Exception:
+                    pass
+            raise
+
+        if reservation_id:
+            try:
+                await storage_quota_svc.settle_quota(
+                    db, reservation_id=reservation_id,
+                    delta_bytes=net_delta, user_id=request_user_id,
+                    kind="detection", sample_key=safe_uuid,
+                )
+            except Exception:
+                pass
 
         return JSONResponse({
             "success": True,
@@ -286,6 +366,7 @@ def create_training_router(
         sample_uuid: str = Form(""),
         is_video: str = Form("0"),
         authorization: Optional[str] = Header(None),
+        db: AsyncSession = Depends(get_db),
     ):
         """追色结果自动入库，所有登录用户导出时都可保存训练样本，按用户邮箱隔离。"""
         request_user_id = get_request_user_id(authorization)
@@ -295,7 +376,6 @@ def create_training_router(
         storage_label = await resolve_user_storage_label(request_user_id)
         safe_uuid = _safe_filename(str(sample_uuid or uuid.uuid4().hex))
         sample_dir = _training_corpus_dir_for_label(storage_label) / safe_uuid
-        sample_dir.mkdir(parents=True, exist_ok=True)
 
         max_bytes = int_env(
             "COLORCHASE_IMAGE_ORIGINAL_UPLOAD_MAX_BYTES",
@@ -312,6 +392,49 @@ def create_training_router(
         if lut is not None:
             files_map["lut"] = lut
 
+        # 配额未启用（默认）：走原有写入路径，零行为改变。
+        if not storage_quota_svc.is_quota_enabled():
+            sample_dir.mkdir(parents=True, exist_ok=True)
+            for key, upload_file in files_map.items():
+                if upload_file is None or not upload_file.filename:
+                    continue
+                ext = Path(upload_file.filename).suffix.lower() or ".jpg"
+                if key == "lut":
+                    ext = ".cube"
+                save_path = sample_dir / f"{key}{ext}"
+                ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
+                content = await upload_file.read()
+                with open(save_path, "wb") as f:
+                    f.write(content)
+                saved[key] = str(save_path.name)
+
+            meta_path = sample_dir / "meta.json"
+            try:
+                meta_obj = json.loads(meta) if meta else {}
+            except (ValueError, TypeError):
+                meta_obj = {}
+            if not isinstance(meta_obj, dict):
+                meta_obj = {}
+            meta_obj.update({
+                "sample_uuid": safe_uuid,
+                "user_id": request_user_id,
+                "storage_label": storage_label,
+                "is_video": is_video == "1" or is_video.lower() == "true",
+                "saved_files": saved,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            })
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+
+            return JSONResponse({
+                "success": True,
+                "sample_uuid": safe_uuid,
+                "saved_files": saved,
+            })
+
+        # ---- 配额启用：累计净新增一次 reserve，staging+replace 原子写入，成功后 settle ----
+        contents = {}  # key -> (save_path, bytes)
+        total_new_bytes = 0
         for key, upload_file in files_map.items():
             if upload_file is None or not upload_file.filename:
                 continue
@@ -319,35 +442,131 @@ def create_training_router(
             if key == "lut":
                 ext = ".cube"
             save_path = sample_dir / f"{key}{ext}"
+            old_size = save_path.stat().st_size if save_path.exists() else 0
             ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
-            content = await upload_file.read()
-            with open(save_path, "wb") as f:
-                f.write(content)
-            saved[key] = str(save_path.name)
+            blob = await upload_file.read()
+            contents[key] = (save_path, blob)
+            net = len(blob) - old_size
+            if net > 0:
+                total_new_bytes += net
 
-        meta_path = sample_dir / "meta.json"
+        reservation_id = None
+        force = not storage_quota_svc.is_dry_run()
+        if total_new_bytes > 0:
+            try:
+                outcome = await storage_quota_svc.reserve_quota(
+                    db, user_id=request_user_id, role=None,
+                    storage_label=storage_label, kind="training",
+                    sample_key=safe_uuid, incoming_bytes=total_new_bytes,
+                )
+                reservation_id = outcome.reservation_id
+                if not outcome.allowed:
+                    return JSONResponse(status_code=503,
+                                        content={"error": "storage quota unavailable", "detail": "quota check failed"})
+            except Exception:
+                if force:
+                    return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
+                # dry-run fail-open：放行
+
+        sample_dir.mkdir(parents=True, exist_ok=True)
         try:
-            meta_obj = json.loads(meta) if meta else {}
-        except (ValueError, TypeError):
-            meta_obj = {}
-        if not isinstance(meta_obj, dict):
-            meta_obj = {}
-        meta_obj.update({
-            "sample_uuid": safe_uuid,
-            "user_id": request_user_id,
-            "storage_label": storage_label,
-            "is_video": is_video == "1" or is_video.lower() == "true",
-            "saved_files": saved,
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-        })
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+            for key, (save_path, blob) in contents.items():
+                staging = save_path.with_name(save_path.name + ".staging")
+                with open(staging, "wb") as f:
+                    f.write(blob)
+                os.replace(staging, save_path)
+                saved[key] = str(save_path.name)
+
+            meta_path = sample_dir / "meta.json"
+            try:
+                meta_obj = json.loads(meta) if meta else {}
+            except (ValueError, TypeError):
+                meta_obj = {}
+            if not isinstance(meta_obj, dict):
+                meta_obj = {}
+            meta_obj.update({
+                "sample_uuid": safe_uuid,
+                "user_id": request_user_id,
+                "storage_label": storage_label,
+                "is_video": is_video == "1" or is_video.lower() == "true",
+                "saved_files": saved,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            })
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+        except Exception:
+            # 清理临时文件并释放预留
+            for key, (save_path, _blob) in contents.items():
+                try:
+                    if save_path.with_name(save_path.name + ".staging").exists():
+                        save_path.with_name(save_path.name + ".staging").unlink()
+                except OSError:
+                    pass
+            if reservation_id:
+                try:
+                    await storage_quota_svc.release_reservation(
+                        db, reservation_id=reservation_id, user_id=request_user_id,
+                        kind="training", sample_key=safe_uuid,
+                    )
+                except Exception:
+                    pass
+            raise
+
+        if reservation_id:
+            try:
+                await storage_quota_svc.settle_quota(
+                    db, reservation_id=reservation_id, delta_bytes=total_new_bytes,
+                    user_id=request_user_id, kind="training", sample_key=safe_uuid,
+                )
+            except Exception:
+                pass
 
         return JSONResponse({
             "success": True,
             "sample_uuid": safe_uuid,
             "saved_files": saved,
         })
+
+    @router.get("/api/storage/quota")
+    async def api_storage_quota(
+        authorization: Optional[str] = Header(None),
+        db: AsyncSession = Depends(get_db),
+    ):
+        """用户自查当前存储用量与配额。返回 user_id / 按 kind 用量 / 配额 / 开关状态。"""
+        request_user_id = get_request_user_id(authorization)
+        if request_user_id is None:
+            raise HTTPException(status_code=401, detail="请先登录")
+
+        from app.services import storage_quota as sq
+        from app.settings import STORAGE_QUOTA_DRY_RUN, STORAGE_QUOTA_ENABLED
+        from models import UserStorageQuota
+
+        result = await db.execute(
+            select(UserStorageQuota).where(UserStorageQuota.user_id == request_user_id)
+        )
+        rows = result.scalars().all()
+        details = []
+        for q in rows:
+            quota_bytes = (
+                (int(q.quota_mb or 0) * 1024 * 1024)
+                if q.quota_mb is not None
+                else sq.default_quota_bytes(str(q.kind))
+            )
+            details.append({
+                "kind": q.kind,
+                "used_mb": int(q.used_bytes or 0) // (1024 * 1024),
+                "reserved_mb": int(q.reserved_bytes or 0) // (1024 * 1024),
+                "quota_mb": q.quota_mb,
+                "reconciled_at": str(q.reconciled_at) if q.reconciled_at else None,
+            })
+
+        return {
+            "success": True,
+            "user_id": request_user_id,
+            "enabled": bool(STORAGE_QUOTA_ENABLED),
+            "dry_run": bool(STORAGE_QUOTA_DRY_RUN),
+            "quota": details,
+        }
 
     @router.get("/api/train/samples")
     async def api_train_samples(

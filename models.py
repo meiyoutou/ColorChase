@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import LONGTEXT
 from database import Base
 
@@ -42,3 +42,63 @@ class Asset(Base):
     project_id = Column(Integer, ForeignKey("projects.id"))
     file_name = Column(String(512))
     rating = Column(Integer, default=0)
+
+
+class UserStorageQuota(Base):
+    """按用户 / 按库种类的配额与用量核算。
+
+    行不存在 = 使用环境变量默认配额。本行由 init_db/create_all 幂等创建，
+    无论开关是否启用，建表本身无害。
+    """
+
+    __tablename__ = "user_storage_quotas"
+    __table_args__ = (
+        Index("ux_quota_user_kind", "user_id", "kind", unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    kind = Column(String(32), nullable=False)  # "training" | "detection"
+    quota_mb = Column(Integer, nullable=True)  # NULL=用环境变量默认；管理员可覆盖
+    used_bytes = Column(BigInteger, nullable=False, default=0)
+    reserved_bytes = Column(BigInteger, nullable=False, default=0)
+    reconciled_at = Column(DateTime, nullable=True)
+    would_deny_count = Column(Integer, nullable=False, default=0)
+    denied_count = Column(Integer, nullable=False, default=0)
+    last_would_deny_at = Column(DateTime, nullable=True)
+    last_denied_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class StorageQuotaReservation(Base):
+    """配额预留明细，reservation_id 幂等 settle/release，用于并发与结算对账。"""
+
+    __tablename__ = "storage_quota_reservations"
+    __table_args__ = (
+        Index("ix_reservation_user_kind_sample", "user_id", "kind", "sample_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reservation_id = Column(String(64), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    kind = Column(String(32), nullable=False)
+    sample_key = Column(String(256), nullable=False)
+    status = Column(String(16), nullable=False, default="reserved")  # reserved|settled|released
+    requested_bytes = Column(BigInteger, nullable=False, default=0)
+    occupied_bytes = Column(BigInteger, nullable=False, default=0)
+    settled_bytes = Column(BigInteger, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    settled_at = Column(DateTime, nullable=True)
+    released_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+
+
+class StorageQuotaLock(Base):
+    """GET_LOCK 辅助节点：同一 user/kind/sample_key 串行化（上传与清理共用）。"""
+
+    __tablename__ = "storage_quota_locks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lock_key = Column(String(512), unique=True, nullable=False)
+    holder = Column(String(128), nullable=True)
+    acquired_at = Column(DateTime, server_default=func.now())

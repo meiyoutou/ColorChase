@@ -43,7 +43,7 @@ from config import (
     get_neuralpreset_weight_status,
 )
 from database import get_db
-from models import Asset, Project, User
+from models import Asset, Project, User, UserStorageQuota
 from progress import progress_manager
 router = APIRouter()
 
@@ -1083,6 +1083,73 @@ async def admin_overview(
     return await _collect_overview(db)
 
 
+@router.get("/storage_stats")
+async def admin_storage_stats(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """存储配额总览：总用量、按 kind、top10、would_exceed/denied、reserved、开关状态。
+
+    只返回 user_id / storage_label 摘要，不返回完整文件路径。
+    """
+    from app.services import storage_quota as sq
+    from app.settings import (
+        STORAGE_QUOTA_DRY_RUN,
+        STORAGE_QUOTA_ENABLED,
+        TRAINING_RETENTION_DAYS,
+    )
+
+    quotas = (await db.execute(select(UserStorageQuota))).scalars().all()
+
+    user_labels = {}
+    users = (await db.execute(select(User.id, User.storage_label))).all()
+    for uid, label in users:
+        user_labels[int(uid)] = label or ""
+
+    totals = {}
+    reserved = {}
+    would_exceed_users = set()
+    denied_users = set()
+    by_user = []
+
+    for q in quotas:
+        kind = str(q.kind or "")
+        totals[kind] = totals.get(kind, 0) + int(q.used_bytes or 0)
+        reserved[kind] = reserved.get(kind, 0) + int(q.reserved_bytes or 0)
+        quota_bytes = (int(q.quota_mb or 0) * 1024 * 1024) if q.quota_mb is not None else sq.default_quota_bytes(kind)
+        if int(q.used_bytes or 0) > quota_bytes:
+            would_exceed_users.add(q.user_id)
+        if int(q.denied_count or 0) > 0:
+            denied_users.add(q.user_id)
+        by_user.append({
+            "user_id": q.user_id,
+            "storage_label": user_labels.get(int(q.user_id), ""),
+            "kind": kind,
+            "used_mb": int(q.used_bytes or 0) // (1024 * 1024),
+            "reserved_mb": int(q.reserved_bytes or 0) // (1024 * 1024),
+            "quota_mb": q.quota_mb,
+            "reconciled_at": str(q.reconciled_at) if q.reconciled_at else None,
+            "would_deny_count": int(q.would_deny_count or 0),
+            "denied_count": int(q.denied_count or 0),
+        })
+
+    top = sorted(by_user, key=lambda item: item["used_mb"], reverse=True)[:10]
+
+    return {
+        "success": True,
+        "enabled": bool(STORAGE_QUOTA_ENABLED),
+        "dry_run": bool(STORAGE_QUOTA_DRY_RUN),
+        "retention_days": int(TRAINING_RETENTION_DAYS or 0),
+        "default_quota_mb": {k: sq.default_quota_bytes(k) // (1024 * 1024) for k in ("training", "detection")},
+        "total_training_mb": totals.get("training", 0) // (1024 * 1024),
+        "total_detection_mb": totals.get("detection", 0) // (1024 * 1024),
+        "reserved_mb": {k: v // (1024 * 1024) for k, v in reserved.items()},
+        "would_exceed_user_count": len(would_exceed_users),
+        "denied_user_count": len(denied_users),
+        "top_users": top,
+    }
+
+
 @router.get("/dashboard")
 async def admin_dashboard(
     _admin: User = Depends(require_admin),
@@ -1385,8 +1452,7 @@ async def admin_task_logs(
     users = (await db.execute(select(User))).scalars().all()
     user_map = {}
     for user in users:
-        for key in _user_lookup_keys(user):
-            user_map[key] = user
+        user_map[user.id] = user
 
     logs = [
         _standardize_admin_log_entry(entry, user_map, live_resource_snapshot)

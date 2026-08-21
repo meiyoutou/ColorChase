@@ -31,6 +31,16 @@ from core.io.loaders.universal_loader import RAW_EXTS, is_supported, load_image_
 from database import get_db
 
 
+def _quota_error_response(outcome) -> JSONResponse:
+    """根据 reserve 结果映射 HTTP 状态：quota_exceeded=413，其余(503)。"""
+    status = 413 if getattr(outcome, "reason", None) == "quota_exceeded" else 503
+    return JSONResponse(
+        status_code=status,
+        content={"error": "storage quota unavailable",
+                 "detail": getattr(outcome, "reason", None) or "quota check failed"},
+    )
+
+
 def _append_upload_index(training_path: Path, records: list):
     """把上传记录追加到 training_path/upload_index.json
     结构: {"samples": [{file, original_name, relative_path, group, uploaded_at}, ...]}
@@ -301,21 +311,20 @@ def create_training_router(
                         db, user_id=request_user_id, role=None,
                         storage_label=storage_label, kind="detection",
                         sample_key=safe_uuid, incoming_bytes=max(net_delta, 0),
+                        lock_token=lock_token,
                     )
                     reservation_id = outcome.reservation_id
                     if not outcome.allowed:
-                        return JSONResponse(
-                            status_code=503,
-                            content={"error": "storage quota unavailable",
-                                     "detail": outcome.reason or "quota check failed"},
-                        )
+                        return _quota_error_response(outcome)
                 except Exception:
+                    import logging
+
+                    logging.getLogger("quota").warning("quota reserve failed (detection)", exc_info=True)
                     if force:
                         return JSONResponse(status_code=503,
                                             content={"error": "storage quota unavailable"})
-                    return JSONResponse(status_code=200,
-                                        content={"success": True, "file_uuid": safe_uuid,
-                                                 "saved_path": str(save_path)})
+                    # dry-run fail-open：继续真实写入，稍后 record_usage(actual_delta)
+                    pass
 
             target_dir.mkdir(parents=True, exist_ok=True)
             staging = target_dir / (save_path.name + ".staging")
@@ -346,15 +355,24 @@ def create_training_router(
                         delta_bytes=net_delta, user_id=request_user_id,
                         kind="detection", sample_key=safe_uuid,
                     )
-                except Exception:
-                    pass
-            elif net_delta != 0 and storage_quota_svc.is_dry_run():
+                except Exception as exc:
+                    import logging
+
+                    logging.getLogger("quota").error(
+                        "settle_quota failed (detection) user=%s", request_user_id, exc_info=True
+                    )
+            elif net_delta != 0:
+                # dry-run / 管理员：写盘成功后按真实净差额记账
                 try:
                     await storage_quota_svc.record_usage(
                         db, user_id=request_user_id, kind="detection", delta_bytes=net_delta,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    import logging
+
+                    logging.getLogger("quota").warning(
+                        "record_usage failed (detection) user=%s", request_user_id, exc_info=True
+                    )
         finally:
             await lock_token.release()
 
@@ -484,18 +502,19 @@ def create_training_router(
                         db, user_id=request_user_id, role=None,
                         storage_label=storage_label, kind="training",
                         sample_key=safe_uuid, incoming_bytes=max(total_net, 0),
+                        lock_token=lock_token,
                     )
                     reservation_id = outcome.reservation_id
                     if not outcome.allowed:
-                        return JSONResponse(status_code=503,
-                                            content={"error": "storage quota unavailable",
-                                                     "detail": outcome.reason or "quota check failed"})
+                        return _quota_error_response(outcome)
                 except Exception:
+                    import logging
+
+                    logging.getLogger("quota").warning("quota reserve failed (training)", exc_info=True)
                     if force:
                         return JSONResponse(status_code=503,
                                             content={"error": "storage quota unavailable"})
-                    return JSONResponse(status_code=200,
-                                        content={"success": True, "sample_uuid": safe_uuid, "saved_files": {}})
+                    pass
 
             sample_dir.mkdir(parents=True, exist_ok=True)
             try:
@@ -540,10 +559,33 @@ def create_training_router(
                     "saved_files": saved,
                     "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 })
+                meta_path = sample_dir / "meta.json"
+                try:
+                    meta_obj = json.loads(meta) if meta else {}
+                except (ValueError, TypeError):
+                    meta_obj = {}
+                if not isinstance(meta_obj, dict):
+                    meta_obj = {}
+                meta_obj.update({
+                    "sample_uuid": safe_uuid,
+                    "user_id": request_user_id,
+                    "storage_label": storage_label,
+                    "is_video": is_video == "1" or is_video.lower() == "true",
+                    "saved_files": saved,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                })
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+
+                # 成功后物理删除备份（扩展名变化留下的旧文件）
+                for bak in backups:
+                    try:
+                        if bak.exists():
+                            bak.unlink()
+                    except OSError:
+                        pass
             except Exception:
-                # 回滚：删除 staging/已替换文件，恢复备份
+                # 回滚：删除 staging/已替换文件，恢复备份（删除残留 staging/backup）
                 for key, (save_path, _blob) in contents.items():
                     try:
                         st = save_path.with_name(save_path.name + ".staging")
@@ -575,14 +617,23 @@ def create_training_router(
                         user_id=request_user_id, kind="training", sample_key=safe_uuid,
                     )
                 except Exception:
-                    pass
-            elif total_net != 0 and storage_quota_svc.is_dry_run():
+                    import logging
+
+                    logging.getLogger("quota").error(
+                        "settle_quota failed (training) user=%s", request_user_id, exc_info=True
+                    )
+            elif total_net != 0:
+                # dry-run / 管理员：写盘成功后按真实净差额记账
                 try:
                     await storage_quota_svc.record_usage(
                         db, user_id=request_user_id, kind="training", delta_bytes=total_net,
                     )
                 except Exception:
-                    pass
+                    import logging
+
+                    logging.getLogger("quota").warning(
+                        "record_usage failed (training) user=%s", request_user_id, exc_info=True
+                    )
         finally:
             await lock_token.release()
 

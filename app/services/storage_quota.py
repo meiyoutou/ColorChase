@@ -26,6 +26,7 @@ from app.settings import (
     STORAGE_QUOTA_KINDS,
     TRAINING_QUOTA_MB,
 )
+from database import get_engine
 from models import StorageQuotaReservation, User, UserStorageQuota
 
 
@@ -147,28 +148,73 @@ async def _mysql_unlock(session, key: str) -> None:
 _mysql_release = _mysql_unlock
 
 
-class QuotaLockToken:
-    """上传全程持有的 GET_LOCK 令牌：覆盖 reserve→写盘→settle/release。
+def _hash_lock_key(key: str) -> str:
+    """GET_LOCK key 上限 64 字符，用 SHA-256 截断到 56 前缀 + 语义摘要。"""
+    import hashlib
 
-    同一连接内 GET_LOCK 在事务提交/连接归还前持续有效，避免 commit 后换连接丢锁。
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return f"sq_{digest[:56]}"
+
+
+class QuotaLockToken:
+    """上传全程持有的独立 AsyncConnection + GET_LOCK 令牌。
+
+    GET_LOCK / RELEASE_LOCK 必须在同一连接上执行；本 token 自持一个独立
+    AsyncConnection（不从请求会话借用），其生命周期覆盖 reserve→写盘→settle/release，
+    结束后显式 close。
     """
 
-    def __init__(self, session, *, user_id, kind, sample_key, acquired: bool):
-        self.session = session
-        self.key = _lock_key(user_id, kind, sample_key)
+    def __init__(self, engine, *, user_id, kind, sample_key, acquired: bool):
+        self._engine = engine
+        self._conn = None
+        self.key = _hash_lock_key(_lock_key(user_id, kind, sample_key))
         self.acquired = acquired
 
     async def release(self) -> None:
-        if self.acquired:
-            await _mysql_unlock(self.session, self.key)
+        if not self.acquired:
+            return
+        try:
+            if self._conn is not None:
+                await self._conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": self.key})
+        finally:
+            try:
+                if self._conn is not None:
+                    await self._conn.close()
+            finally:
+                self._conn = None
+
+
+async def acquire_sample_lock(
+    *, user_id: int, kind: str, sample_key: str, timeout: float = 5.0
+) -> QuotaLockToken:
+    """在独立 AsyncConnection 上获取 GET_LOCK（锁令牌持有该连接）。
+
+    获取失败返回 acquired=False（调用方据 dry/force 决策 fail-open / fail-closed）。
+    """
+    engine = get_engine()
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    token = QuotaLockToken(engine, user_id=user_id, kind=kind, sample_key=sample_key)
+    conn = await engine.connect()
+    token._conn = conn
+    try:
+        raw_key = _lock_key(user_id, kind, sample_key)
+        result = await conn.execute(text("SELECT GET_LOCK(:k, :t)"), {"k": _hash_lock_key(raw_key), "t": timeout})
+        token.acquired = bool(result.scalar())
+    except Exception:
+        token.acquired = False
+        try:
+            await conn.close()
+        finally:
+            token._conn = None
+    return token
 
 
 async def acquire_transaction_lock(
     session, *, user_id: int, kind: str, sample_key: str, timeout: float = 5.0
 ) -> QuotaLockToken:
-    """GET_LOCK 跨上传段持有。获取失败返回 acquired=False（调用方据此 fail-closed）。"""
-    ok = await _mysql_lock(session, _lock_key(user_id, kind, sample_key), timeout)
-    return QuotaLockToken(session, user_id=user_id, kind=kind, sample_key=sample_key, acquired=ok)
+    """兼容旧名：委托给 acquire_sample_lock（独立连接版）。"""
+    return await acquire_sample_lock(user_id=user_id, kind=kind, sample_key=sample_key, timeout=timeout)
 
 
 def _new_reservation_id() -> str:
@@ -187,11 +233,13 @@ async def reserve_quota(
     kind: str,
     sample_key: str,
     incoming_bytes: int,
+    lock_token: Optional[QuotaLockToken] = None,
 ) -> ReserveOutcome:
-    """上传前调用。QUOTA_ENABLED=0 时立即返回 allowed（零 DB 写）。
+    """上传前一次性配额预留（QUOTA_ENABLED=0 时立即返回 allowed，零 DB 写）。
 
-    调用方应持有由 acquire_transaction_lock 返回的锁令牌并跨 reserve→写盘→settle/release 全程带同
-    一令牌，保证 GET_LOCK（同一连接/事务）覆盖整段上传，防止并发共同越过配额。
+    路由先通过 acquire_sample_lock 拿到独立连接上的 GET_LOCK 令牌并传入本函数，
+    本函数不再重复 GET_LOCK。dry-run 不创建假的 reservation_id。
+    管理员豁免：只标记 admin_exempt，实际用量由写盘成功后 record_usage(actual_delta) 记录。
     """
     validate_kind(kind)
     if not is_quota_enabled():
@@ -200,95 +248,82 @@ async def reserve_quota(
     incoming_bytes = _clamp0(incoming_bytes)
     dry_run = is_dry_run()
 
-    # 管理员豁免：以 DB User.role + is_admin_role 为准（入参 role 仅作提示）
     try:
         db_role = await _get_user_role(session, user_id)
     except Exception:
         db_role = role
     if is_admin_role(db_role):
-        # 管理员仍计量真实用量（观察模式有统计价值）
-        if incoming_bytes:
-            try:
-                await record_usage(session, user_id=user_id, kind=kind, delta_bytes=incoming_bytes)
-            except Exception:
-                pass
         return ReserveOutcome(allowed=True, reason="admin_exempt")
 
-    async with _lock(user_id, kind, sample_key):
-        got = await _mysql_lock(session, _lock_key(user_id, kind, sample_key))
-        if not got:
-            # 拿不到锁：强制模式 fail-closed（拒绝），dry-run fail-open（放行并统计 would_deny）
-            if not dry_run:
-                return ReserveOutcome(
-                    allowed=False, reason="quota_unavailable", used_bytes=0, quota_bytes=default_quota_bytes(kind)
-                )
-        try:
-            qrow = await _get_quota_row(session, user_id, kind)
-            quota_bytes = default_quota_bytes(kind)
-            if qrow is not None and qrow.quota_mb is not None:
-                quota_bytes = _clamp0(qrow.quota_mb) * 1024 * 1024
-            used = _clamp0(getattr(qrow, "used_bytes", 0))
-            reserved = _clamp0(getattr(qrow, "reserved_bytes", 0))
+    try:
+        qrow = await _get_quota_row(session, user_id, kind)
+        quota_bytes = default_quota_bytes(kind)
+        if qrow is not None and qrow.quota_mb is not None:
+            quota_bytes = _clamp0(qrow.quota_mb) * 1024 * 1024
+        used = _clamp0(getattr(qrow, "used_bytes", 0))
+        reserved = _clamp0(getattr(qrow, "reserved_bytes", 0))
 
-            # 强制模式且未对账：不得按旧 used 判断（历史存量从 0 开始有误）。
-            # 强制模式下若行已存在但从未对账，或者行不存在但可能已有存量，一律 fail-closed 要求先对账。
-            needs_reconcile = qrow is None or getattr(qrow, "reconciled_at", None) is None
-            if not dry_run and needs_reconcile:
-                return ReserveOutcome(
-                    allowed=False,
-                    reason="reconcile_required",
-                    used_bytes=used,
-                    quota_bytes=quota_bytes,
-                )
-
-            exceed = would_exceed(used, reserved, incoming_bytes, quota_bytes)
-            if not exceed:
-                reservation_id = _new_reservation_id()
-                if not dry_run and got:
-                    if qrow is None:
-                        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-                        session.add(qrow)
-                    qrow.reserved_bytes = _clamp0(qrow.reserved_bytes + incoming_bytes)
-                    session.add(
-                        StorageQuotaReservation(
-                            reservation_id=reservation_id,
-                            user_id=user_id,
-                            kind=kind,
-                            sample_key=sample_key,
-                            status="reserved",
-                            requested_bytes=incoming_bytes,
-                            occupied_bytes=0,
-                            settled_bytes=0,
-                            expires_at=now_utc() + timedelta(minutes=30),
-                        )
-                    )
-                    await session.commit()
-                return ReserveOutcome(
-                    allowed=True,
-                    reservation_id=reservation_id,
-                    used_bytes=used,
-                    quota_bytes=quota_bytes,
-                )
-
-            if dry_run:
-                await _count_stat(session, user_id, kind, "would_deny_count", "last_would_deny_at")
-                return ReserveOutcome(
-                    allowed=True,
-                    would_deny=True,
-                    used_bytes=used,
-                    quota_bytes=quota_bytes,
-                )
-
-            await _count_stat(session, user_id, kind, "denied_count", "last_denied_at")
+        has_lock = bool(lock_token) and bool(lock_token.acquired)
+        needs_reconcile = qrow is None or getattr(qrow, "reconciled_at", None) is None
+        if not dry_run and (not has_lock or needs_reconcile):
+            reason = "reconcile_required" if needs_reconcile else "quota_unavailable"
             return ReserveOutcome(
                 allowed=False,
+                reason=reason,
                 used_bytes=used,
                 quota_bytes=quota_bytes,
-                reason="quota_exceeded",
             )
-        finally:
-            if got:
-                await _mysql_release(session, _lock_key(user_id, kind, sample_key))
+
+        exceed = would_exceed(used, reserved, incoming_bytes, quota_bytes)
+        if not exceed:
+            if dry_run:
+                return ReserveOutcome(allowed=True, used_bytes=used, quota_bytes=quota_bytes)
+
+            reservation_id = _new_reservation_id()
+            if qrow is None:
+                qrow = UserStorageQuota(
+                    user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
+                )
+                session.add(qrow)
+            qrow.reserved_bytes = _clamp0(qrow.reserved_bytes + incoming_bytes)
+            session.add(
+                StorageQuotaReservation(
+                    reservation_id=reservation_id,
+                    user_id=user_id,
+                    kind=kind,
+                    sample_key=sample_key,
+                    status="reserved",
+                    requested_bytes=incoming_bytes,
+                    occupied_bytes=0,
+                    settled_bytes=0,
+                    expires_at=now_utc() + timedelta(minutes=30),
+                )
+            )
+            await session.commit()
+            return ReserveOutcome(
+                allowed=True,
+                reservation_id=reservation_id,
+                used_bytes=used,
+                quota_bytes=quota_bytes,
+            )
+
+        if dry_run:
+            await _count_stat(session, user_id, kind, "would_deny_count", "last_would_deny_at")
+            return ReserveOutcome(
+                allowed=True, would_deny=True, used_bytes=used, quota_bytes=quota_bytes,
+            )
+
+        await _count_stat(session, user_id, kind, "denied_count", "last_denied_at")
+        return ReserveOutcome(
+            allowed=False, used_bytes=used, quota_bytes=quota_bytes, reason="quota_exceeded",
+        )
+    except Exception:
+        if dry_run:
+            return ReserveOutcome(
+                allowed=True, dry_run_fail_open=True, used_bytes=0,
+                quota_bytes=default_quota_bytes(kind),
+            )
+        raise
 
 
 def _lock_key(user_id: int, kind: str, sample_key: str) -> str:
@@ -296,7 +331,7 @@ def _lock_key(user_id: int, kind: str, sample_key: str) -> str:
 
 
 async def record_usage(
-    session, *, user_id: int, kind: str, delta_bytes: int, reserved_delta: int = 0
+    session, *, user_id: int, kind: str, delta_bytes: int
 ) -> int:
     """dry-run / 管理员豁免路径：仍记录真实用量（观察模式有统计价值）。
 
@@ -310,11 +345,7 @@ async def record_usage(
     if qrow is None:
         qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
         session.add(qrow)
-    qrow.used_bytes = upsert_delta(int(qrow.used_bytes or 0), delta_bytes)
-    if sample_label:
-        qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) + int(sample_label))
-    if not sample_label and False:
-        pass
+    qrow.used_bytes = upsert_delta(int(qrow.used_bytes or 0), int(delta_bytes))
     await session.commit()
     return int(qrow.used_bytes or 0)
 

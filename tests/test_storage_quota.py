@@ -91,6 +91,13 @@ def _install(monkeypatch, memo, *, enabled, dry_run, quota_mb=1):
     return sq, FakeSession(memo)
 
 
+class FakeLock:
+    """模拟 QuotaLockToken：传给 reserve_quota 的 lock_token 入参。"""
+
+    def __init__(self, acquired=True):
+        self.acquired = acquired
+
+
 def _mk(user_id=1, kind="training", used=0, reserved=0, quota_mb=None, reconciled=True):
     return UserStorageQuota(
         user_id=user_id, kind=kind, used_bytes=used, reserved_bytes=reserved, quota_mb=quota_mb,
@@ -142,8 +149,8 @@ def test_admin_exempt(monkeypatch, memo):
     assert out.allowed is True
     assert out.reason == "admin_exempt"
     assert out.would_deny is False
-    # 管理员也会计量用量（观察模式有统计价值）——因此记录行会创建
-    assert memo.quotas[(1, "training")].used_bytes == 10 ** 9
+    # 管理员豁免不发 hazard —— 实际用量由写盘成功后 record_usage(actual_delta) 记录（路由负责）
+    assert (1, "training") not in memo.quotas
 
 
 # ---- 3) dry-run 超限放行并标 would_deny（计数+1）----
@@ -173,13 +180,14 @@ def test_multi_file_cannot_bypass(monkeypatch, memo):
     async def run():
         first = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=900000,
+            sample_key="s", incoming_bytes=900000, lock_token=FakeLock(),
         )
         assert first.allowed is True
         assert first.reservation_id is not None
         second = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
             sample_key="s", incoming_bytes=200000,  # 累计 1.1MB
+            lock_token=FakeLock(),
         )
         return first, second
 
@@ -200,7 +208,7 @@ def test_settle_positive_delta(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=90,
+            sample_key="s", incoming_bytes=90, lock_token=FakeLock(),
         )
         after = await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=50,
@@ -223,7 +231,7 @@ def test_settle_negative_delta_floor_zero(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=10,
+            sample_key="s", incoming_bytes=10, lock_token=FakeLock(),
         )
         return await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=-200,
@@ -243,11 +251,11 @@ def test_concurrent_not_exceed(monkeypatch, memo):
     async def run():
         o1 = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=700000,
+            sample_key="s", incoming_bytes=700000, lock_token=FakeLock(),
         )
         o2 = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=700000,
+            sample_key="s", incoming_bytes=700000, lock_token=FakeLock(),
         )
         return o1, o2
 
@@ -265,7 +273,7 @@ def test_release_on_failure(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=500,
+            sample_key="s", incoming_bytes=500, lock_token=FakeLock(),
         )
         assert memo.quotas[(1, "training")].reserved_bytes == 500
         await mod.release_reservation(
@@ -286,7 +294,7 @@ def test_settle_idempotent(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=5,
+            sample_key="s", incoming_bytes=5, lock_token=FakeLock(),
         )
         a1 = await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=7,

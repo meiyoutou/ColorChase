@@ -91,9 +91,10 @@ def _install(monkeypatch, memo, *, enabled, dry_run, quota_mb=1):
     return sq, FakeSession(memo)
 
 
-def _mk(user_id=1, kind="training", used=0, reserved=0, quota_mb=None):
+def _mk(user_id=1, kind="training", used=0, reserved=0, quota_mb=None, reconciled=True):
     return UserStorageQuota(
-        user_id=user_id, kind=kind, used_bytes=used, reserved_bytes=reserved, quota_mb=quota_mb
+        user_id=user_id, kind=kind, used_bytes=used, reserved_bytes=reserved, quota_mb=quota_mb,
+        reconciled_at=sq.now_utc() if reconciled else None,
     )
 
 
@@ -141,7 +142,8 @@ def test_admin_exempt(monkeypatch, memo):
     assert out.allowed is True
     assert out.reason == "admin_exempt"
     assert out.would_deny is False
-    assert (1, "training") not in sess.memo.quotas
+    # 管理员也会计量用量（观察模式有统计价值）——因此记录行会创建
+    assert memo.quotas[(1, "training")].used_bytes == 10 ** 9
 
 
 # ---- 3) dry-run 超限放行并标 would_deny（计数+1）----
@@ -166,6 +168,7 @@ def test_dry_run_would_deny(monkeypatch, memo):
 # ---- 4) 强制模式：多文件合计一次性 reserve 无法绕过 ----
 def test_multi_file_cannot_bypass(monkeypatch, memo):
     mod, sess = _install(monkeypatch, memo, enabled=True, dry_run=False, quota_mb=1)
+    memo.quotas[(1, "training")] = _mk(1, "training", used=0, reconciled=True)
 
     async def run():
         first = await mod.reserve_quota(
@@ -235,6 +238,7 @@ def test_settle_negative_delta_floor_zero(monkeypatch, memo):
 # ---- 6) 两并发预留不共同占满 ----
 def test_concurrent_not_exceed(monkeypatch, memo):
     mod, sess = _install(monkeypatch, memo, enabled=True, dry_run=False, quota_mb=1)
+    memo.quotas[(1, "training")] = _mk(1, "training", used=0, reconciled=True)
 
     async def run():
         o1 = await mod.reserve_quota(

@@ -283,72 +283,80 @@ def create_training_router(
                 "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
             })
 
-        # ---- 配额启用：按覆盖前后净差额一次结算，staging+replace 原子写入 ----
+        # ---- 检测库生效：按覆盖前 GPA 净差额一次结算，持锁分段原子写入 ----
         old_size = save_path.stat().st_size if save_path.exists() else 0
         net_delta = len(content) - old_size
         reservation_id = None
         force = not storage_quota_svc.is_dry_run()
-
-        if net_delta > 0:
-            try:
-                outcome = await storage_quota_svc.reserve_quota(
-                    db,  # 真实 AsyncSession
-                    user_id=request_user_id,
-                    role=None,
-                    storage_label=storage_label,
-                    kind="detection",
-                    sample_key=safe_uuid,
-                    incoming_bytes=net_delta,
-                )
-                reservation_id = outcome.reservation_id
-                if not outcome.allowed:
-                    # 强制模式且配额足够却仍被拒（如 DB fail-closed）
-                    return JSONResponse(
-                        status_code=503,
-                        content={"error": "storage quota unavailable", "detail": "quota check failed"},
-                    )
-                if outcome.would_deny:
-                    # dry-run：不拒绝，仅统计
-                    pass
-            except Exception:
-                if force:
-                    return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
-                # dry-run fail-open：放行
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-        staging = target_dir / (save_path.name + ".staging")
+        lock_token = await storage_quota_svc.acquire_transaction_lock(
+            db, user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+        )
+        if force and not lock_token.acquired:
+            return JSONResponse(status_code=503,
+                                content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            with open(staging, "wb") as f:
-                f.write(content)
-            os.replace(staging, save_path)  # 原子替换
-        except Exception:
+            if net_delta != 0:
+                try:
+                    outcome = await storage_quota_svc.reserve_quota(
+                        db, user_id=request_user_id, role=None,
+                        storage_label=storage_label, kind="detection",
+                        sample_key=safe_uuid, incoming_bytes=max(net_delta, 0),
+                    )
+                    reservation_id = outcome.reservation_id
+                    if not outcome.allowed:
+                        return JSONResponse(
+                            status_code=503,
+                            content={"error": "storage quota unavailable",
+                                     "detail": outcome.reason or "quota check failed"},
+                        )
+                except Exception:
+                    if force:
+                        return JSONResponse(status_code=503,
+                                            content={"error": "storage quota unavailable"})
+                    return JSONResponse(status_code=200,
+                                        content={"success": True, "file_uuid": safe_uuid,
+                                                 "saved_path": str(save_path)})
+
+            target_dir.mkdir(parents=True, exist_ok=True)
+            staging = target_dir / (save_path.name + ".staging")
             try:
-                if staging.exists():
-                    staging.unlink()
-            except OSError:
-                pass
-            if not force:
-                # dry-run 尽管放行，但写盘失败仍不做预留结算
-                pass
+                with open(staging, "wb") as f:
+                    f.write(content)
+                os.replace(staging, save_path)  # 原子替换
+            except Exception:
+                try:
+                    if staging.exists():
+                        staging.unlink()
+                except OSError:
+                    pass
+                if reservation_id:
+                    try:
+                        await storage_quota_svc.release_reservation(
+                            db, reservation_id=reservation_id,
+                            user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                        )
+                    except Exception:
+                        pass
+                raise
+
             if reservation_id:
                 try:
-                    await storage_quota_svc.release_reservation(
+                    await storage_quota_svc.settle_quota(
                         db, reservation_id=reservation_id,
-                        user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                        delta_bytes=net_delta, user_id=request_user_id,
+                        kind="detection", sample_key=safe_uuid,
                     )
                 except Exception:
                     pass
-            raise
-
-        if reservation_id:
-            try:
-                await storage_quota_svc.settle_quota(
-                    db, reservation_id=reservation_id,
-                    delta_bytes=net_delta, user_id=request_user_id,
-                    kind="detection", sample_key=safe_uuid,
-                )
-            except Exception:
-                pass
+            elif net_delta != 0 and storage_quota_svc.is_dry_run():
+                try:
+                    await storage_quota_svc.record_usage(
+                        db, user_id=request_user_id, kind="detection", delta_bytes=net_delta,
+                    )
+                except Exception:
+                    pass
+        finally:
+            await lock_token.release()
 
         return JSONResponse({
             "success": True,
@@ -432,9 +440,9 @@ def create_training_router(
                 "saved_files": saved,
             })
 
-        # ---- 配额启用：累计净新增一次 reserve，staging+replace 原子写入，成功后 settle ----
+        # ---- 配额启用：累计净新增一次 reserve，持锁分段原子写入，成功后 settle ----
         contents = {}  # key -> (save_path, bytes)
-        total_new_bytes = 0
+        total_net = 0
         for key, upload_file in files_map.items():
             if upload_file is None or not upload_file.filename:
                 continue
@@ -446,80 +454,137 @@ def create_training_router(
             ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
             blob = await upload_file.read()
             contents[key] = (save_path, blob)
-            net = len(blob) - old_size
-            if net > 0:
-                total_new_bytes += net
+            total_net += len(blob) - old_size
+
+        # 扩展名变化时清理旧文件（例如 target.jpg→target.png）
+        for key, upload_file in files_map.items():
+            if upload_file is None or not upload_file.filename:
+                continue
+            ext = Path(upload_file.filename).suffix.lower() or ".jpg"
+            if key == "lut":
+                ext = ".cube"
+            save_path = sample_dir / f"{key}{ext}"
+            for old in sample_dir.glob(f"{key}.*"):
+                if old.resolve() != save_path.resolve() and old.name not in (".", ".."):
+                    if old.exists() and storage_quota_svc.is_quota_enabled():
+                        total_net -= old.stat().st_size
 
         reservation_id = None
         force = not storage_quota_svc.is_dry_run()
-        if total_new_bytes > 0:
-            try:
-                outcome = await storage_quota_svc.reserve_quota(
-                    db, user_id=request_user_id, role=None,
-                    storage_label=storage_label, kind="training",
-                    sample_key=safe_uuid, incoming_bytes=total_new_bytes,
-                )
-                reservation_id = outcome.reservation_id
-                if not outcome.allowed:
-                    return JSONResponse(status_code=503,
-                                        content={"error": "storage quota unavailable", "detail": "quota check failed"})
-            except Exception:
-                if force:
-                    return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
-                # dry-run fail-open：放行
-
-        sample_dir.mkdir(parents=True, exist_ok=True)
+        lock_token = await storage_quota_svc.acquire_transaction_lock(
+            db, user_id=request_user_id, kind="training", sample_key=safe_uuid,
+        )
+        if force and not lock_token.acquired:
+            return JSONResponse(status_code=503,
+                                content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            for key, (save_path, blob) in contents.items():
-                staging = save_path.with_name(save_path.name + ".staging")
-                with open(staging, "wb") as f:
-                    f.write(blob)
-                os.replace(staging, save_path)
-                saved[key] = str(save_path.name)
-
-            meta_path = sample_dir / "meta.json"
-            try:
-                meta_obj = json.loads(meta) if meta else {}
-            except (ValueError, TypeError):
-                meta_obj = {}
-            if not isinstance(meta_obj, dict):
-                meta_obj = {}
-            meta_obj.update({
-                "sample_uuid": safe_uuid,
-                "user_id": request_user_id,
-                "storage_label": storage_label,
-                "is_video": is_video == "1" or is_video.lower() == "true",
-                "saved_files": saved,
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            })
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta_obj, f, ensure_ascii=False, indent=2)
-        except Exception:
-            # 清理临时文件并释放预留
-            for key, (save_path, _blob) in contents.items():
+            if total_net != 0:
                 try:
-                    if save_path.with_name(save_path.name + ".staging").exists():
-                        save_path.with_name(save_path.name + ".staging").unlink()
-                except OSError:
-                    pass
+                    outcome = await storage_quota_svc.reserve_quota(
+                        db, user_id=request_user_id, role=None,
+                        storage_label=storage_label, kind="training",
+                        sample_key=safe_uuid, incoming_bytes=max(total_net, 0),
+                    )
+                    reservation_id = outcome.reservation_id
+                    if not outcome.allowed:
+                        return JSONResponse(status_code=503,
+                                            content={"error": "storage quota unavailable",
+                                                     "detail": outcome.reason or "quota check failed"})
+                except Exception:
+                    if force:
+                        return JSONResponse(status_code=503,
+                                            content={"error": "storage quota unavailable"})
+                    return JSONResponse(status_code=200,
+                                        content={"success": True, "sample_uuid": safe_uuid, "saved_files": {}})
+
+            sample_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                # 旧扩展文件先移入同目录 backup（暂不删除），写入成功后再物理删除，失败则回滚
+                backups = []
+                for key, upload_file in files_map.items():
+                    if upload_file is None or not upload_file.filename:
+                        continue
+                    ext = Path(upload_file.filename).suffix.lower() or ".jpg"
+                    if key == "lut":
+                        ext = ".cube"
+                    save_path = sample_dir / f"{key}{ext}"
+                    for old in sample_dir.glob(f"{key}.*"):
+                        if old.resolve() == save_path.resolve():
+                            continue
+                        if old.is_file() and not old.name.endswith(".staging"):
+                            bak = old.with_name(old.name + ".bak")
+                            try:
+                                os.replace(old, bak)
+                                backups.append(bak)
+                            except OSError:
+                                pass
+                for key, (save_path, blob) in contents.items():
+                    staging = save_path.with_name(save_path.name + ".staging")
+                    with open(staging, "wb") as f:
+                        f.write(blob)
+                    os.replace(staging, save_path)
+                    saved[key] = str(save_path.name)
+
+                meta_path = sample_dir / "meta.json"
+                try:
+                    meta_obj = json.loads(meta) if meta else {}
+                except (ValueError, TypeError):
+                    meta_obj = {}
+                if not isinstance(meta_obj, dict):
+                    meta_obj = {}
+                meta_obj.update({
+                    "sample_uuid": safe_uuid,
+                    "user_id": request_user_id,
+                    "storage_label": storage_label,
+                    "is_video": is_video == "1" or is_video.lower() == "true",
+                    "saved_files": saved,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                })
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+            except Exception:
+                # 回滚：删除 staging/已替换文件，恢复备份
+                for key, (save_path, _blob) in contents.items():
+                    try:
+                        st = save_path.with_name(save_path.name + ".staging")
+                        if st.exists():
+                            st.unlink()
+                    except OSError:
+                        pass
+                for bak in backups:
+                    try:
+                        target = bak.with_suffix("")
+                        if bak.exists():
+                            os.replace(bak, target)
+                    except OSError:
+                        pass
+                if reservation_id:
+                    try:
+                        await storage_quota_svc.release_reservation(
+                            db, reservation_id=reservation_id, user_id=request_user_id,
+                            kind="training", sample_key=safe_uuid,
+                        )
+                    except Exception:
+                        pass
+                raise
+
             if reservation_id:
                 try:
-                    await storage_quota_svc.release_reservation(
-                        db, reservation_id=reservation_id, user_id=request_user_id,
-                        kind="training", sample_key=safe_uuid,
+                    await storage_quota_svc.settle_quota(
+                        db, reservation_id=reservation_id, delta_bytes=total_net,
+                        user_id=request_user_id, kind="training", sample_key=safe_uuid,
                     )
                 except Exception:
                     pass
-            raise
-
-        if reservation_id:
-            try:
-                await storage_quota_svc.settle_quota(
-                    db, reservation_id=reservation_id, delta_bytes=total_new_bytes,
-                    user_id=request_user_id, kind="training", sample_key=safe_uuid,
-                )
-            except Exception:
-                pass
+            elif total_net != 0 and storage_quota_svc.is_dry_run():
+                try:
+                    await storage_quota_svc.record_usage(
+                        db, user_id=request_user_id, kind="training", delta_bytes=total_net,
+                    )
+                except Exception:
+                    pass
+        finally:
+            await lock_token.release()
 
         return JSONResponse({
             "success": True,

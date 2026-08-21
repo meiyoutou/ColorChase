@@ -33,6 +33,16 @@ def now_utc() -> datetime:
     return datetime.utcnow()
 
 
+def is_quota_enabled() -> bool:
+    """配额/清理总开关。默认关闭。"""
+    return bool(STORAGE_QUOTA_ENABLED)
+
+
+def is_dry_run() -> bool:
+    """观测模式。默认开启（不拒绝、不预留、不删除）。"""
+    return bool(STORAGE_QUOTA_DRY_RUN)
+
+
 # ---------------------------------------------------------------------------
 # 命名锁（进程内；分布式部署下与 MySQL GET_LOCK 同一 key 语义对齐）
 # ---------------------------------------------------------------------------
@@ -133,6 +143,34 @@ async def _mysql_unlock(session, key: str) -> None:
         pass
 
 
+# 老名兼容
+_mysql_release = _mysql_unlock
+
+
+class QuotaLockToken:
+    """上传全程持有的 GET_LOCK 令牌：覆盖 reserve→写盘→settle/release。
+
+    同一连接内 GET_LOCK 在事务提交/连接归还前持续有效，避免 commit 后换连接丢锁。
+    """
+
+    def __init__(self, session, *, user_id, kind, sample_key, acquired: bool):
+        self.session = session
+        self.key = _lock_key(user_id, kind, sample_key)
+        self.acquired = acquired
+
+    async def release(self) -> None:
+        if self.acquired:
+            await _mysql_unlock(self.session, self.key)
+
+
+async def acquire_transaction_lock(
+    session, *, user_id: int, kind: str, sample_key: str, timeout: float = 5.0
+) -> QuotaLockToken:
+    """GET_LOCK 跨上传段持有。获取失败返回 acquired=False（调用方据此 fail-closed）。"""
+    ok = await _mysql_lock(session, _lock_key(user_id, kind, sample_key), timeout)
+    return QuotaLockToken(session, user_id=user_id, kind=kind, sample_key=sample_key, acquired=ok)
+
+
 def _new_reservation_id() -> str:
     return _uuid.uuid4().hex
 
@@ -150,14 +188,17 @@ async def reserve_quota(
     sample_key: str,
     incoming_bytes: int,
 ) -> ReserveOutcome:
-    """上传前调用。QUOTA_ENABLED=0 时立即返回 allowed（零 DB 写）。"""
+    """上传前调用。QUOTA_ENABLED=0 时立即返回 allowed（零 DB 写）。
+
+    调用方应持有由 acquire_transaction_lock 返回的锁令牌并跨 reserve→写盘→settle/release 全程带同
+    一令牌，保证 GET_LOCK（同一连接/事务）覆盖整段上传，防止并发共同越过配额。
+    """
     validate_kind(kind)
-    if not STORAGE_QUOTA_ENABLED:
+    if not is_quota_enabled():
         return ReserveOutcome(allowed=True, reason="disabled")
 
     incoming_bytes = _clamp0(incoming_bytes)
-    dry_run = STORAGE_QUOTA_DRY_RUN
-    lock_key = f"storage_quota:{user_id}:{kind}:{sample_key}"
+    dry_run = is_dry_run()
 
     # 管理员豁免：以 DB User.role + is_admin_role 为准（入参 role 仅作提示）
     try:
@@ -165,10 +206,22 @@ async def reserve_quota(
     except Exception:
         db_role = role
     if is_admin_role(db_role):
+        # 管理员仍计量真实用量（观察模式有统计价值）
+        if incoming_bytes:
+            try:
+                await record_usage(session, user_id=user_id, kind=kind, delta_bytes=incoming_bytes)
+            except Exception:
+                pass
         return ReserveOutcome(allowed=True, reason="admin_exempt")
 
     async with _lock(user_id, kind, sample_key):
-        got = await _mysql_lock(session, lock_key)
+        got = await _mysql_lock(session, _lock_key(user_id, kind, sample_key))
+        if not got:
+            # 拿不到锁：强制模式 fail-closed（拒绝），dry-run fail-open（放行并统计 would_deny）
+            if not dry_run:
+                return ReserveOutcome(
+                    allowed=False, reason="quota_unavailable", used_bytes=0, quota_bytes=default_quota_bytes(kind)
+                )
         try:
             qrow = await _get_quota_row(session, user_id, kind)
             quota_bytes = default_quota_bytes(kind)
@@ -177,10 +230,21 @@ async def reserve_quota(
             used = _clamp0(getattr(qrow, "used_bytes", 0))
             reserved = _clamp0(getattr(qrow, "reserved_bytes", 0))
 
+            # 强制模式且未对账：不得按旧 used 判断（历史存量从 0 开始有误）。
+            # 强制模式下若行已存在但从未对账，或者行不存在但可能已有存量，一律 fail-closed 要求先对账。
+            needs_reconcile = qrow is None or getattr(qrow, "reconciled_at", None) is None
+            if not dry_run and needs_reconcile:
+                return ReserveOutcome(
+                    allowed=False,
+                    reason="reconcile_required",
+                    used_bytes=used,
+                    quota_bytes=quota_bytes,
+                )
+
             exceed = would_exceed(used, reserved, incoming_bytes, quota_bytes)
             if not exceed:
                 reservation_id = _new_reservation_id()
-                if not dry_run:
+                if not dry_run and got:
                     if qrow is None:
                         qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
                         session.add(qrow)
@@ -224,7 +288,35 @@ async def reserve_quota(
             )
         finally:
             if got:
-                await _mysql_unlock(session, lock_key)
+                await _mysql_release(session, _lock_key(user_id, kind, sample_key))
+
+
+def _lock_key(user_id: int, kind: str, sample_key: str) -> str:
+    return f"storage_quota:{user_id}:{kind}:{sample_key}"
+
+
+async def record_usage(
+    session, *, user_id: int, kind: str, delta_bytes: int, reserved_delta: int = 0
+) -> int:
+    """dry-run / 管理员豁免路径：仍记录真实用量（观察模式有统计价值）。
+
+    delta_bytes 可负（覆盖变小）。used 下限 0。返回结算后 used_bytes。
+    开关关闭时 no-op。
+    """
+    if not is_quota_enabled():
+        return 0
+    validate_kind(kind)
+    qrow = await _get_quota_row(session, user_id, kind)
+    if qrow is None:
+        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
+        session.add(qrow)
+    qrow.used_bytes = upsert_delta(int(qrow.used_bytes or 0), delta_bytes)
+    if sample_label:
+        qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) + int(sample_label))
+    if not sample_label and False:
+        pass
+    await session.commit()
+    return int(qrow.used_bytes or 0)
 
 
 async def settle_quota(
@@ -236,7 +328,10 @@ async def settle_quota(
     kind: str,
     sample_key: str,
 ) -> int:
-    """写盘成功后按真实净差额结算（幂等）。返回结算后 used_bytes。"""
+    """写盘成功后按真实净差额结算（幂等）。返回结算后 used_bytes。
+
+    净差额可为 0 或负（覆盖变小）；调用方须在白名单未被拒绝时调用，释放预留。
+    """
     if not STORAGE_QUOTA_ENABLED:
         return 0
     validate_kind(kind)

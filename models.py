@@ -91,14 +91,3 @@ class StorageQuotaReservation(Base):
     settled_at = Column(DateTime, nullable=True)
     released_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
-
-
-class StorageQuotaLock(Base):
-    """GET_LOCK 辅助节点：同一 user/kind/sample_key 串行化（上传与清理共用）。"""
-
-    __tablename__ = "storage_quota_locks"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    lock_key = Column(String(512), unique=True, nullable=False)
-    holder = Column(String(128), nullable=True)
-    acquired_at = Column(DateTime, server_default=func.now())

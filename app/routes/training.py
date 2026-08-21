@@ -648,40 +648,57 @@ def create_training_router(
         authorization: Optional[str] = Header(None),
         db: AsyncSession = Depends(get_db),
     ):
-        """用户自查当前存储用量与配额。返回 user_id / 按 kind 用量 / 配额 / 开关状态。"""
+        """用户自查当前存储用量与配额。
+
+        无论是否有 quota 行都固定返回 training/detection 两 kind 的完整字段；
+        开关关闭(enabled=false)仍可查询历史统计，不创建 DB 行。
+        """
         request_user_id = get_request_user_id(authorization)
         if request_user_id is None:
             raise HTTPException(status_code=401, detail="请先登录")
 
         from app.services import storage_quota as sq
         from app.settings import STORAGE_QUOTA_DRY_RUN, STORAGE_QUOTA_ENABLED
-        from models import UserStorageQuota
 
         result = await db.execute(
             select(UserStorageQuota).where(UserStorageQuota.user_id == request_user_id)
         )
-        rows = result.scalars().all()
-        details = []
-        for q in rows:
+        rows = list(result.scalars().all())
+        by_kind = {q.kind: q for q in rows}
+
+        out = {}
+        for kind in sq.STORAGE_QUOTA_KINDS:
+            q = by_kind.get(kind)
             quota_bytes = (
                 (int(q.quota_mb or 0) * 1024 * 1024)
-                if q.quota_mb is not None
-                else sq.default_quota_bytes(str(q.kind))
+                if q is not None and q.quota_mb is not None
+                else sq.default_quota_bytes(kind)
             )
-            details.append({
-                "kind": q.kind,
-                "used_mb": int(q.used_bytes or 0) // (1024 * 1024),
-                "reserved_mb": int(q.reserved_bytes or 0) // (1024 * 1024),
-                "quota_mb": q.quota_mb,
-                "reconciled_at": str(q.reconciled_at) if q.reconciled_at else None,
-            })
+            used = int(q.used_bytes or 0) if q is not None else 0
+            reserved = int(q.reserved_bytes or 0) if q is not None else 0
+            would_exceed = (used + reserved) > quota_bytes
+            out[kind] = {
+                "used_bytes": used,
+                "used_mb": used // (1024 * 1024),
+                "reserved_bytes": reserved,
+                "reserved_mb": reserved // (1024 * 1024),
+                "quota_bytes": quota_bytes,
+                "quota_mb": quota_bytes // (1024 * 1024),
+                "remaining_bytes": max(quota_bytes - (used + reserved), 0),
+                "remaining_mb": max(quota_bytes - (used + reserved), 0) // (1024 * 1024),
+                "reconciled_at": str(q.reconciled_at) if (q is not None and q.reconciled_at) else None,
+                "would_exceed": would_exceed,
+                "would_deny_count": int(q.would_deny_count or 0) if q is not None else 0,
+                "denied_count": int(q.denied_count or 0) if q is not None else 0,
+            }
 
         return {
             "success": True,
             "user_id": request_user_id,
             "enabled": bool(STORAGE_QUOTA_ENABLED),
             "dry_run": bool(STORAGE_QUOTA_DRY_RUN),
-            "quota": details,
+            "training": out["training"],
+            "detection": out["detection"],
         }
 
     @router.get("/api/train/samples")

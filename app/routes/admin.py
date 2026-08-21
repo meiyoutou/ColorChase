@@ -45,6 +45,7 @@ from config import (
 from database import get_db
 from models import Asset, Project, User, UserStorageQuota
 from progress import progress_manager
+from app.services import storage_quota as sq
 router = APIRouter()
 
 TRAINING_DATA_ROOT = STORAGE_TRAINING_CORPUS_DIR
@@ -1147,6 +1148,43 @@ async def admin_storage_stats(
         "would_exceed_user_count": len(would_exceed_users),
         "denied_user_count": len(denied_users),
         "top_users": top,
+    }
+
+
+@router.post("/storage_quotas/{user_id}/{kind}/reconcile")
+async def admin_storage_quota_reconcile(
+    user_id: int,
+    kind: str,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """管理员触发某个用户单个 kind 的对账，供强制模式初始化路径使用。
+
+    配额总开关未启用时默认拒绝(409)；不扫描、不创建行。
+    """
+    from app.services import storage_quota as sq
+    from app.settings import STORAGE_QUOTA_ENABLED
+
+    if not STORAGE_QUOTA_ENABLED:
+        raise HTTPException(status_code=409, detail="配额功能未启用")
+    try:
+        sq.validate_kind(kind)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法 kind")
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    label = str(getattr(user, "storage_label", "") or "").strip()
+    if not label:
+        raise HTTPException(status_code=409, detail="用户缺少 storage_label，无法对账")
+
+    total = await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
+    return {
+        "user_id": user.id,
+        "kind": kind,
+        "used_bytes": total,
+        "used_mb": total // (1024 * 1024),
+        "reconciled_at": sq.now_utc().isoformat(),
     }
 
 

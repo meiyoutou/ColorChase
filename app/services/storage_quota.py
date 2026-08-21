@@ -27,7 +27,11 @@ from app.settings import (
     TRAINING_QUOTA_MB,
 )
 from database import get_engine
-from models import StorageQuotaReservation, User, UserStorageQuota
+from models import (
+    StorageQuotaReservation,
+    User,
+    UserStorageQuota,
+)
 
 
 def now_utc() -> datetime:
@@ -511,10 +515,13 @@ def dir_usage_bytes(path) -> int:
     return total
 
 
-def sample_subdir_candidates(root) -> List[Path]:
-    """枚举根目录下可作为样本目录的候选（按目录结构识别，不要求标准 UUID 命名）。
+def sample_subdir_candidates(root=None, kind=None) -> List[Path]:
+    """枚举根目录下可作为样本目录的候选（按真实结构识别）。
 
-    规则：忽略隐藏目录、symlink、非目录；任何包含文件或子目录的非隐藏目录视为样本单元。
+    - kind="training"：须含 meta.json 且含 target.* 与 result.*
+    - kind="detection"：须含 original.*
+    - kind=None：退化为「非隐藏、非 symlink、含内容目录」（兼容旧调用）
+    忽略隐藏目录、symlink、普通文件、以及残留 .staging/.backup/.quota-trash。
     """
     try:
         root_p = Path(root)
@@ -530,12 +537,28 @@ def sample_subdir_candidates(root) -> List[Path]:
             continue
         if entry.name.startswith("."):
             continue
+        if entry.name.endswith((".staging", ".backup", ".quota-trash")):
+            continue
         try:
-            has_content = any(True for _ in entry.iterdir())
+            names = {p.name for p in entry.iterdir()}
         except OSError:
             continue
-        if has_content:
-            result.append(entry)
+
+        def _has(prefix):
+            return any(n.startswith(prefix) for n in names if not n.endswith((".staging", ".backup")))
+
+        if kind == "training":
+            if "meta.json" not in names:
+                continue
+            if not (_has("target") and _has("result")):
+                continue
+        elif kind == "detection":
+            if not _has("original"):
+                continue
+        else:
+            if not names:
+                continue
+        result.append(entry)
     return result
 
 

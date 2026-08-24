@@ -2,6 +2,8 @@ import asyncio
 import base64
 import io
 import json
+import logging
+import os
 import re
 import shutil
 import uuid
@@ -293,18 +295,20 @@ def create_training_router(
                 "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
             })
 
-        # ---- 检测库生效：按覆盖前 GPA 净差额一次结算，持锁分段原子写入 ----
-        old_size = save_path.stat().st_size if save_path.exists() else 0
-        net_delta = len(content) - old_size
+        # ---- 检测库生效：先取锁，再读旧目录真实大小计算净差额，持锁写盘 ----
         reservation_id = None
         force = not storage_quota_svc.is_dry_run()
         lock_token = await storage_quota_svc.acquire_transaction_lock(
             db, user_id=request_user_id, kind="detection", sample_key=safe_uuid,
         )
-        if force and not lock_token.acquired:
+        # 样本写锁失败：即使 dry-run 也不能放行（避免同样本写入竞态）
+        if not lock_token.acquired:
+            logging.getLogger("quota").warning("detection sample lock failed user=%s", request_user_id)
             return JSONResponse(status_code=503,
                                 content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
+            old_size = save_path.stat().st_size if save_path.exists() else 0
+            net_delta = len(content) - old_size
             if net_delta != 0:
                 try:
                     outcome = await storage_quota_svc.reserve_quota(
@@ -458,44 +462,48 @@ def create_training_router(
                 "saved_files": saved,
             })
 
-        # ---- 配额启用：累计净新增一次 reserve，持锁分段原子写入，成功后 settle ----
-        contents = {}  # key -> (save_path, bytes)
-        total_net = 0
-        for key, upload_file in files_map.items():
-            if upload_file is None or not upload_file.filename:
-                continue
-            ext = Path(upload_file.filename).suffix.lower() or ".jpg"
-            if key == "lut":
-                ext = ".cube"
-            save_path = sample_dir / f"{key}{ext}"
-            old_size = save_path.stat().st_size if save_path.exists() else 0
-            ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
-            blob = await upload_file.read()
-            contents[key] = (save_path, blob)
-            total_net += len(blob) - old_size
-
-        # 扩展名变化时清理旧文件（例如 target.jpg→target.png）
-        for key, upload_file in files_map.items():
-            if upload_file is None or not upload_file.filename:
-                continue
-            ext = Path(upload_file.filename).suffix.lower() or ".jpg"
-            if key == "lut":
-                ext = ".cube"
-            save_path = sample_dir / f"{key}{ext}"
-            for old in sample_dir.glob(f"{key}.*"):
-                if old.resolve() != save_path.resolve() and old.name not in (".", ".."):
-                    if old.exists() and storage_quota_svc.is_quota_enabled():
-                        total_net -= old.stat().st_size
-
+        # ---- 配额启用：先取训练样本锁，再读旧目录真实状态，做完整目录级 staging/backup 交换 ----
         reservation_id = None
         force = not storage_quota_svc.is_dry_run()
         lock_token = await storage_quota_svc.acquire_transaction_lock(
             db, user_id=request_user_id, kind="training", sample_key=safe_uuid,
         )
-        if force and not lock_token.acquired:
+        # 样本写锁失败：即使 dry-run 也不能放行（避免同样本写入竞态）
+        if not lock_token.acquired:
+            logging.getLogger("quota").warning("training sample lock failed user=%s", request_user_id)
             return JSONResponse(status_code=503,
                                 content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
+            # ---- 锁内：重新读取旧目录真实大小，计算净差额（不再锁外读）----
+            contents = {}
+            old_dir_bytes = 0
+            for key, upload_file in files_map.items():
+                if upload_file is None or not upload_file.filename:
+                    continue
+                ext = Path(upload_file.filename).suffix.lower() or ".jpg"
+                if key == "lut":
+                    ext = ".cube"
+                save_path = sample_dir / f"{key}{ext}"
+                old_size = save_path.stat().st_size if save_path.exists() else 0
+                old_dir_bytes += old_size
+                ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
+                blob = await upload_file.read()
+                contents[key] = (save_path, blob)
+            meta_old_size = (sample_dir / "meta.json").stat().st_size if (sample_dir / "meta.json").exists() else 0
+            old_dir_bytes += meta_old_size
+            # meta 文本（含新 saved_files）计入目录真实差额
+            new_meta_obj = {
+                "sample_uuid": safe_uuid,
+                "user_id": request_user_id,
+                "storage_label": storage_label,
+                "is_video": is_video == "1" or is_video.lower() == "true",
+                "saved_files": {k: str(p.name) for k, (p, _) in contents.items()},
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            }
+            new_meta_json = json.dumps(new_meta_obj, ensure_ascii=False, indent=2).encode("utf-8")
+            new_dir_bytes = sum(len(blob) for _p, blob in contents.values()) + len(new_meta_json)
+            total_net = new_dir_bytes - old_dir_bytes
+
             if total_net != 0:
                 try:
                     outcome = await storage_quota_svc.reserve_quota(
@@ -508,8 +516,6 @@ def create_training_router(
                     if not outcome.allowed:
                         return _quota_error_response(outcome)
                 except Exception:
-                    import logging
-
                     logging.getLogger("quota").warning("quota reserve failed (training)", exc_info=True)
                     if force:
                         return JSONResponse(status_code=503,
@@ -517,89 +523,36 @@ def create_training_router(
                     pass
 
             sample_dir.mkdir(parents=True, exist_ok=True)
+            # 完整目录级交换：staging 子目录构建新样本，backup 备份旧样本
+            staging_dir = sample_dir.with_name(f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}")
+            backup_dir = sample_dir.with_name(f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}")
             try:
-                # 旧扩展文件先移入同目录 backup（暂不删除），写入成功后再物理删除，失败则回滚
-                backups = []
-                for key, upload_file in files_map.items():
-                    if upload_file is None or not upload_file.filename:
-                        continue
-                    ext = Path(upload_file.filename).suffix.lower() or ".jpg"
-                    if key == "lut":
-                        ext = ".cube"
-                    save_path = sample_dir / f"{key}{ext}"
-                    for old in sample_dir.glob(f"{key}.*"):
-                        if old.resolve() == save_path.resolve():
-                            continue
-                        if old.is_file() and not old.name.endswith(".staging"):
-                            bak = old.with_name(old.name + ".bak")
-                            try:
-                                os.replace(old, bak)
-                                backups.append(bak)
-                            except OSError:
-                                pass
+                staging_dir.mkdir(parents=True)
                 for key, (save_path, blob) in contents.items():
-                    staging = save_path.with_name(save_path.name + ".staging")
-                    with open(staging, "wb") as f:
+                    sp = staging_dir / save_path.name
+                    with open(sp, "wb") as f:
                         f.write(blob)
-                    os.replace(staging, save_path)
-                    saved[key] = str(save_path.name)
+                with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
+                    f.write(new_meta_json.decode("utf-8"))
 
-                meta_path = sample_dir / "meta.json"
-                try:
-                    meta_obj = json.loads(meta) if meta else {}
-                except (ValueError, TypeError):
-                    meta_obj = {}
-                if not isinstance(meta_obj, dict):
-                    meta_obj = {}
-                meta_obj.update({
-                    "sample_uuid": safe_uuid,
-                    "user_id": request_user_id,
-                    "storage_label": storage_label,
-                    "is_video": is_video == "1" or is_video.lower() == "true",
-                    "saved_files": saved,
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                })
-                meta_path = sample_dir / "meta.json"
-                try:
-                    meta_obj = json.loads(meta) if meta else {}
-                except (ValueError, TypeError):
-                    meta_obj = {}
-                if not isinstance(meta_obj, dict):
-                    meta_obj = {}
-                meta_obj.update({
-                    "sample_uuid": safe_uuid,
-                    "user_id": request_user_id,
-                    "storage_label": storage_label,
-                    "is_video": is_video == "1" or is_video.lower() == "true",
-                    "saved_files": saved,
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                })
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(meta_obj, f, ensure_ascii=False, indent=2)
-
-                # 成功后物理删除备份（扩展名变化留下的旧文件）
-                for bak in backups:
-                    try:
-                        if bak.exists():
-                            bak.unlink()
-                    except OSError:
-                        pass
-            except Exception:
-                # 回滚：删除 staging/已替换文件，恢复备份（删除残留 staging/backup）
+                # 原子交换：backup 存旧样本
+                if sample_dir.exists():
+                    os.rename(str(sample_dir), str(backup_dir))
+                os.rename(str(staging_dir), str(sample_dir))
                 for key, (save_path, _blob) in contents.items():
-                    try:
-                        st = save_path.with_name(save_path.name + ".staging")
-                        if st.exists():
-                            st.unlink()
-                    except OSError:
-                        pass
-                for bak in backups:
-                    try:
-                        target = bak.with_suffix("")
-                        if bak.exists():
-                            os.replace(bak, target)
-                    except OSError:
-                        pass
+                    saved[key] = save_path.name
+            except Exception:
+                # 失败回滚：删 staging，恢复完整旧目录（backup→sample_dir）
+                try:
+                    if staging_dir.exists():
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                except OSError:
+                    pass
+                try:
+                    if backup_dir.exists() and not sample_dir.exists():
+                        os.rename(str(backup_dir), str(sample_dir))
+                except OSError:
+                    pass
                 if reservation_id:
                     try:
                         await storage_quota_svc.release_reservation(
@@ -610,6 +563,13 @@ def create_training_router(
                         pass
                 raise
 
+            # 成功后删除 backup（旧样本）
+            try:
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+            except OSError:
+                pass
+
             if reservation_id:
                 try:
                     await storage_quota_svc.settle_quota(
@@ -617,8 +577,6 @@ def create_training_router(
                         user_id=request_user_id, kind="training", sample_key=safe_uuid,
                     )
                 except Exception:
-                    import logging
-
                     logging.getLogger("quota").error(
                         "settle_quota failed (training) user=%s", request_user_id, exc_info=True
                     )
@@ -629,8 +587,6 @@ def create_training_router(
                         db, user_id=request_user_id, kind="training", delta_bytes=total_net,
                     )
                 except Exception:
-                    import logging
-
                     logging.getLogger("quota").warning(
                         "record_usage failed (training) user=%s", request_user_id, exc_info=True
                     )

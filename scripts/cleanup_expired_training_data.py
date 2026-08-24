@@ -62,7 +62,10 @@ async def _has_active_reservation(session, *, user_id: int, kind: str, sample_ke
 
 
 async def _trash_and_delete(root: Path, cand: Path, dry_run: bool, stats: dict) -> None:
-    """把过期样本 rename 到 trash 再删除；rename 成功才计入 affected。"""
+    """把过期样本 rename 入 trash 再删除。
+
+    stats 拆为 trashed/deleted/failed，避免 affected 语义混淆。
+    """
     trash_dir = root / TRASH_DIR_NAME
     if dry_run:
         print(f"[DRY_RUN] would trash: {cand} -> {trash_dir}")
@@ -72,10 +75,11 @@ async def _trash_and_delete(root: Path, cand: Path, dry_run: bool, stats: dict) 
     dest = trash_dir / f"{cand.name}-{uuid.uuid4().hex[:8]}"
     try:
         os.rename(str(cand), str(dest))
-        stats["affected"] += 1
+        stats["trashed"] += 1
         print(f"trashed: {cand} -> {dest}")
         try:
             shutil.rmtree(dest, ignore_errors=False)
+            stats["deleted"] += 1
         except Exception as exc:
             stats["failed"] += 1
             print(f"[failed] rmtree {dest}: {exc} (trash left for retry)")
@@ -118,11 +122,11 @@ async def _cleanup_kind(session, *, uid: int, root, kind: str, retention: int, d
                 await token.release()
 
 
-def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
+def _cleanup_residuals(root: Path, dry_run: bool, now: float, stats: dict) -> None:
     """清理残留 staging/backup/trash：只匹配本功能固定命名。
 
     命名格式：<sample>.staging-<8hex> / <sample>.backup-<8hex> / 根下 .quota-trash。
-    仅列根目录（不递归遍历删除父后再继续子项），超最小年龄才清理。
+    仅列根目录（不递归删除父后再继续子项），超最小年龄才清理；失败统一计入 stats["failed"]。
     """
     import re as _re
 
@@ -155,6 +159,7 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
         if age < RESIDUAL_MIN_AGE:
             continue
         if dry_run:
+            stats["would_delete"] += 1
             print(f"[DRY_RUN] would purge residual: {entry}")
             continue
         try:
@@ -163,6 +168,7 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
             else:
                 entry.unlink()
         except OSError:
+            stats["failed"] += 1
             print(f"[failed] purge residual: {entry}")
 
 
@@ -176,7 +182,7 @@ async def main():
     dry_run = bool(STORAGE_QUOTA_DRY_RUN)
     print(f"cleanup start: retention={retention}d dry_run={dry_run}")
 
-    stats = {"affected": 0, "failed": 0, "skip_lock": 0, "skip_active": 0, "skip_fresh": 0}
+    stats = {"trashed": 0, "deleted": 0, "failed": 0, "skip_lock": 0, "skip_active": 0, "skip_fresh": 0}
     async with async_session() as session:
         if not dry_run:
             await sq.reclaim_expired_reservations(session)
@@ -193,11 +199,11 @@ async def main():
                     continue
                 if not root.exists() or not root.is_dir():
                     continue
-                before = stats["affected"]
+                before = min(stats["trashed"], stats["deleted"])
                 await _cleanup_kind(session, uid=uid, root=root, kind=kind,
                                     retention=retention, dry_run=dry_run, stats=stats)
-                _cleanup_residuals(root, dry_run, time.time())
-                if stats["affected"] != before and not dry_run:
+                _cleanup_residuals(root, dry_run, time.time(), stats)
+                if stats["deleted"] != before and not dry_run:
                     try:
                         await sq.reconcile_usage(session, user_id=uid, kind=kind, storage_label=label)
                     except Exception as exc:

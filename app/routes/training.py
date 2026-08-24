@@ -287,6 +287,13 @@ def create_training_router(
         # 配额未启用（默认）：走原路径，零行为改变。
         if not storage_quota_svc.is_quota_enabled():
             target_dir.mkdir(parents=True, exist_ok=True)
+            # 旧扩展名 original.* 清理（例如 original.jpg→original.png）
+            for old in target_dir.glob("original.*"):
+                if old.resolve() != save_path.resolve() and old.is_file():
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
             with open(save_path, "wb") as f:
                 f.write(content)
             return JSONResponse({
@@ -295,7 +302,7 @@ def create_training_router(
                 "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
             })
 
-        # ---- 检测库生效：先取锁，再读旧目录真实大小计算净差额，持锁写盘 ----
+        # ---- 检测库生效：整目录读取旧状态计算净差额；目录级 staging/backup 交换 ----
         reservation_id = None
         force = not storage_quota_svc.is_dry_run()
         lock_token = await storage_quota_svc.acquire_transaction_lock(
@@ -307,8 +314,11 @@ def create_training_router(
             return JSONResponse(status_code=503,
                                 content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            old_size = save_path.stat().st_size if save_path.exists() else 0
-            net_delta = len(content) - old_size
+            old_dir_bytes = storage_quota_svc.dir_usage_bytes(target_dir) if target_dir.exists() else 0
+            ext = Path(file.filename or "").suffix.lower() or ".jpg"
+            new_name = f"original{ext}"
+            new_dir_bytes = len(content)
+            net_delta = new_dir_bytes - old_dir_bytes
             if net_delta != 0:
                 try:
                     outcome = await storage_quota_svc.reserve_quota(
@@ -321,8 +331,6 @@ def create_training_router(
                     if not outcome.allowed:
                         return _quota_error_response(outcome)
                 except Exception:
-                    import logging
-
                     logging.getLogger("quota").warning("quota reserve failed (detection)", exc_info=True)
                     if force:
                         return JSONResponse(status_code=503,
@@ -331,15 +339,25 @@ def create_training_router(
                     pass
 
             target_dir.mkdir(parents=True, exist_ok=True)
-            staging = target_dir / (save_path.name + ".staging")
+            # 目录级交换：staging 子目录构建新样本，backup 备份旧样本
+            staging_dir = target_dir.parent / f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}"
+            backup_dir = target_dir.parent / f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}"
             try:
-                with open(staging, "wb") as f:
+                staging_dir.mkdir(parents=True)
+                with open(staging_dir / new_name, "wb") as f:
                     f.write(content)
-                os.replace(staging, save_path)  # 原子替换
+                if target_dir.exists():
+                    os.rename(str(target_dir), str(backup_dir))
+                os.rename(str(staging_dir), str(target_dir))
             except Exception:
                 try:
-                    if staging.exists():
-                        staging.unlink()
+                    if staging_dir.exists():
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                except OSError:
+                    pass
+                try:
+                    if backup_dir.exists() and not target_dir.exists():
+                        os.rename(str(backup_dir), str(target_dir))
                 except OSError:
                     pass
                 if reservation_id:
@@ -352,6 +370,17 @@ def create_training_router(
                         pass
                 raise
 
+            backup_extra = 0
+            if backup_dir.exists():
+                try:
+                    shutil.rmtree(backup_dir)
+                except OSError as exc:
+                    backup_extra = storage_quota_svc.dir_usage_bytes(backup_dir)
+                    logging.getLogger("quota").error(
+                        "detection backup removal failed user=%s dir=%s err=%s",
+                        request_user_id, backup_dir, exc,
+                    )
+
             if reservation_id:
                 try:
                     await storage_quota_svc.settle_quota(
@@ -360,20 +389,21 @@ def create_training_router(
                         kind="detection", sample_key=safe_uuid,
                     )
                 except Exception as exc:
-                    import logging
-
                     logging.getLogger("quota").error(
                         "settle_quota failed (detection) user=%s", request_user_id, exc_info=True
                     )
-            elif net_delta != 0:
+                    if force:
+                        return JSONResponse(status_code=503,
+                                            content={"error": "storage quota settle failed",
+                                                     "reconcile_needed": True})
+            elif net_delta + backup_extra != 0:
                 # dry-run / 管理员：写盘成功后按真实净差额记账
                 try:
                     await storage_quota_svc.record_usage(
-                        db, user_id=request_user_id, kind="detection", delta_bytes=net_delta,
+                        db, user_id=request_user_id, kind="detection",
+                        delta_bytes=net_delta + backup_extra,
                     )
                 except Exception as exc:
-                    import logging
-
                     logging.getLogger("quota").warning(
                         "record_usage failed (detection) user=%s", request_user_id, exc_info=True
                     )

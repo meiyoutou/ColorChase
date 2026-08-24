@@ -168,7 +168,7 @@ class QuotaLockToken:
     结束后显式 close。
     """
 
-    def __init__(self, engine, *, user_id, kind, sample_key, acquired: bool):
+    def __init__(self, engine, *, user_id, kind, sample_key, acquired: bool = False):
         self._engine = engine
         self._conn = None
         self.key = _hash_lock_key(_lock_key(user_id, kind, sample_key))
@@ -186,6 +186,7 @@ class QuotaLockToken:
                     await self._conn.close()
             finally:
                 self._conn = None
+                self.acquired = False
 
 
 async def acquire_sample_lock(

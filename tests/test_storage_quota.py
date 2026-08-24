@@ -96,6 +96,25 @@ class FakeLock:
 
     def __init__(self, acquired=True):
         self.acquired = acquired
+        self.released = False
+
+    async def release(self):
+        self.released = True
+        self.acquired = False
+
+
+def test_quota_lock_token_default_acquired_false():
+    """acquired 默认应 False，且 release 后置 False（幂等）。"""
+    import asyncio
+
+    token = sq.QuotaLockToken(None, user_id=1, kind="training", sample_key="s")
+    assert token.acquired is False
+
+    async def run():
+        await token.release()
+
+    asyncio.run(run())
+    assert token.acquired is False
 
 
 def _mk(user_id=1, kind="training", used=0, reserved=0, quota_mb=None, reconciled=True):

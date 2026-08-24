@@ -175,18 +175,16 @@ class QuotaLockToken:
         self.acquired = acquired
 
     async def release(self) -> None:
-        if not self.acquired:
-            return
+        conn = self._conn
+        was_acquired = self.acquired
+        self._conn = None
+        self.acquired = False
         try:
-            if self._conn is not None:
-                await self._conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": self.key})
+            if conn is not None and was_acquired:
+                await conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": self.key})
         finally:
-            try:
-                if self._conn is not None:
-                    await self._conn.close()
-            finally:
-                self._conn = None
-                self.acquired = False
+            if conn is not None:
+                await conn.close()
 
 
 async def acquire_sample_lock(
@@ -194,24 +192,32 @@ async def acquire_sample_lock(
 ) -> QuotaLockToken:
     """在独立 AsyncConnection 上获取 GET_LOCK（锁令牌持有该连接）。
 
-    获取失败返回 acquired=False（调用方据 dry/force 决策 fail-open / fail-closed）。
+    获取失败或 engine.connect() 异常都返回 acquired=False（不抛到路由变 500）。
     """
     engine = get_engine()
-    from sqlalchemy.ext.asyncio import AsyncConnection
-
     token = QuotaLockToken(engine, user_id=user_id, kind=kind, sample_key=sample_key)
-    conn = await engine.connect()
-    token._conn = conn
     try:
+        from sqlalchemy.ext.asyncio import AsyncConnection
+
+        conn = await engine.connect()
+        token._conn = conn
         raw_key = _lock_key(user_id, kind, sample_key)
         result = await conn.execute(text("SELECT GET_LOCK(:k, :t)"), {"k": _hash_lock_key(raw_key), "t": timeout})
         token.acquired = bool(result.scalar())
-    except Exception:
-        token.acquired = False
-        try:
+        if not token.acquired:
+            # GET_LOCK 返回 0（锁超时未获）应立即关闭连接，不泄漏
             await conn.close()
-        finally:
             token._conn = None
+    except Exception:
+        # engine.connect() 异常或 GET_LOCK 异常：返回 acquired=False，不 500
+        token.acquired = False
+        conn = token._conn
+        token._conn = None
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
     return token
 
 

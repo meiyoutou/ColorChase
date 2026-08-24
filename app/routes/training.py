@@ -504,9 +504,9 @@ def create_training_router(
             return JSONResponse(status_code=503,
                                 content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            # ---- 锁内：重新读取旧目录真实大小，计算净差额（不再锁外读）----
+            # ---- 锁内：重新读取整个旧目录真实大小，计算净差额（不再锁外读）----
             contents = {}
-            old_dir_bytes = 0
+            old_dir_bytes = storage_quota_svc.dir_usage_bytes(sample_dir) if sample_dir.exists() else 0
             for key, upload_file in files_map.items():
                 if upload_file is None or not upload_file.filename:
                     continue
@@ -514,14 +514,10 @@ def create_training_router(
                 if key == "lut":
                     ext = ".cube"
                 save_path = sample_dir / f"{key}{ext}"
-                old_size = save_path.stat().st_size if save_path.exists() else 0
-                old_dir_bytes += old_size
                 ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
                 blob = await upload_file.read()
                 contents[key] = (save_path, blob)
-            meta_old_size = (sample_dir / "meta.json").stat().st_size if (sample_dir / "meta.json").exists() else 0
-            old_dir_bytes += meta_old_size
-            # meta 文本（含新 saved_files）计入目录真实差额
+            # 未传的可选字段（reference/lut）从旧目录复制到 staging 以保持原语义
             new_meta_obj = {
                 "sample_uuid": safe_uuid,
                 "user_id": request_user_id,
@@ -531,8 +527,29 @@ def create_training_router(
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
             new_meta_json = json.dumps(new_meta_obj, ensure_ascii=False, indent=2).encode("utf-8")
-            new_dir_bytes = sum(len(blob) for _p, blob in contents.values()) + len(new_meta_json)
-            total_net = new_dir_bytes - old_dir_bytes
+
+            sample_dir.mkdir(parents=True, exist_ok=True)
+            staging_dir = sample_dir.with_name(f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}")
+            backup_dir = sample_dir.with_name(f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}")
+            staging_dir.mkdir(parents=True)
+            for key, (save_path, blob) in contents.items():
+                with open(staging_dir / save_path.name, "wb") as f:
+                    f.write(blob)
+            # 复制未传的可选字段（reference/lut）以保持与旧接口语义
+            for name in ("reference", "lut"):
+                imported = any(k == name for k in contents)
+                if imported:
+                    continue
+                for f_old in sample_dir.glob(f"{name}.*"):
+                    if f_old.is_file():
+                        try:
+                            shutil.copy2(str(f_old), str(staging_dir / f_old.name))
+                        except OSError:
+                            pass
+            with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
+                f.write(new_meta_json.decode("utf-8"))
+            # 用真实 staging 目录大小计算净差额（staging 保留到交换完成后再清理）
+            total_net = storage_quota_svc.dir_usage_bytes(staging_dir) - old_dir_bytes
 
             if total_net != 0:
                 try:
@@ -552,20 +569,8 @@ def create_training_router(
                                             content={"error": "storage quota unavailable"})
                     pass
 
-            sample_dir.mkdir(parents=True, exist_ok=True)
-            # 完整目录级交换：staging 子目录构建新样本，backup 备份旧样本
-            staging_dir = sample_dir.with_name(f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}")
-            backup_dir = sample_dir.with_name(f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}")
+            # 原子交换：backup 存旧样本
             try:
-                staging_dir.mkdir(parents=True)
-                for key, (save_path, blob) in contents.items():
-                    sp = staging_dir / save_path.name
-                    with open(sp, "wb") as f:
-                        f.write(blob)
-                with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
-                    f.write(new_meta_json.decode("utf-8"))
-
-                # 原子交换：backup 存旧样本
                 if sample_dir.exists():
                     os.rename(str(sample_dir), str(backup_dir))
                 os.rename(str(staging_dir), str(sample_dir))
@@ -593,28 +598,39 @@ def create_training_router(
                         pass
                 raise
 
-            # 成功后删除 backup（旧样本）
-            try:
-                if backup_dir.exists():
-                    shutil.rmtree(backup_dir, ignore_errors=True)
-            except OSError:
-                pass
+            # 成功后删除 backup（旧样本）；失败不静默，计入残留物理用量
+            backup_extra = 0
+            if backup_dir.exists():
+                try:
+                    shutil.rmtree(backup_dir)
+                except OSError as exc:
+                    backup_extra = storage_quota_svc.dir_usage_bytes(backup_dir)
+                    logging.getLogger("quota").error(
+                        "training backup removal failed user=%s dir=%s err=%s",
+                        request_user_id, backup_dir, exc,
+                    )
+            actual_delta = total_net + backup_extra
 
             if reservation_id:
                 try:
                     await storage_quota_svc.settle_quota(
-                        db, reservation_id=reservation_id, delta_bytes=total_net,
+                        db, reservation_id=reservation_id, delta_bytes=actual_delta,
                         user_id=request_user_id, kind="training", sample_key=safe_uuid,
                     )
                 except Exception:
                     logging.getLogger("quota").error(
                         "settle_quota failed (training) user=%s", request_user_id, exc_info=True
                     )
-            elif total_net != 0:
+                    if force:
+                        return JSONResponse(status_code=503,
+                                            content={"error": "storage quota settle failed",
+                                                     "stored": True,
+                                                     "reconcile_needed": True})
+            elif actual_delta != 0:
                 # dry-run / 管理员：写盘成功后按真实净差额记账
                 try:
                     await storage_quota_svc.record_usage(
-                        db, user_id=request_user_id, kind="training", delta_bytes=total_net,
+                        db, user_id=request_user_id, kind="training", delta_bytes=actual_delta,
                     )
                 except Exception:
                     logging.getLogger("quota").warning(

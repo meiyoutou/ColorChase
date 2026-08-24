@@ -382,7 +382,17 @@ def create_training_router(
                     )
             actual_delta = net_delta + backup_extra
             if backup_extra > 0 and force:
-                # 强制模式 backup 删除失败：残留物理用量已计，不返回 200
+                # 强制模式 backup 删除失败：先 settle 实际差额（释放 reservation/reserved），再 503 对账
+                if reservation_id:
+                    try:
+                        await storage_quota_svc.settle_quota(
+                            db, reservation_id=reservation_id, delta_bytes=actual_delta,
+                            user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                        )
+                    except Exception as exc:
+                        logging.getLogger("quota").error(
+                            "settle_quota failed (detection backup 残留) user=%s", request_user_id, exc_info=True
+                        )
                 return JSONResponse(status_code=503,
                                     content={"error": "storage quota backfill failed",
                                              "stored": True,
@@ -617,6 +627,7 @@ def create_training_router(
                         request_user_id, backup_dir, exc,
                     )
             actual_delta = total_net + backup_extra
+            backup_pending = backup_extra > 0
 
             if reservation_id:
                 try:
@@ -643,6 +654,13 @@ def create_training_router(
                     logging.getLogger("quota").warning(
                         "record_usage failed (training) user=%s", request_user_id, exc_info=True
                     )
+
+            if backup_pending and force:
+                # backup 残留待物理回收；已 settle 实际差额，不返回 200
+                return JSONResponse(status_code=503,
+                                    content={"error": "storage quota backfill failed",
+                                             "stored": True,
+                                             "reconcile_needed": True})
         finally:
             await lock_token.release()
 

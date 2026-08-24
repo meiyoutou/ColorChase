@@ -167,6 +167,7 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float, stats: dict) -> No
                 shutil.rmtree(entry)
             else:
                 entry.unlink()
+            stats["deleted"] += 1
         except OSError:
             stats["failed"] += 1
             print(f"[failed] purge residual: {entry}")
@@ -199,11 +200,11 @@ async def main():
                     continue
                 if not root.exists() or not root.is_dir():
                     continue
-                before = min(stats["trashed"], stats["deleted"])
+                before_deleted = stats["deleted"]
                 await _cleanup_kind(session, uid=uid, root=root, kind=kind,
                                     retention=retention, dry_run=dry_run, stats=stats)
                 _cleanup_residuals(root, dry_run, time.time(), stats)
-                if stats["deleted"] != before and not dry_run:
+                if stats["deleted"] != before_deleted and not dry_run:
                     try:
                         await sq.reconcile_usage(session, user_id=uid, kind=kind, storage_label=label)
                     except Exception as exc:

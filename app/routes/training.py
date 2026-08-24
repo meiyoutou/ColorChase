@@ -380,12 +380,19 @@ def create_training_router(
                         "detection backup removal failed user=%s dir=%s err=%s",
                         request_user_id, backup_dir, exc,
                     )
+            actual_delta = net_delta + backup_extra
+            if backup_extra > 0 and force:
+                # 强制模式 backup 删除失败：残留物理用量已计，不返回 200
+                return JSONResponse(status_code=503,
+                                    content={"error": "storage quota backfill failed",
+                                             "stored": True,
+                                             "reconcile_needed": True})
 
             if reservation_id:
                 try:
                     await storage_quota_svc.settle_quota(
                         db, reservation_id=reservation_id,
-                        delta_bytes=net_delta, user_id=request_user_id,
+                        delta_bytes=actual_delta, user_id=request_user_id,
                         kind="detection", sample_key=safe_uuid,
                     )
                 except Exception as exc:
@@ -396,12 +403,12 @@ def create_training_router(
                         return JSONResponse(status_code=503,
                                             content={"error": "storage quota settle failed",
                                                      "reconcile_needed": True})
-            elif net_delta + backup_extra != 0:
+            elif actual_delta != 0:
                 # dry-run / 管理员：写盘成功后按真实净差额记账
                 try:
                     await storage_quota_svc.record_usage(
                         db, user_id=request_user_id, kind="detection",
-                        delta_bytes=net_delta + backup_extra,
+                        delta_bytes=actual_delta,
                     )
                 except Exception as exc:
                     logging.getLogger("quota").warning(

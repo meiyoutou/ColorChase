@@ -111,6 +111,7 @@ async def _cleanup_kind(session, *, uid: int, root, kind: str, retention: int, d
                 continue
             await _trash_and_delete(root, cand, dry_run, stats)
         except Exception as exc:
+            stats["failed"] += 1
             print(f"[error] {cand}: {exc}")
         finally:
             if locked and token is not None:
@@ -125,14 +126,21 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
     """
     import re as _re
 
-    resid_re = _re.compile(r"^(?P<sample>[a-f0-9]+)\.(?:staging|backup)-(?P<rid>[a-f0-9]{8})$")
+    resid_re = _re.compile(r"^(?P<sample>[A-Za-z0-9_.-]+)\.(?:staging|backup)-(?P<rid>[a-f0-9]{8})$")
     targets = []
     try:
         for entry in root.iterdir():
             if entry.is_symlink():
                 continue
             if entry.name == TRASH_DIR_NAME and entry.is_dir():
-                targets.append(entry)
+                # .quota-trash：只枚举其下具体子目录逐个清计数，不删整个父目录
+                try:
+                    for sub in entry.iterdir():
+                        if sub.is_symlink() or sub.name.startswith("."):
+                            continue
+                        targets.append(sub)
+                except OSError:
+                    pass
                 continue
             m = resid_re.match(entry.name)
             if m:
@@ -151,7 +159,7 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
             continue
         try:
             if entry.is_dir():
-                shutil.rmtree(entry, ignore_errors=True)
+                shutil.rmtree(entry)
             else:
                 entry.unlink()
         except OSError:
@@ -192,8 +200,9 @@ async def main():
                 if stats["affected"] != before and not dry_run:
                     try:
                         await sq.reconcile_usage(session, user_id=uid, kind=kind, storage_label=label)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        stats["reconcile_failed"] = stats.get("reconcile_failed", 0) + 1
+                        print(f"[error] reconcile failed user={uid} kind={kind}: {exc} (reconcile_needed)")
         print(f"cleanup finished. {stats}")
 
 

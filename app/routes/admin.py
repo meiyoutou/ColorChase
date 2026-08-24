@@ -1178,13 +1178,24 @@ async def admin_storage_quota_reconcile(
     if not label:
         raise HTTPException(status_code=409, detail="用户缺少 storage_label，无法对账")
 
-    total = await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
+    await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
+    # 重新读取 quota 行，返回数据库实际写入的 reconciled_at
+    qrow = (
+        await db.execute(
+            select(UserStorageQuota).where(
+                UserStorageQuota.user_id == user.id,
+                UserStorageQuota.kind == kind,
+            )
+        )
+    ).scalar_one_or_none()
+    reconciled_at = str(qrow.reconciled_at) if (qrow is not None and qrow.reconciled_at) else None
+    used = int(qrow.used_bytes or 0) if qrow is not None else 0
     return {
         "user_id": user.id,
         "kind": kind,
-        "used_bytes": total,
-        "used_mb": total // (1024 * 1024),
-        "reconciled_at": sq.now_utc().isoformat(),
+        "used_bytes": used,
+        "used_mb": used // (1024 * 1024),
+        "reconciled_at": reconciled_at,
     }
 
 

@@ -31,16 +31,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.services import storage_quota as sq
 from database import async_session
-from models import User
+from models import StorageQuotaReservation, User
 from sqlalchemy import select  # noqa: E402
 
 RESIDUAL_MIN_AGE = 6 * 3600  # 残留文件须 >6h 才清理，不碰当天活动文件
 TRASH_DIR_NAME = ".quota-trash"
 
 
-def _sync_has_active_reservation(sample_dir: Path) -> bool:
-    """目录内存在 .active_reservation 标记即视为有活动预留（DB 一致信号，供注入）。"""
-    return (sample_dir / ".active_reservation").exists()
+def _cand_expired(cand: Path, retention: int) -> bool:
+    """判断单个样本目录是否过期（目录内最大文件 mtime 超过保留期）。"""
+    if retention <= 0:
+        return False
+    mtime = sq.latest_mtime(cand)
+    if mtime is None:
+        return False
+    return mtime < (time.time() - retention * 86400)
+
+
+async def _has_active_reservation(session, *, user_id: int, kind: str, sample_key: str) -> bool:
+    """查询 DB：该 user/kind/sample 是否有 status='reserved' 的预留存在。"""
+    result = await session.execute(
+        select(StorageQuotaReservation.id).where(
+            StorageQuotaReservation.user_id == user_id,
+            StorageQuotaReservation.kind == kind,
+            StorageQuotaReservation.sample_key == sample_key,
+            StorageQuotaReservation.status == "reserved",
+        )
+    )
+    return result.first() is not None
 
 
 async def _trash_and_delete(root: Path, cand: Path, dry_run: bool, stats: dict) -> None:
@@ -66,30 +84,30 @@ async def _trash_and_delete(root: Path, cand: Path, dry_run: bool, stats: dict) 
         print(f"[failed] rename {cand}: {exc}")
 
 
-async def _cleanup_kind(session, root: Path, kind: str, retention: int, dry_run: bool, stats: dict) -> None:
-    """清理单用户单 kind 下的过期样本。"""
+async def _cleanup_kind(session, *, uid: int, root, kind: str, retention: int, dry_run: bool, stats: dict) -> None:
+    """清理单用户单 kind 下的过期样本。uid 必须是该样本拥有者的真实 user_id。"""
     for cand in sq.sample_subdir_candidates(root, kind):
         locked = False
         token = None
         try:
-            token = await sq.acquire_sample_lock(user_id=0, kind=kind, sample_key=cand.name, timeout=2.0)
+            token = await sq.acquire_sample_lock(user_id=uid, kind=kind, sample_key=cand.name, timeout=2.0)
             locked = token.acquired
             if not locked:
                 stats["skip_lock"] += 1
                 print(f"[skip] lock failed: {cand}")
                 continue
-            if _sync_has_active_reservation(cand):
-                stats["skip_active"] += 1
-                print(f"[skip] active reservation: {cand}")
+            # 拿锁后二次检查过期状态（拿锁前后可能变化）——判定当前 cand 是否仍过期
+            if not _cand_expired(cand, retention):
+                stats["skip_fresh"] += 1
+                print(f"[skip] sample not expired: {cand}")
                 continue
-            # 拿锁后二次检查过期状态（拿锁前后可能变化）
             if cand not in sq.sample_subdir_candidates(root, kind):
                 stats["skip_fresh"] += 1
                 print(f"[skip] sample no longer valid: {cand}")
                 continue
-            if not sq.expired_sample_dirs(root, retention):
-                stats["skip_fresh"] += 1
-                print(f"[skip] sample became fresh: {cand}")
+            if await _has_active_reservation(session, user_id=uid, kind=kind, sample_key=cand.name):
+                stats["skip_active"] += 1
+                print(f"[skip] active reservation: {cand}")
                 continue
             await _trash_and_delete(root, cand, dry_run, stats)
         except Exception as exc:
@@ -100,16 +118,28 @@ async def _cleanup_kind(session, root: Path, kind: str, retention: int, dry_run:
 
 
 def _cleanup_residuals(root: Path, dry_run: bool, now: float) -> None:
-    """清理残留 .staging/.backup/.quota-trash：仅处理超过最小年龄的。"""
-    for entry in root.rglob("*"):
-        if entry.is_symlink():
-            continue
-        is_residual = (
-            entry.name.endswith((".staging", ".backup"))
-            or (entry.is_dir() and entry.name == TRASH_DIR_NAME)
-        )
-        if not is_residual:
-            continue
+    """清理残留 staging/backup/trash：只匹配本功能固定命名。
+
+    命名格式：<sample>.staging-<8hex> / <sample>.backup-<8hex> / 根下 .quota-trash。
+    仅列根目录（不递归遍历删除父后再继续子项），超最小年龄才清理。
+    """
+    import re as _re
+
+    resid_re = _re.compile(r"^(?P<sample>[a-f0-9]+)\.(?:staging|backup)-(?P<rid>[a-f0-9]{8})$")
+    targets = []
+    try:
+        for entry in root.iterdir():
+            if entry.is_symlink():
+                continue
+            if entry.name == TRASH_DIR_NAME and entry.is_dir():
+                targets.append(entry)
+                continue
+            m = resid_re.match(entry.name)
+            if m:
+                targets.append(entry)
+    except OSError:
+        return
+    for entry in targets:
         try:
             age = now - entry.stat().st_mtime
         except OSError:
@@ -140,7 +170,8 @@ async def main():
 
     stats = {"affected": 0, "failed": 0, "skip_lock": 0, "skip_active": 0, "skip_fresh": 0}
     async with async_session() as session:
-        await sq.reclaim_expired_reservations(session)
+        if not dry_run:
+            await sq.reclaim_expired_reservations(session)
         users = (await session.execute(select(User))).scalars().all()
         for user in users:
             label = str(getattr(user, "storage_label", "") or "")
@@ -155,7 +186,8 @@ async def main():
                 if not root.exists() or not root.is_dir():
                     continue
                 before = stats["affected"]
-                await _cleanup_kind(session, root, kind, retention, dry_run, stats)
+                await _cleanup_kind(session, uid=uid, root=root, kind=kind,
+                                    retention=retention, dry_run=dry_run, stats=stats)
                 _cleanup_residuals(root, dry_run, time.time())
                 if stats["affected"] != before and not dry_run:
                     try:

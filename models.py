@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import LONGTEXT
 from database import Base
 
@@ -63,6 +63,7 @@ class UserStorageQuota(Base):
     used_bytes = Column(BigInteger, nullable=False, default=0)
     reserved_bytes = Column(BigInteger, nullable=False, default=0)
     reconciled_at = Column(DateTime, nullable=True)
+    reconcile_needed = Column(Boolean, nullable=False, default=False)
     would_deny_count = Column(Integer, nullable=False, default=0)
     denied_count = Column(Integer, nullable=False, default=0)
     last_would_deny_at = Column(DateTime, nullable=True)

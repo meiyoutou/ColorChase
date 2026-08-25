@@ -32,6 +32,7 @@ from models import (
     User,
     UserStorageQuota,
 )
+from sqlalchemy.exc import IntegrityError
 
 
 def now_utc() -> datetime:
@@ -292,10 +293,16 @@ async def reserve_quota(
 
             reservation_id = _new_reservation_id()
             if qrow is None:
-                qrow = UserStorageQuota(
-                    user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
-                )
-                session.add(qrow)
+                # 首次并发创建（不同 sample_key 同 user+kind）可能唯一键冲突：
+                # 这里创建，冲突 rollback+重查一次，避免唯一键竞态。
+                try:
+                    qrow = UserStorageQuota(
+                        user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
+                    )
+                    session.add(qrow)
+                except IntegrityError:
+                    await session.rollback()
+                    qrow = await _get_quota_row(session, user_id, kind)
             qrow.reserved_bytes = _clamp0(qrow.reserved_bytes + incoming_bytes)
             session.add(
                 StorageQuotaReservation(
@@ -394,6 +401,7 @@ async def settle_quota(
         r.settled_bytes = delta_bytes
         r.occupied_bytes = delta_bytes
         r.settled_at = now_utc()
+        qrow.reconcile_needed = False
         await session.commit()
         return new_used
 
@@ -448,11 +456,11 @@ async def reclaim_expired_reservations(
     if not STORAGE_QUOTA_ENABLED:
         return 0
     now = now if now is not None else now_utc()
-    cutoff = cutoff or (now - timedelta(minutes=30))
     result = await session.execute(
         select(StorageQuotaReservation).where(
             StorageQuotaReservation.status == "reserved",
-            StorageQuotaReservation.created_at < cutoff,
+            StorageQuotaReservation.expires_at.isnot_(None),
+            StorageQuotaReservation.expires_at < now,
         )
     )
     rows = list(result.scalars().all())
@@ -461,10 +469,13 @@ async def reclaim_expired_reservations(
         r = await _get_reservation(session, row.reservation_id)
         if r is None or r.status != "reserved":
             continue
+        if r.expires_at is None or r.expires_at >= now:
+            continue
         qrow = await _get_quota_row(session, r.user_id, r.kind)
         if qrow is not None:
             qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) - int(r.requested_bytes or 0))
-        r.status = "released"
+            qrow.reconcile_needed = True
+        r.status = "expired"
         r.released_at = now
         await session.commit()
         count += 1

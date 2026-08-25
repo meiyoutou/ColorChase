@@ -294,14 +294,15 @@ async def reserve_quota(
             reservation_id = _new_reservation_id()
             if qrow is None:
                 # 首次并发创建（不同 sample_key 同 user+kind）可能唯一键冲突：
-                # 这里创建，冲突 rollback+重查一次，避免唯一键竞态。
+                # 用 SAVEPOINT(begin_nested) 仅回滚 quota insert，禁止外层 session.rollback()。
                 try:
-                    qrow = UserStorageQuota(
-                        user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
-                    )
-                    session.add(qrow)
+                    async with session.begin_nested():
+                        qrow = UserStorageQuota(
+                            user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
+                        )
+                        session.add(qrow)
                 except IntegrityError:
-                    await session.rollback()
+                    # SAVEPOINT 已自动回滚 insert；重查既有行，不解开外层事务
                     qrow = await _get_quota_row(session, user_id, kind)
             qrow.reserved_bytes = _clamp0(qrow.reserved_bytes + incoming_bytes)
             session.add(

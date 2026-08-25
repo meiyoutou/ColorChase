@@ -348,6 +348,38 @@ def _lock_key(user_id: int, kind: str, sample_key: str) -> str:
     return f"storage_quota:{user_id}:{kind}:{sample_key}"
 
 
+def _quota_row_lock_key(user_id: int, kind: str) -> str:
+    """user-kind 级 quota 行锁 key：保护 qrow 首次创建与关键增量更新（相对 sample key 不同）。"""
+    return f"storage_quota_row:{user_id}:{kind}"
+
+
+async def mark_reconcile_needed(
+    session, *, user_id: int, kind: str, reason: str, sample_key: Optional[str] = None
+) -> None:
+    """把 quota 行标记为待对账（文件可能已交换但账面未对齐）。"""
+    import logging
+
+    if not is_quota_enabled():
+        return
+    validate_kind(kind)
+    qrow = await _get_quota_row(session, user_id, kind)
+    if qrow is None:
+        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
+        session.add(qrow)
+    qrow.reconcile_needed = True
+    qrow.reconcile_reason = str(reason or "")[:128]
+    qrow.reconcile_sample_key = str(sample_key or "")[:256] or qrow.reconcile_sample_key
+    qrow.reconcile_marked_at = now_utc()
+    try:
+        await session.commit()
+    except Exception:
+        logging.getLogger("quota").error(
+            "mark_reconcile_needed failed user=%s kind=%s sample=%s reason=%s",
+            user_id, kind, sample_key, reason, exc_info=True,
+        )
+        raise
+
+
 async def record_usage(
     session, *, user_id: int, kind: str, delta_bytes: int
 ) -> int:

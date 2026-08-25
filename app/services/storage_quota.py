@@ -222,6 +222,41 @@ async def acquire_sample_lock(
     return token
 
 
+async def acquire_quota_row_lock(
+    *, user_id: int, kind: str, timeout: float = 5.0
+) -> QuotaLockToken:
+    """user-kind 级 quota 行锁：保护 qrow 首次创建与关键增量更新。
+
+    独立 AsyncConnection + QuotaLockToken 管理连接生命周期；key = hash("storage_quota_row:{user,kind}")，
+    与 sample lock key 不同。锁顺序统一为：先 quota-row lock，再 sample lock。
+    """
+    engine = get_engine()
+    token = QuotaLockToken(engine, user_id=user_id, kind=kind, sample_key="", acquired=False)
+    try:
+        from sqlalchemy.ext.asyncio import AsyncConnection
+
+        conn = await engine.connect()
+        token._conn = conn
+        raw_key = _quota_row_lock_key(user_id, kind)
+        result = await conn.execute(
+            text("SELECT GET_LOCK(:k, :t)"), {"k": _hash_lock_key(raw_key), "t": timeout}
+        )
+        token.acquired = bool(result.scalar())
+        if not token.acquired:
+            await conn.close()
+            token._conn = None
+    except Exception:
+        token.acquired = False
+        conn = token._conn
+        token._conn = None
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+    return token
+
+
 async def acquire_transaction_lock(
     session, *, user_id: int, kind: str, sample_key: str, timeout: float = 5.0
 ) -> QuotaLockToken:

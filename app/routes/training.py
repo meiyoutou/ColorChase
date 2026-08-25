@@ -515,6 +515,8 @@ def create_training_router(
         lock_token = await storage_quota_svc.acquire_transaction_lock(
             db, user_id=request_user_id, kind="training", sample_key=safe_uuid,
         )
+        staging_dir = None
+        swap_done = False
         # 样本写锁失败：即使 dry-run 也不能放行（避免同样本写入竞态）
         if not lock_token.acquired:
             logging.getLogger("quota").warning("training sample lock failed user=%s", request_user_id)
@@ -552,17 +554,14 @@ def create_training_router(
             for key, (save_path, blob) in contents.items():
                 with open(staging_dir / save_path.name, "wb") as f:
                     f.write(blob)
-            # 复制未传的可选字段（reference/lut）以保持与旧接口语义
+            # 复制未传的可选字段（reference/lut）以保持旧接口语义；失败必须中止上传，不 pass
             for name in ("reference", "lut"):
                 imported = any(k == name for k in contents)
                 if imported:
                     continue
                 for f_old in sample_dir.glob(f"{name}.*"):
                     if f_old.is_file():
-                        try:
-                            shutil.copy2(str(f_old), str(staging_dir / f_old.name))
-                        except OSError:
-                            pass
+                        shutil.copy2(str(f_old), str(staging_dir / f_old.name))
             with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
                 f.write(new_meta_json.decode("utf-8"))
             # 用真实 staging 目录大小计算净差额（staging 保留到交换完成后再清理）
@@ -591,6 +590,7 @@ def create_training_router(
                 if sample_dir.exists():
                     os.rename(str(sample_dir), str(backup_dir))
                 os.rename(str(staging_dir), str(sample_dir))
+                swap_done = True
                 for key, (save_path, _blob) in contents.items():
                     saved[key] = save_path.name
             except Exception:
@@ -662,6 +662,12 @@ def create_training_router(
                                              "stored": True,
                                              "reconcile_needed": True})
         finally:
+            # 未完成交换时清理残留 staging（配额拒绝/DB 异常早退不泄漏）
+            try:
+                if staging_dir is not None and not swap_done and staging_dir.exists():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+            except Exception:
+                pass
             await lock_token.release()
 
         return JSONResponse({

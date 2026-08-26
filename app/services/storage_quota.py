@@ -264,6 +264,65 @@ async def acquire_transaction_lock(
     return await acquire_sample_lock(user_id=user_id, kind=kind, sample_key=sample_key, timeout=timeout)
 
 
+class QuotaLockUnavailable(Exception):
+    """组合锁上下文无法取得所需锁。"""
+
+
+class QuotaOperationLock:
+    """组合锁结果：暴露 acquired / row_token / sample_token。"""
+
+    def __init__(self, row_token, sample_token):
+        self.row_token = row_token
+        self.sample_token = sample_token
+        self.acquired = bool(row_token is not None and row_token.acquired
+                             and sample_token is not None and sample_token.acquired)
+
+
+class _QuotaOperationCtx:
+    def __init__(self, *, user_id, kind, sample_key, timeout):
+        self._user_id = user_id
+        self._kind = kind
+        self._sample_key = sample_key
+        self._timeout = timeout
+        self._row_token = None
+        self._sample_token = None
+        self.result = None
+
+    async def __aenter__(self):
+        row = await acquire_quota_row_lock(user_id=self._user_id, kind=self._kind, timeout=self._timeout)
+        self._row_token = row
+        if not row.acquired:
+            await row.release()
+            raise QuotaLockUnavailable("quota row lock unavailable")
+        try:
+            samp = await acquire_sample_lock(
+                user_id=self._user_id, kind=self._kind, sample_key=self._sample_key, timeout=self._timeout
+            )
+        except Exception:
+            # sample 获取异常：先释放已取 row（逆序），再向上抛
+            await row.release()
+            raise
+        self._sample_token = samp
+        if not samp.acquired:
+            await samp.release()
+            await row.release()
+            raise QuotaLockUnavailable("sample lock unavailable")
+        op = QuotaOperationLock(row, samp)
+        self.result = op
+        return op
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._sample_token is not None:
+            await self._sample_token.release()
+        if self._row_token is not None:
+            await self._row_token.release()
+        return False
+
+
+def quota_operation_lock(user_id: int, kind: str, sample_key: str, timeout: float = 5.0):
+    return _QuotaOperationCtx(user_id=user_id, kind=kind, sample_key=sample_key, timeout=timeout)
+
+
 def _new_reservation_id() -> str:
     return _uuid.uuid4().hex
 

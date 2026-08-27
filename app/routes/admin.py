@@ -1111,6 +1111,7 @@ async def admin_storage_stats(
     reserved = {}
     would_exceed_users = set()
     denied_users = set()
+    reconcile_needed_users = set()
     by_user = []
 
     for q in quotas:
@@ -1122,6 +1123,8 @@ async def admin_storage_stats(
             would_exceed_users.add(q.user_id)
         if int(q.denied_count or 0) > 0:
             denied_users.add(q.user_id)
+        if bool(q.reconcile_needed):
+            reconcile_needed_users.add(q.user_id)
         by_user.append({
             "user_id": q.user_id,
             "storage_label": user_labels.get(int(q.user_id), ""),
@@ -1130,11 +1133,51 @@ async def admin_storage_stats(
             "reserved_mb": int(q.reserved_bytes or 0) // (1024 * 1024),
             "quota_mb": q.quota_mb,
             "reconciled_at": str(q.reconciled_at) if q.reconciled_at else None,
+            "reconcile_needed": bool(q.reconcile_needed),
+            "reconcile_reason": q.reconcile_reason,
+            "reconcile_sample_key": q.reconcile_sample_key,
+            "reconcile_marked_at": str(q.reconcile_marked_at) if q.reconcile_marked_at else None,
             "would_deny_count": int(q.would_deny_count or 0),
             "denied_count": int(q.denied_count or 0),
         })
 
     top = sorted(by_user, key=lambda item: item["used_mb"], reverse=True)[:10]
+    known_labels = {label for label in user_labels.values() if label}
+
+    import asyncio
+
+    def scan_physical():
+        aggregate = {
+            "trash_bytes": 0,
+            "staging_bytes": 0,
+            "committed_backup_bytes": 0,
+            "recovery_backup_bytes": 0,
+            "recovery_backup_count": 0,
+        }
+        for value in known_labels:
+            for root in (
+                sq.quota_sample_root("training", value),
+                sq.quota_sample_root("detection", value),
+            ):
+                current = sq.physical_orphan_stats(root)
+                for key in aggregate:
+                    aggregate[key] += int(current.get(key, 0) or 0)
+        return aggregate
+
+    physical = await asyncio.to_thread(scan_physical)
+
+    orphan_labels = set()
+    for base in (STORAGE_TRAINING_CORPUS_DIR, STORAGE_USERS_DIR):
+        try:
+            for entry in base.iterdir():
+                if (
+                    entry.is_dir() and not entry.is_symlink()
+                    and not entry.name.startswith(".")
+                    and entry.name not in known_labels
+                ):
+                    orphan_labels.add(entry.name)
+        except OSError:
+            pass
 
     return {
         "success": True,
@@ -1147,6 +1190,9 @@ async def admin_storage_stats(
         "reserved_mb": {k: v // (1024 * 1024) for k, v in reserved.items()},
         "would_exceed_user_count": len(would_exceed_users),
         "denied_user_count": len(denied_users),
+        "reconcile_needed_user_count": len(reconcile_needed_users),
+        "physical_orphans": physical,
+        "orphan_storage_labels": sorted(orphan_labels),
         "top_users": top,
     }
 
@@ -1158,9 +1204,10 @@ async def admin_storage_quota_reconcile(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """管理员触发某个用户单个 kind 的对账，供强制模式初始化路径使用。
+    """管理员触发某个用户单个 kind 的近似快照对账。
 
-    配额总开关未启用时默认拒绝(409)；不扫描、不创建行。
+    使用 quota-row lock 保护账面写回；不阻塞该用户所有 sample lock，因此结果是
+    扫描时刻的近似快照。配额未启用时拒绝且不扫描、不创建行。
     """
     from app.services import storage_quota as sq
     from app.settings import STORAGE_QUOTA_ENABLED
@@ -1179,7 +1226,7 @@ async def admin_storage_quota_reconcile(
         raise HTTPException(status_code=409, detail="用户缺少 storage_label，无法对账")
 
     await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
-    # 重新读取 quota 行，返回数据库实际写入的 reconciled_at
+    # reconcile_usage 独立调用会自行取得 quota-row lock；重新读取数据库实际状态
     qrow = (
         await db.execute(
             select(UserStorageQuota).where(
@@ -1196,6 +1243,13 @@ async def admin_storage_quota_reconcile(
         "used_bytes": used,
         "used_mb": used // (1024 * 1024),
         "reconciled_at": reconciled_at,
+        "reconcile_needed": bool(qrow.reconcile_needed) if qrow is not None else False,
+        "reconcile_reason": qrow.reconcile_reason if qrow is not None else None,
+        "reconcile_sample_key": qrow.reconcile_sample_key if qrow is not None else None,
+        "reconcile_marked_at": (
+            str(qrow.reconcile_marked_at)
+            if qrow is not None and qrow.reconcile_marked_at else None
+        ),
     }
 
 

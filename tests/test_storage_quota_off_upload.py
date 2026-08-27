@@ -64,7 +64,18 @@ def _make_client(monkeypatch, router):
     return TestClient(app)
 
 
+def _forbid_quota_helpers(monkeypatch):
+    import app.routes.training as rt
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("quota helper must not be called while feature is disabled")
+
+    monkeypatch.setattr(rt.storage_quota_svc, "reserve_quota", forbidden)
+    monkeypatch.setattr(rt.storage_quota_svc, "quota_operation_lock", forbidden)
+
+
 def test_detection_upload_default_off_writes_file(monkeypatch, tmp_path):
+    _forbid_quota_helpers(monkeypatch)
     router, users_root, _corpus = _make_router(monkeypatch, tmp_path, request_user_id=7)
     client = _make_client(monkeypatch, router)
 
@@ -81,6 +92,7 @@ def test_detection_upload_default_off_writes_file(monkeypatch, tmp_path):
 
 
 def test_training_upload_default_off_writes_files(monkeypatch, tmp_path):
+    _forbid_quota_helpers(monkeypatch)
     router, _u, corpus_root = _make_router(monkeypatch, tmp_path, request_user_id=3)
     client = _make_client(monkeypatch, router)
 

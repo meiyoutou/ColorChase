@@ -71,20 +71,41 @@ def test_cleanup_dry_run_zero_writes(tmp_path):
     assert any(p.name == "old" for p in expired)
 
 
+def test_is_valid_sample_dir_checks_only_current_directory(tmp_path):
+    good = _mk_training(tmp_path, "good")
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    (partial / "meta.json").write_text("{}", encoding="utf-8")
+    (partial / "target.jpg").write_bytes(b"t")
+
+    assert sq.is_valid_sample_dir(good, "training") is True
+    assert sq.is_valid_sample_dir(partial, "training") is False
+    assert sq.is_valid_sample_dir(_mk_detection(tmp_path, "det"), "detection") is True
+
+
+def test_physical_orphan_stats_separates_recovery_and_committed(tmp_path):
+    (tmp_path / "s.staging-deadbeef").mkdir()
+    (tmp_path / "s.staging-deadbeef" / "a").write_bytes(b"a")
+    (tmp_path / "s.backup-committed-deadbeef").mkdir()
+    (tmp_path / "s.backup-committed-deadbeef" / "b").write_bytes(b"bb")
+    (tmp_path / "s.backup-recovery-deadbeef").mkdir()
+    (tmp_path / "s.backup-recovery-deadbeef" / "c").write_bytes(b"ccc")
+    (tmp_path / ".quota-trash").mkdir()
+    (tmp_path / ".quota-trash" / "old").write_bytes(b"dddd")
+
+    stats = sq.physical_orphan_stats(tmp_path)
+    assert stats == {
+        "trash_bytes": 4,
+        "staging_bytes": 1,
+        "committed_backup_bytes": 2,
+        "recovery_backup_bytes": 3,
+        "recovery_backup_count": 1,
+    }
+
+
 def test_reconcile_requires_explicit_force_semantics():
     # reconcile_usage 内部不修改全局常量：总开关通过入口已检查；此处仅验证 validate_kind 抛错
     import pytest
 
     with pytest.raises(ValueError):
         sq.validate_kind("bogus")
-
-
-def test_user_default_quota_fields_cover_full_set():
-    # 用户 quota 接口返回字段集合的静态断言
-    fields = {
-        "used_bytes", "used_mb", "reserved_bytes", "reserved_mb",
-        "quota_bytes", "quota_mb", "remaining_bytes", "remaining_mb",
-        "reconciled_at", "would_exceed", "would_deny_count", "denied_count",
-    }
-    # 此处为纯静态断言，由 training.py 的 api_storage_quota 内联字段满足
-    assert bool(fields)

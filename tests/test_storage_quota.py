@@ -1,7 +1,7 @@
 """存储配额服务层单元测试（不依赖真实 MySQL）。
 
 用 monkeypatch 替换 sq 模块的 DB helper（_get_quota_row / _get_reservation /
-_get_user_role / _mysql_lock / _mysql_unlock）为内存实现。session 用一个
+_get_user_role）为内存实现。session 用一个
 TestSession：其 add() 按对象类型登记到 memo（配额行/预留行），helper 再返回
 对象引用，因此服务层的属性读写（used_bytes/reserved_bytes/计数/status）会
 自然回读内存状态。
@@ -50,6 +50,19 @@ class FakeSession:
         elif isinstance(obj, StorageQuotaReservation):
             self.memo.reservations[obj.reservation_id] = obj
 
+    def begin_nested(self):
+        class _Nested:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return _Nested()
+
+    async def flush(self):
+        return None
+
     async def commit(self):
         return None
 
@@ -71,17 +84,23 @@ def _install(monkeypatch, memo, *, enabled, dry_run, quota_mb=1):
     async def get_user_role(session, user_id):
         return memo.roles.get(user_id)
 
-    async def mysql_lock(session, key, timeout=5.0):
-        return True
+    async def acquire_row(**_kwargs):
+        return FakeOperationLock(True)
 
-    async def mysql_unlock(session, key):
-        pass
+    async def has_other_active(session, user_id, kind, reservation_id=None):
+        return any(
+            r.status == "reserved"
+            and r.user_id == user_id
+            and r.kind == kind
+            and r.reservation_id != reservation_id
+            for r in memo.reservations.values()
+        )
 
     monkeypatch.setattr(sq, "_get_quota_row", get_quota_row)
     monkeypatch.setattr(sq, "_get_reservation", get_reservation)
     monkeypatch.setattr(sq, "_get_user_role", get_user_role)
-    monkeypatch.setattr(sq, "_mysql_lock", mysql_lock)
-    monkeypatch.setattr(sq, "_mysql_unlock", mysql_unlock)
+    monkeypatch.setattr(sq, "acquire_quota_row_lock", acquire_row)
+    monkeypatch.setattr(sq, "_has_other_active_reservations", has_other_active)
 
     monkeypatch.setattr(sq, "STORAGE_QUOTA_ENABLED", enabled)
     monkeypatch.setattr(sq, "STORAGE_QUOTA_DRY_RUN", dry_run)
@@ -91,11 +110,13 @@ def _install(monkeypatch, memo, *, enabled, dry_run, quota_mb=1):
     return sq, FakeSession(memo)
 
 
-class FakeLock:
-    """模拟 QuotaLockToken：传给 reserve_quota 的 lock_token 入参。"""
+class FakeOperationLock:
+    """模拟调用方已按 row → sample 顺序取得的组合锁上下文。"""
 
     def __init__(self, acquired=True):
         self.acquired = acquired
+        self.row_token = object() if acquired else None
+        self.sample_token = object() if acquired else None
         self.released = False
 
     async def release(self):
@@ -199,14 +220,14 @@ def test_multi_file_cannot_bypass(monkeypatch, memo):
     async def run():
         first = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=900000, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=900000, lock_context=FakeOperationLock(),
         )
         assert first.allowed is True
         assert first.reservation_id is not None
         second = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
             sample_key="s", incoming_bytes=200000,  # 累计 1.1MB
-            lock_token=FakeLock(),
+            lock_context=FakeOperationLock(),
         )
         return first, second
 
@@ -227,7 +248,7 @@ def test_settle_positive_delta(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=90, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=90, lock_context=FakeOperationLock(),
         )
         after = await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=50,
@@ -250,7 +271,7 @@ def test_settle_negative_delta_floor_zero(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=10, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=10, lock_context=FakeOperationLock(),
         )
         return await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=-200,
@@ -270,11 +291,11 @@ def test_concurrent_not_exceed(monkeypatch, memo):
     async def run():
         o1 = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=700000, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=700000, lock_context=FakeOperationLock(),
         )
         o2 = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=700000, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=700000, lock_context=FakeOperationLock(),
         )
         return o1, o2
 
@@ -292,7 +313,7 @@ def test_release_on_failure(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=500, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=500, lock_context=FakeOperationLock(),
         )
         assert memo.quotas[(1, "training")].reserved_bytes == 500
         await mod.release_reservation(
@@ -313,7 +334,7 @@ def test_settle_idempotent(monkeypatch, memo):
     async def run():
         out = await mod.reserve_quota(
             sess, user_id=1, role="user", kind="training",
-            sample_key="s", incoming_bytes=5, lock_token=FakeLock(),
+            sample_key="s", incoming_bytes=5, lock_context=FakeOperationLock(),
         )
         a1 = await mod.settle_quota(
             sess, reservation_id=out.reservation_id, delta_bytes=7,
@@ -341,7 +362,9 @@ def test_reconcile_uses_real_paths(monkeypatch, memo, tmp_path):
     training = storage / "training" / "corpus"
     sample = training / "user_u1" / "abc"
     sample.mkdir(parents=True)
-    (sample / "a.jpg").write_bytes(b"x" * 100)
+    (sample / "target.jpg").write_bytes(b"x" * 50)
+    (sample / "result.jpg").write_bytes(b"y" * 48)
+    (sample / "meta.json").write_bytes(b"{}")
 
     monkeypatch.setattr(
         paths, "_training_corpus_dir_for_label",

@@ -25,69 +25,104 @@ def test_quota_row_lock_key_differs_from_sample_lock_key():
 
 
 class RecordingSession:
-    """记录会话：begin_nested 次数、外层 rollback 是否被调。"""
+    """模拟真实唯一键冲突：flush 抛 IntegrityError，重查返回已有行。"""
 
     def __init__(self):
         self.nested = 0
         self.outer_rollback = 0
-        self.conflict = True
-        self.retried = False
-        self.added = []
+        self.flush_calls = 0
+        self.existing = UserStorageQuota(
+            user_id=1, kind="training", used_bytes=10, reserved_bytes=0
+        )
 
     def begin_nested(self):
         self.nested += 1
-        return _NestedCtx(self)
+        return _NestedCtx()
 
     async def rollback(self):
         self.outer_rollback += 1
 
-    async def commit(self):
+    def add(self, _obj):
         pass
 
-    def add(self, obj):
-        if isinstance(obj, UserStorageQuota):
-            if self.conflict:
-                self.conflict = False
-                self.retried = True
-                raise IntegrityError("INSERT", {}, Exception("duplicate key (simulated)"))
-            self.added.append(obj)
+    async def flush(self):
+        self.flush_calls += 1
+        raise IntegrityError("INSERT", {}, Exception("duplicate key (simulated)"))
+
+
+class _Scalars:
+    def __init__(self, value):
+        self.value = value
+
+    def first(self):
+        return self.value
+
+
+class _Result:
+    def __init__(self, value):
+        self.value = value
+
+    def scalars(self):
+        return _Scalars(self.value)
 
 
 class _NestedCtx:
-    """模拟 SAVEPOINT：冲突时自动回滚嵌套保存点并返回，不放外层异常。"""
-
-    def __init__(self, session):
-        self._session = session
-
     async def __aenter__(self):
-        return self._session
+        return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        return True  # 吞掉保存点内异常
+        return False
 
 
 def test_quota_insert_integrity_error_uses_savepoint_without_outer_rollback():
-    """唯一键冲突必须走 SAVEPOINT，外层 rollback 绝不调用；冲突后重查。"""
     sess = RecordingSession()
+    calls = {"execute": 0}
+
+    async def execute(_stmt):
+        calls["execute"] += 1
+        # 第一次查询模拟行不存在；冲突后的重查返回竞争者已创建的行。
+        return _Result(None if calls["execute"] == 1 else sess.existing)
+
+    sess.execute = execute
+    qrow = asyncio.run(sq._get_or_create_quota_row_locked(sess, 1, "training"))
+
+    assert qrow is sess.existing
+    assert sess.nested == 1
+    assert sess.flush_calls == 1
+    assert sess.outer_rollback == 0
+    assert calls["execute"] >= 2
+
+
+def test_acquire_row_lock_releases_the_same_key_it_acquired(monkeypatch):
+    calls = []
+
+    class Scalar:
+        def scalar(self):
+            return 1
+
+    class Conn:
+        async def execute(self, _stmt, params):
+            calls.append(params["k"])
+            return Scalar()
+
+        async def close(self):
+            calls.append("closed")
+
+    class Engine:
+        async def connect(self):
+            return Conn()
+
+    monkeypatch.setattr(sq, "get_engine", lambda: Engine())
 
     async def run():
-        reservation_id = "r1"
-        qrow = None
-        try:
-            async with sess.begin_nested():
-                qrow = UserStorageQuota(user_id=1, kind="training",
-                                        used_bytes=0, reserved_bytes=0)
-                sess.add(qrow)  # 第一次 add 抛 IntegrityError
-        except IntegrityError:
-            # SAVEPOINT 已吞；这里走重查路径（模拟返回已有行）
-            qrow = UserStorageQuota(user_id=1, kind="training",
-                                    used_bytes=10, reserved_bytes=0)
-        return qrow
+        token = await sq.acquire_quota_row_lock(user_id=1, kind="training")
+        acquired_key = token.key
+        await token.release()
+        return acquired_key
 
-    qrow = asyncio.run(run())
-    assert sess.nested >= 1
-    assert sess.outer_rollback == 0  # 禁止外层 rollback
-    assert sess.retried is True  # IntegrityError 后重试/重查
+    key = asyncio.run(run())
+    assert calls == [key, key, "closed"]
+    assert key == sq._hash_lock_key(sq._quota_row_lock_key(1, "training"))
 
 
 def test_quota_row_lock_release_idempotent_conn_closed():

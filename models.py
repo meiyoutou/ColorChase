@@ -87,7 +87,7 @@ class StorageQuotaReservation(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     kind = Column(String(32), nullable=False)
     sample_key = Column(String(256), nullable=False)
-    status = Column(String(16), nullable=False, default="reserved")  # reserved|settled|released
+    status = Column(String(16), nullable=False, default="reserved")  # reserved|settled|released|expired
     requested_bytes = Column(BigInteger, nullable=False, default=0)
     occupied_bytes = Column(BigInteger, nullable=False, default=0)
     settled_bytes = Column(BigInteger, nullable=False, default=0)

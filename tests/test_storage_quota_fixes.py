@@ -11,6 +11,7 @@ import pytest
 
 import app.services.storage_quota as sqm
 from models import UserStorageQuota
+from tests.test_storage_quota import FakeOperationLock
 
 
 def _async(method_fn):
@@ -52,16 +53,8 @@ def test_unreconciled_force_mode_returns_503(monkeypatch):
     async def role(session, user_id):
         return memo["roles"].get(user_id, "user")
 
-    async def lock(session, key, timeout=5):
-        return True
-
-    async def unlock(session, key):
-        return None
-
     monkeypatch.setattr(sqm, "_get_quota_row", get_q)
     monkeypatch.setattr(sqm, "_get_user_role", role)
-    monkeypatch.setattr(sqm, "_mysql_lock", lock)
-    monkeypatch.setattr(sqm, "_mysql_unlock", unlock)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_ENABLED", True)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_DRY_RUN", False)
 
@@ -71,7 +64,8 @@ def test_unreconciled_force_mode_returns_503(monkeypatch):
 
     async def run():
         return await sqm.reserve_quota(None, user_id=1, role="user",
-                                       kind="training", sample_key="s", incoming_bytes=1)
+                                       kind="training", sample_key="s", incoming_bytes=1,
+                                       lock_context=FakeOperationLock())
 
     out = asyncio.run(run())
     assert out.allowed is False
@@ -87,16 +81,8 @@ def test_negative_delta_releases_quota(monkeypatch):
     async def role(session, user_id):
         return "user"
 
-    async def lock(session, key, timeout=5):
-        return True
-
-    async def unlock(session, key):
-        return None
-
     monkeypatch.setattr(sqm, "_get_quota_row", get_q)
     monkeypatch.setattr(sqm, "_get_user_role", role)
-    monkeypatch.setattr(sqm, "_mysql_lock", lock)
-    monkeypatch.setattr(sqm, "_mysql_unlock", unlock)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_ENABLED", True)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_DRY_RUN", True)  # dry-run：仍需要记账
     import datetime
@@ -107,7 +93,8 @@ def test_negative_delta_releases_quota(monkeypatch):
 
     async def run():
         out = await sqm.reserve_quota(None, user_id=1, role="user", kind="training",
-                                      sample_key="s", incoming_bytes=-500)  # 负差额（覆盖变小）
+                                      sample_key="s", incoming_bytes=-500,
+                                      lock_context=FakeOperationLock())
         return out
 
     out = asyncio.run(run())

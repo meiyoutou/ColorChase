@@ -31,6 +31,7 @@ from app.settings import int_env
 from config import get_training_corpus_dir
 from core.io.loaders.universal_loader import RAW_EXTS, is_supported, load_image_bgr
 from database import get_db
+from models import UserStorageQuota
 
 
 def _quota_error_response(outcome) -> JSONResponse:
@@ -302,130 +303,188 @@ def create_training_router(
                 "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
             })
 
-        # ---- 检测库生效：整目录读取旧状态计算净差额；目录级 staging/backup 交换 ----
-        reservation_id = None
+        # ---- 配额启用：统一 row→sample 组合锁；锁内完成读旧状态、预留、目录交换与结算 ----
         force = not storage_quota_svc.is_dry_run()
-        lock_token = await storage_quota_svc.acquire_transaction_lock(
-            db, user_id=request_user_id, kind="detection", sample_key=safe_uuid,
-        )
-        # 样本写锁失败：即使 dry-run 也不能放行（避免同样本写入竞态）
-        if not lock_token.acquired:
-            logging.getLogger("quota").warning("detection sample lock failed user=%s", request_user_id)
-            return JSONResponse(status_code=503,
-                                content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            old_dir_bytes = storage_quota_svc.dir_usage_bytes(target_dir) if target_dir.exists() else 0
-            ext = Path(file.filename or "").suffix.lower() or ".jpg"
-            new_name = f"original{ext}"
-            new_dir_bytes = len(content)
-            net_delta = new_dir_bytes - old_dir_bytes
-            if net_delta != 0:
-                try:
-                    outcome = await storage_quota_svc.reserve_quota(
-                        db, user_id=request_user_id, role=None,
-                        storage_label=storage_label, kind="detection",
-                        sample_key=safe_uuid, incoming_bytes=max(net_delta, 0),
-                        lock_token=lock_token,
-                    )
-                    reservation_id = outcome.reservation_id
-                    if not outcome.allowed:
-                        return _quota_error_response(outcome)
-                except Exception:
-                    logging.getLogger("quota").warning("quota reserve failed (detection)", exc_info=True)
-                    if force:
-                        return JSONResponse(status_code=503,
-                                            content={"error": "storage quota unavailable"})
-                    # dry-run fail-open：继续真实写入，稍后 record_usage(actual_delta)
-                    pass
+            async with storage_quota_svc.quota_operation_lock(
+                request_user_id, "detection", safe_uuid
+            ) as op_lock:
+                old_dir_bytes = storage_quota_svc.dir_usage_bytes(target_dir)
+                ext = Path(file.filename or "").suffix.lower() or ".jpg"
+                new_name = f"original{ext}"
+                net_delta = len(content) - old_dir_bytes
+                reservation_id = None
 
-            target_dir.mkdir(parents=True, exist_ok=True)
-            # 目录级交换：staging 子目录构建新样本，backup 备份旧样本
-            staging_dir = target_dir.parent / f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}"
-            backup_dir = target_dir.parent / f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}"
-            try:
-                staging_dir.mkdir(parents=True)
-                with open(staging_dir / new_name, "wb") as f:
-                    f.write(content)
-                if target_dir.exists():
-                    os.rename(str(target_dir), str(backup_dir))
-                os.rename(str(staging_dir), str(target_dir))
-            except Exception:
-                try:
-                    if staging_dir.exists():
-                        shutil.rmtree(staging_dir, ignore_errors=True)
-                except OSError:
-                    pass
-                try:
-                    if backup_dir.exists() and not target_dir.exists():
-                        os.rename(str(backup_dir), str(target_dir))
-                except OSError:
-                    pass
-                if reservation_id:
+                if net_delta != 0:
                     try:
-                        await storage_quota_svc.release_reservation(
-                            db, reservation_id=reservation_id,
-                            user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                        outcome = await storage_quota_svc.reserve_quota(
+                            db, user_id=request_user_id, role=None,
+                            storage_label=storage_label, kind="detection",
+                            sample_key=safe_uuid, incoming_bytes=max(net_delta, 0),
+                            lock_context=op_lock,
                         )
                     except Exception:
-                        pass
-                raise
+                        logging.getLogger("quota").warning(
+                            "quota reserve failed (detection) user=%s", request_user_id, exc_info=True
+                        )
+                        if force:
+                            return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
+                        outcome = storage_quota_svc.ReserveOutcome(allowed=True, dry_run_fail_open=True)
+                    if not outcome.allowed:
+                        return _quota_error_response(outcome)
+                    reservation_id = outcome.reservation_id
 
-            backup_extra = 0
-            if backup_dir.exists():
-                try:
-                    shutil.rmtree(backup_dir)
-                except OSError as exc:
-                    backup_extra = storage_quota_svc.dir_usage_bytes(backup_dir)
-                    logging.getLogger("quota").error(
-                        "detection backup removal failed user=%s dir=%s err=%s",
-                        request_user_id, backup_dir, exc,
-                    )
-            actual_delta = net_delta + backup_extra
-            if backup_extra > 0 and force:
-                # 强制模式 backup 删除失败：先 settle 实际差额（释放 reservation/reserved），再 503 对账
                 if reservation_id:
-                    try:
+                    await storage_quota_svc.touch_reservation(
+                        db, reservation_id=reservation_id, lock_context=op_lock
+                    )
+                staging_dir = target_dir.parent / f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}"
+                recovery_backup = target_dir.parent / f"{safe_uuid}.backup-recovery-{uuid.uuid4().hex[:8]}"
+                committed_backup = target_dir.parent / f"{safe_uuid}.backup-committed-{uuid.uuid4().hex[:8]}"
+                swapped = False
+                try:
+                    staging_dir.mkdir(parents=True)
+                    with open(staging_dir / new_name, "wb") as f:
+                        f.write(content)
+                    if target_dir.exists():
+                        os.rename(str(target_dir), str(recovery_backup))
+                    os.rename(str(staging_dir), str(target_dir))
+                    swapped = True
+                    if recovery_backup.exists():
+                        try:
+                            os.rename(str(recovery_backup), str(committed_backup))
+                        except OSError:
+                            # 新目录已上线但旧目录未能改为 committed；保守按 recovery
+                            # 保留，绝不让自动清理误删可能的唯一恢复副本。
+                            logging.getLogger("quota").error(
+                                "detection backup commit marker failed user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                except Exception:
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                    if recovery_backup.exists() and not target_dir.exists():
+                        try:
+                            os.rename(str(recovery_backup), str(target_dir))
+                        except OSError:
+                            logging.getLogger("quota").critical(
+                                "detection recovery failed user=%s sample=%s backup=%s",
+                                request_user_id, safe_uuid, recovery_backup, exc_info=True,
+                            )
+                    recovery_pending = recovery_backup.exists() and not target_dir.exists()
+                    if reservation_id:
+                        await storage_quota_svc.release_reservation(
+                            db, reservation_id=reservation_id, user_id=request_user_id,
+                            kind="detection", sample_key=safe_uuid,
+                            lock_context=op_lock, stored=recovery_pending,
+                        )
+                    if recovery_pending:
+                        try:
+                            await storage_quota_svc.mark_reconcile_needed(
+                                db, user_id=request_user_id, kind="detection",
+                                reason="recovery_backup_pending", sample_key=safe_uuid,
+                                lock_context=op_lock,
+                            )
+                        except Exception:
+                            logging.getLogger("quota").critical(
+                                "failed to mark detection recovery pending user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                    raise
+                finally:
+                    if not swapped:
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+
+                try:
+                    await storage_quota_svc.mark_reconcile_needed(
+                        db, user_id=request_user_id, kind="detection",
+                        reason="post_swap_pre_settle", sample_key=safe_uuid,
+                        lock_context=op_lock,
+                    )
+                except Exception:
+                    if reservation_id:
+                        try:
+                            await storage_quota_svc.release_reservation(
+                                db, reservation_id=reservation_id,
+                                user_id=request_user_id, kind="detection",
+                                sample_key=safe_uuid, lock_context=op_lock, stored=True,
+                            )
+                        except Exception:
+                            logging.getLogger("quota").error(
+                                "release after detection mark failure failed user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                    if force:
+                        return JSONResponse(status_code=503, content={
+                            "error": "storage quota state update failed", "stored": True,
+                            "reconcile_needed": True,
+                        })
+                    logging.getLogger("quota").warning(
+                        "mark_reconcile_needed failed (detection) user=%s",
+                        request_user_id, exc_info=True,
+                    )
+
+                backup_extra = 0
+                backup_path = committed_backup if committed_backup.exists() else recovery_backup
+                if backup_path.exists():
+                    if backup_path == committed_backup:
+                        try:
+                            shutil.rmtree(backup_path)
+                        except OSError:
+                            pass
+                    if backup_path.exists():
+                        backup_extra = storage_quota_svc.dir_usage_bytes(backup_path)
+                actual_delta = net_delta + backup_extra
+                try:
+                    if reservation_id:
                         await storage_quota_svc.settle_quota(
                             db, reservation_id=reservation_id, delta_bytes=actual_delta,
                             user_id=request_user_id, kind="detection", sample_key=safe_uuid,
+                            lock_context=op_lock,
                         )
-                    except Exception as exc:
-                        logging.getLogger("quota").error(
-                            "settle_quota failed (detection backup 残留) user=%s", request_user_id, exc_info=True
+                    elif actual_delta != 0:
+                        await storage_quota_svc.record_usage(
+                            db, user_id=request_user_id, kind="detection",
+                            delta_bytes=actual_delta, sample_key=safe_uuid,
+                            lock_context=op_lock,
                         )
-                return JSONResponse(status_code=503,
-                                    content={"error": "storage quota backfill failed",
-                                             "stored": True,
-                                             "reconcile_needed": True})
-
-            if reservation_id:
-                try:
-                    await storage_quota_svc.settle_quota(
-                        db, reservation_id=reservation_id,
-                        delta_bytes=actual_delta, user_id=request_user_id,
-                        kind="detection", sample_key=safe_uuid,
-                    )
-                except Exception as exc:
+                    else:
+                        await storage_quota_svc.reconcile_usage(
+                            db, user_id=request_user_id, kind="detection",
+                            storage_label=storage_label, lock_context=op_lock,
+                        )
+                except Exception:
                     logging.getLogger("quota").error(
-                        "settle_quota failed (detection) user=%s", request_user_id, exc_info=True
+                        "quota accounting failed (detection) user=%s sample=%s",
+                        request_user_id, safe_uuid, exc_info=True,
                     )
                     if force:
-                        return JSONResponse(status_code=503,
-                                            content={"error": "storage quota settle failed",
-                                                     "reconcile_needed": True})
-            elif actual_delta != 0:
-                # dry-run / 管理员：写盘成功后按真实净差额记账
-                try:
-                    await storage_quota_svc.record_usage(
-                        db, user_id=request_user_id, kind="detection",
-                        delta_bytes=actual_delta,
-                    )
-                except Exception as exc:
-                    logging.getLogger("quota").warning(
-                        "record_usage failed (detection) user=%s", request_user_id, exc_info=True
-                    )
-        finally:
-            await lock_token.release()
+                        return JSONResponse(status_code=503, content={
+                            "error": "storage quota settle failed", "stored": True,
+                            "reconcile_needed": True,
+                        })
+                if backup_extra > 0 and force:
+                    try:
+                        await storage_quota_svc.mark_reconcile_needed(
+                            db, user_id=request_user_id, kind="detection",
+                            reason=(
+                                "committed_backup_pending"
+                                if committed_backup.exists() else "recovery_backup_pending"
+                            ), sample_key=safe_uuid,
+                            lock_context=op_lock,
+                        )
+                    except Exception:
+                        logging.getLogger("quota").error(
+                            "failed to mark detection backup pending user=%s sample=%s",
+                            request_user_id, safe_uuid, exc_info=True,
+                        )
+                    return JSONResponse(status_code=503, content={
+                        "error": "storage quota backup pending", "stored": True,
+                        "reconcile_needed": True,
+                    })
+        except storage_quota_svc.QuotaLockUnavailable:
+            return JSONResponse(status_code=503, content={
+                "error": "storage quota unavailable", "detail": "lock_failed",
+            })
 
         return JSONResponse({
             "success": True,
@@ -509,166 +568,231 @@ def create_training_router(
                 "saved_files": saved,
             })
 
-        # ---- 配额启用：先取训练样本锁，再读旧目录真实状态，做完整目录级 staging/backup 交换 ----
-        reservation_id = None
+        # ---- 配额启用：组合锁内读取旧目录、构建 staging、预留、交换、标记与结算 ----
         force = not storage_quota_svc.is_dry_run()
-        lock_token = await storage_quota_svc.acquire_transaction_lock(
-            db, user_id=request_user_id, kind="training", sample_key=safe_uuid,
-        )
-        staging_dir = None
-        swap_done = False
-        # 样本写锁失败：即使 dry-run 也不能放行（避免同样本写入竞态）
-        if not lock_token.acquired:
-            logging.getLogger("quota").warning("training sample lock failed user=%s", request_user_id)
-            return JSONResponse(status_code=503,
-                                content={"error": "storage quota unavailable", "detail": "lock_failed"})
         try:
-            # ---- 锁内：重新读取整个旧目录真实大小，计算净差额（不再锁外读）----
-            contents = {}
-            old_dir_bytes = storage_quota_svc.dir_usage_bytes(sample_dir) if sample_dir.exists() else 0
-            for key, upload_file in files_map.items():
-                if upload_file is None or not upload_file.filename:
-                    continue
-                ext = Path(upload_file.filename).suffix.lower() or ".jpg"
-                if key == "lut":
-                    ext = ".cube"
-                save_path = sample_dir / f"{key}{ext}"
-                ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
-                blob = await upload_file.read()
-                contents[key] = (save_path, blob)
-            # 未传的可选字段（reference/lut）从旧目录复制到 staging 以保持原语义
-            new_meta_obj = {
-                "sample_uuid": safe_uuid,
-                "user_id": request_user_id,
-                "storage_label": storage_label,
-                "is_video": is_video == "1" or is_video.lower() == "true",
-                "saved_files": {k: str(p.name) for k, (p, _) in contents.items()},
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            }
-            new_meta_json = json.dumps(new_meta_obj, ensure_ascii=False, indent=2).encode("utf-8")
+            async with storage_quota_svc.quota_operation_lock(
+                request_user_id, "training", safe_uuid
+            ) as op_lock:
+                old_dir_bytes = storage_quota_svc.dir_usage_bytes(sample_dir)
+                contents = {}
+                for key, upload_file in files_map.items():
+                    if upload_file is None or not upload_file.filename:
+                        continue
+                    ext = Path(upload_file.filename).suffix.lower() or ".jpg"
+                    if key == "lut":
+                        ext = ".cube"
+                    save_path = sample_dir / f"{key}{ext}"
+                    ensure_upload_file_size(upload_file, max_bytes, label=f"训练样本 {key}")
+                    contents[key] = (save_path, await upload_file.read())
 
-            sample_dir.mkdir(parents=True, exist_ok=True)
-            staging_dir = sample_dir.with_name(f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}")
-            backup_dir = sample_dir.with_name(f"{safe_uuid}.backup-{uuid.uuid4().hex[:8]}")
-            staging_dir.mkdir(parents=True)
-            for key, (save_path, blob) in contents.items():
-                with open(staging_dir / save_path.name, "wb") as f:
-                    f.write(blob)
-            # 复制未传的可选字段（reference/lut）以保持旧接口语义；失败必须中止上传，不 pass
-            for name in ("reference", "lut"):
-                imported = any(k == name for k in contents)
-                if imported:
-                    continue
-                for f_old in sample_dir.glob(f"{name}.*"):
-                    if f_old.is_file():
-                        shutil.copy2(str(f_old), str(staging_dir / f_old.name))
-            with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
-                f.write(new_meta_json.decode("utf-8"))
-            # 用真实 staging 目录大小计算净差额（staging 保留到交换完成后再清理）
-            total_net = storage_quota_svc.dir_usage_bytes(staging_dir) - old_dir_bytes
+                staging_dir = sample_dir.with_name(f"{safe_uuid}.staging-{uuid.uuid4().hex[:8]}")
+                recovery_backup = sample_dir.with_name(
+                    f"{safe_uuid}.backup-recovery-{uuid.uuid4().hex[:8]}"
+                )
+                committed_backup = sample_dir.with_name(
+                    f"{safe_uuid}.backup-committed-{uuid.uuid4().hex[:8]}"
+                )
+                swapped = False
+                reservation_id = None
+                try:
+                    staging_dir.mkdir(parents=True)
+                    for key, (save_path, blob) in contents.items():
+                        with open(staging_dir / save_path.name, "wb") as f:
+                            f.write(blob)
+                    for name in ("reference", "lut"):
+                        if name in contents:
+                            continue
+                        for old_optional in sample_dir.glob(f"{name}.*"):
+                            if old_optional.is_file():
+                                shutil.copy2(old_optional, staging_dir / old_optional.name)
 
-            if total_net != 0:
-                try:
-                    outcome = await storage_quota_svc.reserve_quota(
-                        db, user_id=request_user_id, role=None,
-                        storage_label=storage_label, kind="training",
-                        sample_key=safe_uuid, incoming_bytes=max(total_net, 0),
-                        lock_token=lock_token,
-                    )
-                    reservation_id = outcome.reservation_id
-                    if not outcome.allowed:
-                        return _quota_error_response(outcome)
-                except Exception:
-                    logging.getLogger("quota").warning("quota reserve failed (training)", exc_info=True)
-                    if force:
-                        return JSONResponse(status_code=503,
-                                            content={"error": "storage quota unavailable"})
-                    pass
-
-            # 原子交换：backup 存旧样本
-            try:
-                if sample_dir.exists():
-                    os.rename(str(sample_dir), str(backup_dir))
-                os.rename(str(staging_dir), str(sample_dir))
-                swap_done = True
-                for key, (save_path, _blob) in contents.items():
-                    saved[key] = save_path.name
-            except Exception:
-                # 失败回滚：删 staging，恢复完整旧目录（backup→sample_dir）
-                try:
-                    if staging_dir.exists():
-                        shutil.rmtree(staging_dir, ignore_errors=True)
-                except OSError:
-                    pass
-                try:
-                    if backup_dir.exists() and not sample_dir.exists():
-                        os.rename(str(backup_dir), str(sample_dir))
-                except OSError:
-                    pass
-                if reservation_id:
+                    final_saved = {}
+                    for path in staging_dir.iterdir():
+                        if path.is_file() and path.name != "meta.json":
+                            key = path.stem if path.suffix != ".cube" else "lut"
+                            if key in {"target", "result", "reference", "lut"}:
+                                final_saved[key] = path.name
                     try:
+                        meta_obj = json.loads(meta) if meta else {}
+                    except (TypeError, ValueError):
+                        meta_obj = {}
+                    if not isinstance(meta_obj, dict):
+                        meta_obj = {}
+                    meta_obj.update({
+                        "sample_uuid": safe_uuid,
+                        "user_id": request_user_id,
+                        "storage_label": storage_label,
+                        "is_video": is_video == "1" or is_video.lower() == "true",
+                        "saved_files": final_saved,
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    with open(staging_dir / "meta.json", "w", encoding="utf-8") as f:
+                        json.dump(meta_obj, f, ensure_ascii=False, indent=2)
+                    total_net = storage_quota_svc.dir_usage_bytes(staging_dir) - old_dir_bytes
+
+                    if total_net != 0:
+                        try:
+                            outcome = await storage_quota_svc.reserve_quota(
+                                db, user_id=request_user_id, role=None,
+                                storage_label=storage_label, kind="training",
+                                sample_key=safe_uuid, incoming_bytes=max(total_net, 0),
+                                lock_context=op_lock,
+                            )
+                        except Exception:
+                            logging.getLogger("quota").warning(
+                                "quota reserve failed (training) user=%s",
+                                request_user_id, exc_info=True,
+                            )
+                            if force:
+                                return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
+                            outcome = storage_quota_svc.ReserveOutcome(allowed=True, dry_run_fail_open=True)
+                        if not outcome.allowed:
+                            return _quota_error_response(outcome)
+                        reservation_id = outcome.reservation_id
+
+                    if reservation_id:
+                        await storage_quota_svc.touch_reservation(
+                            db, reservation_id=reservation_id, lock_context=op_lock
+                        )
+                    if sample_dir.exists():
+                        os.rename(sample_dir, recovery_backup)
+                    os.rename(staging_dir, sample_dir)
+                    swapped = True
+                    saved = final_saved
+                    if recovery_backup.exists():
+                        try:
+                            os.rename(recovery_backup, committed_backup)
+                        except OSError:
+                            logging.getLogger("quota").error(
+                                "training backup commit marker failed user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                except Exception:
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                    if recovery_backup.exists() and not sample_dir.exists():
+                        try:
+                            os.rename(recovery_backup, sample_dir)
+                        except OSError:
+                            logging.getLogger("quota").critical(
+                                "training recovery failed user=%s sample=%s backup=%s",
+                                request_user_id, safe_uuid, recovery_backup, exc_info=True,
+                            )
+                    recovery_pending = recovery_backup.exists() and not sample_dir.exists()
+                    if reservation_id:
                         await storage_quota_svc.release_reservation(
                             db, reservation_id=reservation_id, user_id=request_user_id,
                             kind="training", sample_key=safe_uuid,
+                            lock_context=op_lock, stored=recovery_pending,
                         )
-                    except Exception:
-                        pass
-                raise
+                    if recovery_pending:
+                        try:
+                            await storage_quota_svc.mark_reconcile_needed(
+                                db, user_id=request_user_id, kind="training",
+                                reason="recovery_backup_pending", sample_key=safe_uuid,
+                                lock_context=op_lock,
+                            )
+                        except Exception:
+                            logging.getLogger("quota").critical(
+                                "failed to mark training recovery pending user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                    raise
+                finally:
+                    if not swapped:
+                        shutil.rmtree(staging_dir, ignore_errors=True)
 
-            # 成功后删除 backup（旧样本）；失败不静默，计入残留物理用量
-            backup_extra = 0
-            if backup_dir.exists():
                 try:
-                    shutil.rmtree(backup_dir)
-                except OSError as exc:
-                    backup_extra = storage_quota_svc.dir_usage_bytes(backup_dir)
-                    logging.getLogger("quota").error(
-                        "training backup removal failed user=%s dir=%s err=%s",
-                        request_user_id, backup_dir, exc,
-                    )
-            actual_delta = total_net + backup_extra
-            backup_pending = backup_extra > 0
-
-            if reservation_id:
-                try:
-                    await storage_quota_svc.settle_quota(
-                        db, reservation_id=reservation_id, delta_bytes=actual_delta,
-                        user_id=request_user_id, kind="training", sample_key=safe_uuid,
+                    await storage_quota_svc.mark_reconcile_needed(
+                        db, user_id=request_user_id, kind="training",
+                        reason="post_swap_pre_settle", sample_key=safe_uuid,
+                        lock_context=op_lock,
                     )
                 except Exception:
+                    if reservation_id:
+                        try:
+                            await storage_quota_svc.release_reservation(
+                                db, reservation_id=reservation_id,
+                                user_id=request_user_id, kind="training",
+                                sample_key=safe_uuid, lock_context=op_lock, stored=True,
+                            )
+                        except Exception:
+                            logging.getLogger("quota").error(
+                                "release after training mark failure failed user=%s sample=%s",
+                                request_user_id, safe_uuid, exc_info=True,
+                            )
+                    if force:
+                        return JSONResponse(status_code=503, content={
+                            "error": "storage quota state update failed", "stored": True,
+                            "reconcile_needed": True,
+                        })
+                    logging.getLogger("quota").warning(
+                        "mark_reconcile_needed failed (training) user=%s",
+                        request_user_id, exc_info=True,
+                    )
+
+                backup_extra = 0
+                backup_path = committed_backup if committed_backup.exists() else recovery_backup
+                if backup_path.exists():
+                    if backup_path == committed_backup:
+                        try:
+                            shutil.rmtree(backup_path)
+                        except OSError:
+                            pass
+                    if backup_path.exists():
+                        backup_extra = storage_quota_svc.dir_usage_bytes(backup_path)
+                actual_delta = total_net + backup_extra
+                try:
+                    if reservation_id:
+                        await storage_quota_svc.settle_quota(
+                            db, reservation_id=reservation_id, delta_bytes=actual_delta,
+                            user_id=request_user_id, kind="training", sample_key=safe_uuid,
+                            lock_context=op_lock,
+                        )
+                    elif actual_delta != 0:
+                        await storage_quota_svc.record_usage(
+                            db, user_id=request_user_id, kind="training",
+                            delta_bytes=actual_delta, sample_key=safe_uuid,
+                            lock_context=op_lock,
+                        )
+                    else:
+                        await storage_quota_svc.reconcile_usage(
+                            db, user_id=request_user_id, kind="training",
+                            storage_label=storage_label, lock_context=op_lock,
+                        )
+                except Exception:
                     logging.getLogger("quota").error(
-                        "settle_quota failed (training) user=%s", request_user_id, exc_info=True
+                        "quota accounting failed (training) user=%s sample=%s",
+                        request_user_id, safe_uuid, exc_info=True,
                     )
                     if force:
-                        return JSONResponse(status_code=503,
-                                            content={"error": "storage quota settle failed",
-                                                     "stored": True,
-                                                     "reconcile_needed": True})
-            elif actual_delta != 0:
-                # dry-run / 管理员：写盘成功后按真实净差额记账
-                try:
-                    await storage_quota_svc.record_usage(
-                        db, user_id=request_user_id, kind="training", delta_bytes=actual_delta,
-                    )
-                except Exception:
-                    logging.getLogger("quota").warning(
-                        "record_usage failed (training) user=%s", request_user_id, exc_info=True
-                    )
-
-            if backup_pending and force:
-                # backup 残留待物理回收；已 settle 实际差额，不返回 200
-                return JSONResponse(status_code=503,
-                                    content={"error": "storage quota backfill failed",
-                                             "stored": True,
-                                             "reconcile_needed": True})
-        finally:
-            # 未完成交换时清理残留 staging（配额拒绝/DB 异常早退不泄漏）
-            try:
-                if staging_dir is not None and not swap_done and staging_dir.exists():
-                    shutil.rmtree(staging_dir, ignore_errors=True)
-            except Exception:
-                pass
-            await lock_token.release()
+                        return JSONResponse(status_code=503, content={
+                            "error": "storage quota settle failed", "stored": True,
+                            "reconcile_needed": True,
+                        })
+                if backup_extra > 0 and force:
+                    try:
+                        await storage_quota_svc.mark_reconcile_needed(
+                            db, user_id=request_user_id, kind="training",
+                            reason=(
+                                "committed_backup_pending"
+                                if committed_backup.exists() else "recovery_backup_pending"
+                            ), sample_key=safe_uuid,
+                            lock_context=op_lock,
+                        )
+                    except Exception:
+                        logging.getLogger("quota").error(
+                            "failed to mark training backup pending user=%s sample=%s",
+                            request_user_id, safe_uuid, exc_info=True,
+                        )
+                    return JSONResponse(status_code=503, content={
+                        "error": "storage quota backup pending", "stored": True,
+                        "reconcile_needed": True,
+                    })
+        except storage_quota_svc.QuotaLockUnavailable:
+            return JSONResponse(status_code=503, content={
+                "error": "storage quota unavailable", "detail": "lock_failed",
+            })
 
         return JSONResponse({
             "success": True,
@@ -720,6 +844,13 @@ def create_training_router(
                 "remaining_bytes": max(quota_bytes - (used + reserved), 0),
                 "remaining_mb": max(quota_bytes - (used + reserved), 0) // (1024 * 1024),
                 "reconciled_at": str(q.reconciled_at) if (q is not None and q.reconciled_at) else None,
+                "reconcile_needed": bool(q.reconcile_needed) if q is not None else False,
+                "reconcile_reason": q.reconcile_reason if q is not None else None,
+                "reconcile_sample_key": q.reconcile_sample_key if q is not None else None,
+                "reconcile_marked_at": (
+                    str(q.reconcile_marked_at)
+                    if q is not None and q.reconcile_marked_at else None
+                ),
                 "would_exceed": would_exceed,
                 "would_deny_count": int(q.would_deny_count or 0) if q is not None else 0,
                 "denied_count": int(q.denied_count or 0) if q is not None else 0,
@@ -730,6 +861,10 @@ def create_training_router(
             "user_id": request_user_id,
             "enabled": bool(STORAGE_QUOTA_ENABLED),
             "dry_run": bool(STORAGE_QUOTA_DRY_RUN),
+            "quota": {
+                kind: {k: v for k, v in out[kind].items()}
+                for kind in sq.STORAGE_QUOTA_KINDS
+            },
             "training": out["training"],
             "detection": out["detection"],
         }

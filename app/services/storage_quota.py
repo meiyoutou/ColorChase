@@ -14,7 +14,7 @@ import uuid as _uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy import select, text
 
@@ -50,23 +50,6 @@ def is_dry_run() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 命名锁（进程内；分布式部署下与 MySQL GET_LOCK 同一 key 语义对齐）
-# ---------------------------------------------------------------------------
-_LOCKS: Dict[str, object] = {}
-
-
-def _lock_for(user_id: int, kind: str, sample_key: str):
-    import asyncio
-
-    key = f"{user_id}:{kind}:{sample_key}"
-    lock = _LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _LOCKS[key] = lock
-    return lock
-
-
-# ---------------------------------------------------------------------------
 # 输出对象与纯逻辑辅助
 # ---------------------------------------------------------------------------
 @dataclass
@@ -74,6 +57,7 @@ class ReserveOutcome:
     allowed: bool
     reservation_id: Optional[str] = None
     would_deny: bool = False
+    dry_run_fail_open: bool = False
     used_bytes: int = 0
     quota_bytes: int = 0
     reason: Optional[str] = None  # "disabled"|"admin_exempt"|"quota_exceeded"|None
@@ -128,29 +112,24 @@ async def _get_reservation(session, reservation_id: str):
     return result.scalars().first()
 
 
+async def _has_other_active_reservations(
+    session, user_id: int, kind: str, reservation_id: Optional[str] = None
+) -> bool:
+    stmt = select(StorageQuotaReservation.reservation_id).where(
+        StorageQuotaReservation.user_id == user_id,
+        StorageQuotaReservation.kind == kind,
+        StorageQuotaReservation.status == "reserved",
+    )
+    if reservation_id:
+        stmt = stmt.where(StorageQuotaReservation.reservation_id != reservation_id)
+    result = await session.execute(stmt.limit(1))
+    return result.first() is not None
+
+
 async def _get_user_role(session, user_id: int) -> Optional[str]:
     stmt = select(User.role).where(User.id == user_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
-
-
-async def _mysql_lock(session, key: str, timeout: float = 5.0) -> bool:
-    try:
-        result = await session.execute(text("SELECT GET_LOCK(:k, :t)"), {"k": key, "t": timeout})
-        return bool(result.scalar())
-    except Exception:
-        return False
-
-
-async def _mysql_unlock(session, key: str) -> None:
-    try:
-        await session.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
-    except Exception:
-        pass
-
-
-# 老名兼容
-_mysql_release = _mysql_unlock
 
 
 def _hash_lock_key(key: str) -> str:
@@ -238,8 +217,9 @@ async def acquire_quota_row_lock(
         conn = await engine.connect()
         token._conn = conn
         raw_key = _quota_row_lock_key(user_id, kind)
+        token.key = _hash_lock_key(raw_key)
         result = await conn.execute(
-            text("SELECT GET_LOCK(:k, :t)"), {"k": _hash_lock_key(raw_key), "t": timeout}
+            text("SELECT GET_LOCK(:k, :t)"), {"k": token.key, "t": timeout}
         )
         token.acquired = bool(result.scalar())
         if not token.acquired:
@@ -255,13 +235,6 @@ async def acquire_quota_row_lock(
             except Exception:
                 pass
     return token
-
-
-async def acquire_transaction_lock(
-    session, *, user_id: int, kind: str, sample_key: str, timeout: float = 5.0
-) -> QuotaLockToken:
-    """兼容旧名：委托给 acquire_sample_lock（独立连接版）。"""
-    return await acquire_sample_lock(user_id=user_id, kind=kind, sample_key=sample_key, timeout=timeout)
 
 
 class QuotaLockUnavailable(Exception):
@@ -330,30 +303,18 @@ def _new_reservation_id() -> str:
 # ---------------------------------------------------------------------------
 # 核心对外 API
 # ---------------------------------------------------------------------------
-async def reserve_quota(
+async def _reserve_quota_locked(
     session,
     *,
     user_id: int,
     role: Optional[str],
-    storage_label: Optional[str] = None,
     kind: str,
     sample_key: str,
     incoming_bytes: int,
-    lock_token: Optional[QuotaLockToken] = None,
-) -> ReserveOutcome:
-    """上传前一次性配额预留（QUOTA_ENABLED=0 时立即返回 allowed，零 DB 写）。
-
-    路由先通过 acquire_sample_lock 拿到独立连接上的 GET_LOCK 令牌并传入本函数，
-    本函数不再重复 GET_LOCK。dry-run 不创建假的 reservation_id。
-    管理员豁免：只标记 admin_exempt，实际用量由写盘成功后 record_usage(actual_delta) 记录。
-    """
-    validate_kind(kind)
-    if not is_quota_enabled():
-        return ReserveOutcome(allowed=True, reason="disabled")
-
-    incoming_bytes = _clamp0(incoming_bytes)
-    dry_run = is_dry_run()
-
+    dry_run: bool,
+    has_lock: bool,
+) -> "ReserveOutcome":
+    """在已持锁或 fail-open 条件下执行配额预留。"""
     try:
         db_role = await _get_user_role(session, user_id)
     except Exception:
@@ -364,79 +325,95 @@ async def reserve_quota(
     try:
         qrow = await _get_quota_row(session, user_id, kind)
         quota_bytes = default_quota_bytes(kind)
-        if qrow is not None and qrow.quota_mb is not None:
+        if qrow is not None and getattr(qrow, "quota_mb", None) is not None:
             quota_bytes = _clamp0(qrow.quota_mb) * 1024 * 1024
         used = _clamp0(getattr(qrow, "used_bytes", 0))
         reserved = _clamp0(getattr(qrow, "reserved_bytes", 0))
 
-        has_lock = bool(lock_token) and bool(lock_token.acquired)
-        needs_reconcile = qrow is None or getattr(qrow, "reconciled_at", None) is None
+        needs_reconcile = (
+            qrow is None
+            or getattr(qrow, "reconciled_at", None) is None
+            or bool(getattr(qrow, "reconcile_needed", False))
+        )
         if not dry_run and (not has_lock or needs_reconcile):
             reason = "reconcile_required" if needs_reconcile else "quota_unavailable"
-            return ReserveOutcome(
-                allowed=False,
-                reason=reason,
-                used_bytes=used,
-                quota_bytes=quota_bytes,
-            )
+            return ReserveOutcome(allowed=False, reason=reason, used_bytes=used, quota_bytes=quota_bytes)
 
         exceed = would_exceed(used, reserved, incoming_bytes, quota_bytes)
         if not exceed:
             if dry_run:
                 return ReserveOutcome(allowed=True, used_bytes=used, quota_bytes=quota_bytes)
-
             reservation_id = _new_reservation_id()
-            if qrow is None:
-                # 首次并发创建（不同 sample_key 同 user+kind）可能唯一键冲突：
-                # 用 SAVEPOINT(begin_nested) 仅回滚 quota insert，禁止外层 session.rollback()。
-                try:
-                    async with session.begin_nested():
-                        qrow = UserStorageQuota(
-                            user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0
-                        )
-                        session.add(qrow)
-                except IntegrityError:
-                    # SAVEPOINT 已自动回滚 insert；重查既有行，不解开外层事务
-                    qrow = await _get_quota_row(session, user_id, kind)
+            qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
             qrow.reserved_bytes = _clamp0(qrow.reserved_bytes + incoming_bytes)
-            session.add(
-                StorageQuotaReservation(
-                    reservation_id=reservation_id,
-                    user_id=user_id,
-                    kind=kind,
-                    sample_key=sample_key,
-                    status="reserved",
-                    requested_bytes=incoming_bytes,
-                    occupied_bytes=0,
-                    settled_bytes=0,
-                    expires_at=now_utc() + timedelta(minutes=30),
-                )
-            )
+            session.add(StorageQuotaReservation(
+                reservation_id=reservation_id, user_id=user_id, kind=kind, sample_key=sample_key,
+                status="reserved", requested_bytes=incoming_bytes, occupied_bytes=0,
+                settled_bytes=0, expires_at=now_utc() + timedelta(minutes=30),
+            ))
             await session.commit()
-            return ReserveOutcome(
-                allowed=True,
-                reservation_id=reservation_id,
-                used_bytes=used,
-                quota_bytes=quota_bytes,
-            )
+            return ReserveOutcome(allowed=True, reservation_id=reservation_id, used_bytes=used, quota_bytes=quota_bytes)
 
         if dry_run:
             await _count_stat(session, user_id, kind, "would_deny_count", "last_would_deny_at")
-            return ReserveOutcome(
-                allowed=True, would_deny=True, used_bytes=used, quota_bytes=quota_bytes,
-            )
+            return ReserveOutcome(allowed=True, would_deny=True, used_bytes=used, quota_bytes=quota_bytes)
 
         await _count_stat(session, user_id, kind, "denied_count", "last_denied_at")
-        return ReserveOutcome(
-            allowed=False, used_bytes=used, quota_bytes=quota_bytes, reason="quota_exceeded",
-        )
+        return ReserveOutcome(allowed=False, used_bytes=used, quota_bytes=quota_bytes, reason="quota_exceeded")
     except Exception:
         if dry_run:
-            return ReserveOutcome(
-                allowed=True, dry_run_fail_open=True, used_bytes=0,
-                quota_bytes=default_quota_bytes(kind),
-            )
+            return ReserveOutcome(allowed=True, dry_run_fail_open=True, used_bytes=0, quota_bytes=default_quota_bytes(kind))
         raise
+
+
+async def reserve_quota(
+    session,
+    *,
+    user_id: int,
+    role: Optional[str],
+    storage_label: Optional[str] = None,
+    kind: str,
+    sample_key: str,
+    incoming_bytes: int,
+    lock_context: Optional[QuotaOperationLock] = None,
+) -> "ReserveOutcome":
+    """配额预留。
+
+    - lock_context.acquired=True：直接复用，不再加锁。
+    - 无 lock_context：独立调用取 quota-row lock（不取 sample），包裹后释放。
+    - context 存在但 acquired=False：forceQuotaLockUnavailable；dry-run fail-open。
+    """
+    validate_kind(kind)
+    if not is_quota_enabled():
+        return ReserveOutcome(allowed=True, reason="disabled")
+
+    incoming_bytes = _clamp0(incoming_bytes)
+    dry_run = is_dry_run()
+
+    if lock_context is not None:
+        if getattr(lock_context, "acquired", False):
+            return await _reserve_quota_locked(
+                session, user_id=user_id, role=role, kind=kind, sample_key=sample_key,
+                incoming_bytes=incoming_bytes, dry_run=dry_run, has_lock=True,
+            )
+        if not dry_run:
+            raise QuotaLockUnavailable("quota lock context unavailable in reserve")
+        return ReserveOutcome(allowed=True, dry_run_fail_open=True, used_bytes=0,
+                              quota_bytes=default_quota_bytes(kind))
+
+    row_tok = await acquire_quota_row_lock(user_id=user_id, kind=kind)
+    try:
+        if not row_tok.acquired:
+            if dry_run:
+                return ReserveOutcome(allowed=True, dry_run_fail_open=True, used_bytes=0,
+                                      quota_bytes=default_quota_bytes(kind))
+            raise QuotaLockUnavailable("quota row lock unavailable")
+        return await _reserve_quota_locked(
+            session, user_id=user_id, role=role, kind=kind, sample_key=sample_key,
+            incoming_bytes=incoming_bytes, dry_run=dry_run, has_lock=True,
+        )
+    finally:
+        await row_tok.release()
 
 
 def _lock_key(user_id: int, kind: str, sample_key: str) -> str:
@@ -448,8 +425,78 @@ def _quota_row_lock_key(user_id: int, kind: str) -> str:
     return f"storage_quota_row:{user_id}:{kind}"
 
 
+async def _get_or_create_quota_row_locked(
+    session, user_id: int, kind: str, *, used_bytes: int = 0
+):
+    """在已持 quota-row lock 时取得或创建行。
+
+    SAVEPOINT 只回滚本次 INSERT；唯一键竞争时重查，不回滚调用方外层事务。
+    """
+    qrow = await _get_quota_row(session, user_id, kind)
+    if qrow is not None:
+        return qrow
+    try:
+        async with session.begin_nested():
+            qrow = UserStorageQuota(
+                user_id=user_id,
+                kind=kind,
+                used_bytes=_clamp0(used_bytes),
+                reserved_bytes=0,
+            )
+            session.add(qrow)
+            flush = getattr(session, "flush", None)
+            if flush is not None:
+                await flush()
+    except IntegrityError:
+        qrow = await _get_quota_row(session, user_id, kind)
+    if qrow is None:
+        qrow = await _get_quota_row(session, user_id, kind)
+    if qrow is None:
+        raise RuntimeError("quota row creation failed")
+    return qrow
+
+
+async def _with_quota_row_lock(user_id: int, kind: str, operation):
+    """用分布式 user-kind GET_LOCK 执行仅修改 quota 行的独立服务调用。"""
+    token = await acquire_quota_row_lock(user_id=user_id, kind=kind)
+    try:
+        if not token.acquired:
+            raise QuotaLockUnavailable("quota row lock unavailable")
+        return await operation()
+    finally:
+        await token.release()
+
+
+def _set_reconcile_state(qrow, *, reason: str, sample_key: Optional[str], marked_at=None):
+    """标记待对账；不覆盖另一个样本尚未解决的告警。"""
+    current_sample = str(getattr(qrow, "reconcile_sample_key", "") or "")
+    new_sample = str(sample_key or "")[:256]
+    if bool(getattr(qrow, "reconcile_needed", False)) and current_sample not in ("", new_sample):
+        qrow.reconcile_reason = "multiple_samples"
+        qrow.reconcile_sample_key = None
+        qrow.reconcile_marked_at = marked_at or now_utc()
+        return
+    qrow.reconcile_needed = True
+    qrow.reconcile_reason = str(reason or "")[:128]
+    qrow.reconcile_sample_key = new_sample or None
+    qrow.reconcile_marked_at = marked_at or now_utc()
+
+
+def _clear_matching_post_swap_state(qrow, sample_key: Optional[str]):
+    if (
+        bool(getattr(qrow, "reconcile_needed", False))
+        and getattr(qrow, "reconcile_reason", None) == "post_swap_pre_settle"
+        and str(getattr(qrow, "reconcile_sample_key", "") or "") == str(sample_key or "")
+    ):
+        qrow.reconcile_needed = False
+        qrow.reconcile_reason = None
+        qrow.reconcile_sample_key = None
+        qrow.reconcile_marked_at = None
+
+
 async def mark_reconcile_needed(
-    session, *, user_id: int, kind: str, reason: str, sample_key: Optional[str] = None
+    session, *, user_id: int, kind: str, reason: str, sample_key: Optional[str] = None,
+    lock_context: Optional[QuotaOperationLock] = None,
 ) -> None:
     """把 quota 行标记为待对账（文件可能已交换但账面未对齐）。"""
     import logging
@@ -457,42 +504,54 @@ async def mark_reconcile_needed(
     if not is_quota_enabled():
         return
     validate_kind(kind)
-    qrow = await _get_quota_row(session, user_id, kind)
-    if qrow is None:
-        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-        session.add(qrow)
-    qrow.reconcile_needed = True
-    qrow.reconcile_reason = str(reason or "")[:128]
-    qrow.reconcile_sample_key = str(sample_key or "")[:256] or qrow.reconcile_sample_key
-    qrow.reconcile_marked_at = now_utc()
-    try:
-        await session.commit()
-    except Exception:
-        logging.getLogger("quota").error(
-            "mark_reconcile_needed failed user=%s kind=%s sample=%s reason=%s",
-            user_id, kind, sample_key, reason, exc_info=True,
+
+    async def _do():
+        qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
+        _set_reconcile_state(
+            qrow, reason=reason, sample_key=sample_key
         )
-        raise
+        try:
+            await session.commit()
+        except Exception:
+            logging.getLogger("quota").error(
+                "mark_reconcile_needed failed user=%s kind=%s sample=%s reason=%s",
+                user_id, kind, sample_key, reason, exc_info=True,
+            )
+            raise
+
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    return await _with_quota_row_lock(user_id, kind, _do)
 
 
 async def record_usage(
-    session, *, user_id: int, kind: str, delta_bytes: int
+    session, *, user_id: int, kind: str, delta_bytes: int,
+    sample_key: Optional[str] = None,
+    lock_context: Optional[QuotaOperationLock] = None,
 ) -> int:
     """dry-run / 管理员豁免路径：仍记录真实用量（观察模式有统计价值）。
 
-    delta_bytes 可负（覆盖变小）。used 下限 0。返回结算后 used_bytes。
-    开关关闭时 no-op。
+    lock_context.acquired=True 时调用方已持组合锁，不再内部加锁。
     """
     if not is_quota_enabled():
         return 0
     validate_kind(kind)
-    qrow = await _get_quota_row(session, user_id, kind)
-    if qrow is None:
-        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-        session.add(qrow)
-    qrow.used_bytes = upsert_delta(int(qrow.used_bytes or 0), int(delta_bytes))
-    await session.commit()
-    return int(qrow.used_bytes or 0)
+
+    async def _do():
+        qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
+        qrow.used_bytes = upsert_delta(int(qrow.used_bytes or 0), int(delta_bytes))
+        if not await _has_other_active_reservations(session, user_id, kind):
+            _clear_matching_post_swap_state(qrow, sample_key)
+        await session.commit()
+        return int(qrow.used_bytes or 0)
+
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    return await _with_quota_row_lock(user_id, kind, _do)
 
 
 async def settle_quota(
@@ -503,24 +562,23 @@ async def settle_quota(
     user_id: int,
     kind: str,
     sample_key: str,
+    lock_context: Optional[QuotaOperationLock] = None,
 ) -> int:
     """写盘成功后按真实净差额结算（幂等）。返回结算后 used_bytes。
 
-    净差额可为 0 或负（覆盖变小）；调用方须在白名单未被拒绝时调用，释放预留。
+    lock_context.acquired=True 时调用方已持组合锁，不再内部加锁。
     """
     if not STORAGE_QUOTA_ENABLED:
         return 0
     validate_kind(kind)
-    async with _lock(user_id, kind, sample_key):
+
+    async def _do():
         r = await _get_reservation(session, reservation_id)
         if r is None:
             return 0
         if r.status in ("settled", "released"):
             return _clamp0(r.settled_bytes)
-        qrow = await _get_quota_row(session, user_id, kind)
-        if qrow is None:
-            qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-            session.add(qrow)
+        qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
         new_used = upsert_delta(int(qrow.used_bytes or 0), delta_bytes)
         qrow.used_bytes = new_used
         qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) - int(r.requested_bytes or 0))
@@ -528,29 +586,49 @@ async def settle_quota(
         r.settled_bytes = delta_bytes
         r.occupied_bytes = delta_bytes
         r.settled_at = now_utc()
-        qrow.reconcile_needed = False
+        if not await _has_other_active_reservations(session, user_id, kind, reservation_id):
+            _clear_matching_post_swap_state(qrow, sample_key)
         await session.commit()
         return new_used
 
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    return await _with_quota_row_lock(user_id, kind, _do)
+
 
 async def release_reservation(
-    session, *, reservation_id: str, user_id: int, kind: str, sample_key: str
+    session, *, reservation_id: str, user_id: int, kind: str, sample_key: str,
+    lock_context: Optional[QuotaOperationLock] = None, stored: bool = False,
 ) -> None:
-    """写盘失败时释放预留（幂等）。"""
+    """释放预留（幂等）。
+
+    stored=True 表示文件已落盘但未结算，释放后需标记 reconcile_needed。
+    lock_context.acquired=True 时调用方已持组合锁，不再内部加锁。
+    """
     if not STORAGE_QUOTA_ENABLED:
         return
-    async with _lock(user_id, kind, sample_key):
+
+    async def _do():
         r = await _get_reservation(session, reservation_id)
         if r is None or r.status != "reserved":
             return
-        qrow = await _get_quota_row(session, user_id, kind)
-        if qrow is None:
-            qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-            session.add(qrow)
+        qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
         qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) - int(r.requested_bytes or 0))
+        if stored:
+            _set_reconcile_state(
+                qrow, reason="released_after_store", sample_key=sample_key
+            )
         r.status = "released"
         r.released_at = now_utc()
         await session.commit()
+
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    return await _with_quota_row_lock(user_id, kind, _do)
 
 
 async def reconcile_usage(
@@ -559,70 +637,147 @@ async def reconcile_usage(
     user_id: int,
     kind: str,
     storage_label: Optional[str] = None,
+    lock_context: Optional[QuotaOperationLock] = None,
 ) -> int:
-    """按真实目录扫描回写 used_bytes（不跟随 symlink）。返回实际用量。"""
+    """按真实目录扫描回写 used_bytes（不写 symlink）。成功清 reconcile_needed。
+
+    lock_context.acquired=True 时不内部加锁。
+    """
     if not STORAGE_QUOTA_ENABLED:
         return 0
     validate_kind(kind)
-    root = quota_sample_root(kind, storage_label)
-    total = dir_usage_bytes(root)
-    qrow = await _get_quota_row(session, user_id, kind)
-    if qrow is None:
-        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=total, reserved_bytes=0)
-        session.add(qrow)
-    qrow.used_bytes = total
-    qrow.reconciled_at = now_utc()
-    await session.commit()
-    return total
+
+    async def _do():
+        root = quota_sample_root(kind, storage_label)
+        total = logical_usage_bytes(root, kind)
+        qrow = await _get_or_create_quota_row_locked(
+            session, user_id, kind, used_bytes=total
+        )
+        qrow.used_bytes = total
+        qrow.reconciled_at = now_utc()
+        qrow.reconcile_needed = False
+        qrow.reconcile_reason = None
+        qrow.reconcile_sample_key = None
+        qrow.reconcile_marked_at = None
+        await session.commit()
+        return total
+
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    return await _with_quota_row_lock(user_id, kind, _do)
+
+
+async def touch_reservation(
+    session,
+    *,
+    reservation_id: str,
+    extend_minutes: int = 30,
+    lock_context: Optional[QuotaOperationLock] = None,
+) -> bool:
+    """延长 active reservation 的过期时间；已有组合锁时不重复取锁。"""
+    if not is_quota_enabled() or not reservation_id:
+        return False
+
+    async def _do():
+        row = await _get_reservation(session, reservation_id)
+        if row is None or row.status != "reserved":
+            return False
+        row.expires_at = now_utc() + timedelta(minutes=max(int(extend_minutes), 1))
+        await session.commit()
+        return True
+
+    if lock_context is not None:
+        if not lock_context.acquired:
+            raise QuotaLockUnavailable("quota operation lock unavailable")
+        return await _do()
+    row = await _get_reservation(session, reservation_id)
+    if row is None:
+        return False
+    token = await acquire_quota_row_lock(user_id=row.user_id, kind=row.kind)
+    try:
+        if not token.acquired:
+            raise QuotaLockUnavailable("quota row lock unavailable")
+        return await _do()
+    finally:
+        await token.release()
+
+
+@dataclass
+class ReclaimOutcome:
+    processed: int = 0
+    skipped: int = 0
+    failed: int = 0
 
 
 async def reclaim_expired_reservations(
-    session, *, cutoff: Optional[datetime] = None, now: Optional[datetime] = None
-) -> int:
-    """回收超过 cutoff 仍未 settle/release 的预留。返回回收数量。"""
-    if not STORAGE_QUOTA_ENABLED:
-        return 0
-    now = now if now is not None else now_utc()
+    session, *, now: Optional[datetime] = None
+) -> ReclaimOutcome:
+    """逐条持 row→sample 锁回收 expires_at 已过期的预留。"""
+    outcome = ReclaimOutcome()
+    if not is_quota_enabled():
+        return outcome
+    current = now if now is not None else now_utc()
     result = await session.execute(
         select(StorageQuotaReservation).where(
             StorageQuotaReservation.status == "reserved",
-            StorageQuotaReservation.expires_at.isnot_(None),
-            StorageQuotaReservation.expires_at < now,
+            StorageQuotaReservation.expires_at.isnot(None),
+            StorageQuotaReservation.expires_at < current,
         )
     )
-    rows = list(result.scalars().all())
-    count = 0
-    for row in rows:
-        r = await _get_reservation(session, row.reservation_id)
-        if r is None or r.status != "reserved":
-            continue
-        if r.expires_at is None or r.expires_at >= now:
-            continue
-        qrow = await _get_quota_row(session, r.user_id, r.kind)
-        if qrow is not None:
-            qrow.reserved_bytes = _clamp0(int(qrow.reserved_bytes or 0) - int(r.requested_bytes or 0))
-            qrow.reconcile_needed = True
-        r.status = "expired"
-        r.released_at = now
-        await session.commit()
-        count += 1
-    return count
+    candidates = list(result.scalars().all())
+    for candidate in candidates:
+        try:
+            async with quota_operation_lock(
+                candidate.user_id, candidate.kind, candidate.sample_key, timeout=2.0
+            ) as op_lock:
+                row = await _get_reservation(session, candidate.reservation_id)
+                if (
+                    row is None
+                    or row.status != "reserved"
+                    or row.expires_at is None
+                    or row.expires_at >= current
+                ):
+                    outcome.skipped += 1
+                    continue
+                qrow = await _get_or_create_quota_row_locked(
+                    session, row.user_id, row.kind
+                )
+                qrow.reserved_bytes = _clamp0(
+                    int(qrow.reserved_bytes or 0) - int(row.requested_bytes or 0)
+                )
+                _set_reconcile_state(
+                    qrow,
+                    reason="reservation_expired",
+                    sample_key=row.sample_key,
+                    marked_at=current,
+                )
+                row.status = "expired"
+                row.released_at = current
+                await session.commit()
+                outcome.processed += 1
+        except QuotaLockUnavailable:
+            outcome.skipped += 1
+        except Exception:
+            import logging
+
+            logging.getLogger("quota").error(
+                "reservation reclaim failed id=%s user=%s kind=%s sample=%s",
+                candidate.reservation_id, candidate.user_id, candidate.kind,
+                candidate.sample_key, exc_info=True,
+            )
+            outcome.failed += 1
+    return outcome
 
 
 async def _count_stat(session, user_id, kind, count_field, at_field) -> None:
     if not STORAGE_QUOTA_ENABLED:
         return
-    qrow = await _get_quota_row(session, user_id, kind)
-    if qrow is None:
-        qrow = UserStorageQuota(user_id=user_id, kind=kind, used_bytes=0, reserved_bytes=0)
-        session.add(qrow)
+    qrow = await _get_or_create_quota_row_locked(session, user_id, kind)
     setattr(qrow, count_field, int(getattr(qrow, count_field, 0) or 0) + 1)
     setattr(qrow, at_field, now_utc())
     await session.commit()
-
-
-def _lock(user_id, kind, sample_key):
-    return _lock_for(user_id, kind, sample_key)
 
 
 # ---------------------------------------------------------------------------
@@ -660,6 +815,65 @@ def dir_usage_bytes(path) -> int:
     return total
 
 
+def physical_orphan_stats(root) -> dict:
+    """统计配额样本根中的 staging/backup/trash 物理占用，不返回绝对路径。"""
+    result = {
+        "trash_bytes": 0,
+        "staging_bytes": 0,
+        "committed_backup_bytes": 0,
+        "recovery_backup_bytes": 0,
+        "recovery_backup_count": 0,
+    }
+    try:
+        root_path = Path(root)
+        entries = list(root_path.iterdir()) if root_path.is_dir() else []
+    except OSError:
+        return result
+    for entry in entries:
+        if entry.is_symlink():
+            continue
+        name = entry.name
+        size = dir_usage_bytes(entry) if entry.is_dir() else 0
+        if name == ".quota-trash":
+            result["trash_bytes"] += size
+        elif ".staging-" in name:
+            result["staging_bytes"] += size
+        elif ".backup-committed-" in name:
+            result["committed_backup_bytes"] += size
+        elif ".backup-recovery-" in name:
+            result["recovery_backup_bytes"] += size
+            result["recovery_backup_count"] += 1
+    return result
+
+
+def is_valid_sample_dir(path, kind: str) -> bool:
+    """只检查一个目录是否为合法样本，避免清理时每个候选重扫整个根。"""
+    validate_kind(kind)
+    try:
+        entry = Path(path)
+        if entry.is_symlink() or not entry.is_dir() or entry.name.startswith("."):
+            return False
+        name = entry.name
+        if ".staging-" in name or ".backup-committed-" in name or ".backup-recovery-" in name:
+            return False
+        files = [p for p in entry.iterdir() if p.is_file() and not p.is_symlink()]
+    except OSError:
+        return False
+    names = {p.name for p in files}
+    if kind == "training":
+        return (
+            "meta.json" in names
+            and any(n.startswith("target.") for n in names)
+            and any(n.startswith("result.") for n in names)
+        )
+    return any(n.startswith("original.") for n in names)
+
+
+def logical_usage_bytes(root, kind: str) -> int:
+    """只统计正式合法样本，不把 trash/staging/backup 算入用户逻辑配额。"""
+    return sum(dir_usage_bytes(path) for path in sample_subdir_candidates(root, kind))
+
+
 def sample_subdir_candidates(root=None, kind=None) -> List[Path]:
     """枚举根目录下可作为样本目录的候选（按真实结构识别）。
 
@@ -682,26 +896,21 @@ def sample_subdir_candidates(root=None, kind=None) -> List[Path]:
             continue
         if entry.name.startswith("."):
             continue
-        if entry.name.endswith((".staging", ".backup", ".quota-trash")):
+        if (
+            ".staging-" in entry.name
+            or ".backup-committed-" in entry.name
+            or ".backup-recovery-" in entry.name
+            or entry.name == ".quota-trash"
+        ):
             continue
-        try:
-            names = {p.name for p in entry.iterdir()}
-        except OSError:
-            continue
-
-        def _has(prefix):
-            return any(n.startswith(prefix) for n in names if not n.endswith((".staging", ".backup")))
-
-        if kind == "training":
-            if "meta.json" not in names:
-                continue
-            if not (_has("target") and _has("result")):
-                continue
-        elif kind == "detection":
-            if not _has("original"):
+        if kind in STORAGE_QUOTA_KINDS:
+            if not is_valid_sample_dir(entry, kind):
                 continue
         else:
-            if not names:
+            try:
+                if not any(True for _ in entry.iterdir()):
+                    continue
+            except OSError:
                 continue
         result.append(entry)
     return result

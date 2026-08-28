@@ -12,7 +12,7 @@ DB 访问全部收敛到模块级 helper，便于测试在无 MySQL 环境替换
 import time
 import uuid as _uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -36,7 +36,8 @@ from sqlalchemy.exc import IntegrityError
 
 
 def now_utc() -> datetime:
-    return datetime.utcnow()
+    # MySQL DATETIME columns are timezone-naive; derive from aware UTC then strip tzinfo.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def is_quota_enabled() -> bool:
@@ -112,6 +113,17 @@ async def _get_reservation(session, reservation_id: str):
     return result.scalars().first()
 
 
+async def _get_reservation_identity(session, reservation_id: str):
+    result = await session.execute(
+        select(
+            StorageQuotaReservation.user_id,
+            StorageQuotaReservation.kind,
+            StorageQuotaReservation.sample_key,
+        ).where(StorageQuotaReservation.reservation_id == reservation_id)
+    )
+    return result.first()
+
+
 async def _has_other_active_reservations(
     session, user_id: int, kind: str, reservation_id: Optional[str] = None
 ) -> bool:
@@ -161,10 +173,24 @@ class QuotaLockToken:
         self.acquired = False
         try:
             if conn is not None and was_acquired:
-                await conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": self.key})
+                try:
+                    await conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": self.key})
+                except Exception:
+                    import logging
+
+                    logging.getLogger("quota").error(
+                        "quota lock release failed key=%s", self.key, exc_info=True
+                    )
         finally:
             if conn is not None:
-                await conn.close()
+                try:
+                    await conn.close()
+                except Exception:
+                    import logging
+
+                    logging.getLogger("quota").error(
+                        "quota lock connection close failed key=%s", self.key, exc_info=True
+                    )
 
 
 async def acquire_sample_lock(
@@ -277,18 +303,22 @@ class _QuotaOperationCtx:
             raise
         self._sample_token = samp
         if not samp.acquired:
-            await samp.release()
-            await row.release()
+            try:
+                await samp.release()
+            finally:
+                await row.release()
             raise QuotaLockUnavailable("sample lock unavailable")
         op = QuotaOperationLock(row, samp)
         self.result = op
         return op
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._sample_token is not None:
-            await self._sample_token.release()
-        if self._row_token is not None:
-            await self._row_token.release()
+        try:
+            if self._sample_token is not None:
+                await self._sample_token.release()
+        finally:
+            if self._row_token is not None:
+                await self._row_token.release()
         return False
 
 
@@ -692,16 +722,17 @@ async def touch_reservation(
         if not lock_context.acquired:
             raise QuotaLockUnavailable("quota operation lock unavailable")
         return await _do()
-    row = await _get_reservation(session, reservation_id)
-    if row is None:
+    identity = await _get_reservation_identity(session, reservation_id)
+    if identity is None:
         return False
-    token = await acquire_quota_row_lock(user_id=row.user_id, kind=row.kind)
-    try:
-        if not token.acquired:
-            raise QuotaLockUnavailable("quota row lock unavailable")
-        return await _do()
-    finally:
-        await token.release()
+    user_id, kind, sample_key = identity
+    async with quota_operation_lock(user_id, kind, sample_key) as operation:
+        return await touch_reservation(
+            session,
+            reservation_id=reservation_id,
+            extend_minutes=extend_minutes,
+            lock_context=operation,
+        )
 
 
 @dataclass
@@ -720,19 +751,24 @@ async def reclaim_expired_reservations(
         return outcome
     current = now if now is not None else now_utc()
     result = await session.execute(
-        select(StorageQuotaReservation).where(
+        select(
+            StorageQuotaReservation.reservation_id,
+            StorageQuotaReservation.user_id,
+            StorageQuotaReservation.kind,
+            StorageQuotaReservation.sample_key,
+        ).where(
             StorageQuotaReservation.status == "reserved",
             StorageQuotaReservation.expires_at.isnot(None),
             StorageQuotaReservation.expires_at < current,
         )
     )
-    candidates = list(result.scalars().all())
-    for candidate in candidates:
+    candidates = list(result.all())
+    for reservation_id, user_id, kind, sample_key in candidates:
         try:
             async with quota_operation_lock(
-                candidate.user_id, candidate.kind, candidate.sample_key, timeout=2.0
-            ) as op_lock:
-                row = await _get_reservation(session, candidate.reservation_id)
+                user_id, kind, sample_key, timeout=2.0
+            ):
+                row = await _get_reservation(session, reservation_id)
                 if (
                     row is None
                     or row.status != "reserved"
@@ -764,8 +800,7 @@ async def reclaim_expired_reservations(
 
             logging.getLogger("quota").error(
                 "reservation reclaim failed id=%s user=%s kind=%s sample=%s",
-                candidate.reservation_id, candidate.user_id, candidate.kind,
-                candidate.sample_key, exc_info=True,
+                reservation_id, user_id, kind, sample_key, exc_info=True,
             )
             outcome.failed += 1
     return outcome

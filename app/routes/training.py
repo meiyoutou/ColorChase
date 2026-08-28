@@ -272,7 +272,7 @@ def create_training_router(
 
         storage_label = await resolve_user_storage_label(request_user_id)
         detection_dir = _user_assets_root_for_label(storage_label) / "detection"
-        safe_uuid = _safe_filename(str(file_uuid or uuid.uuid4().hex))
+        safe_uuid = _safe_sample_key(str(file_uuid or uuid.uuid4().hex))
         target_dir = detection_dir / safe_uuid
 
         ext = Path(file.filename or "").suffix.lower() or ".jpg"
@@ -305,6 +305,7 @@ def create_training_router(
 
         # ---- 配额启用：统一 row→sample 组合锁；锁内完成读旧状态、预留、目录交换与结算 ----
         force = not storage_quota_svc.is_dry_run()
+        telemetry_failed = False
         try:
             async with storage_quota_svc.quota_operation_lock(
                 request_user_id, "detection", safe_uuid
@@ -329,6 +330,7 @@ def create_training_router(
                         )
                         if force:
                             return JSONResponse(status_code=503, content={"error": "storage quota unavailable"})
+                        telemetry_failed = True
                         outcome = storage_quota_svc.ReserveOutcome(allowed=True, dry_run_fail_open=True)
                     if not outcome.allowed:
                         return _quota_error_response(outcome)
@@ -418,6 +420,7 @@ def create_training_router(
                             "error": "storage quota state update failed", "stored": True,
                             "reconcile_needed": True,
                         })
+                    telemetry_failed = True
                     logging.getLogger("quota").warning(
                         "mark_reconcile_needed failed (detection) user=%s",
                         request_user_id, exc_info=True,
@@ -462,6 +465,7 @@ def create_training_router(
                             "error": "storage quota settle failed", "stored": True,
                             "reconcile_needed": True,
                         })
+                    telemetry_failed = True
                 if backup_extra > 0 and force:
                     try:
                         await storage_quota_svc.mark_reconcile_needed(
@@ -486,11 +490,14 @@ def create_training_router(
                 "error": "storage quota unavailable", "detail": "lock_failed",
             })
 
-        return JSONResponse({
+        response = {
             "success": True,
             "file_uuid": safe_uuid,
             "saved_path": str(save_path.relative_to(get_training_corpus_dir().parent.parent)),
-        })
+        }
+        if telemetry_failed:
+            response["telemetry_failed"] = True
+        return JSONResponse(response)
 
     @router.post("/api/training/upload")
     async def api_training_upload(
@@ -510,7 +517,7 @@ def create_training_router(
             raise HTTPException(status_code=401, detail="请先登录")
 
         storage_label = await resolve_user_storage_label(request_user_id)
-        safe_uuid = _safe_filename(str(sample_uuid or uuid.uuid4().hex))
+        safe_uuid = _safe_sample_key(str(sample_uuid or uuid.uuid4().hex))
         sample_dir = _training_corpus_dir_for_label(storage_label) / safe_uuid
 
         max_bytes = int_env(
@@ -570,6 +577,7 @@ def create_training_router(
 
         # ---- 配额启用：组合锁内读取旧目录、构建 staging、预留、交换、标记与结算 ----
         force = not storage_quota_svc.is_dry_run()
+        telemetry_failed = False
         try:
             async with storage_quota_svc.quota_operation_lock(
                 request_user_id, "training", safe_uuid
@@ -603,9 +611,12 @@ def create_training_router(
                     for name in ("reference", "lut"):
                         if name in contents:
                             continue
-                        for old_optional in sample_dir.glob(f"{name}.*"):
-                            if old_optional.is_file():
-                                shutil.copy2(old_optional, staging_dir / old_optional.name)
+                        old_candidates = [
+                            path for path in sample_dir.glob(f"{name}.*") if path.is_file()
+                        ]
+                        if old_candidates:
+                            newest = max(old_candidates, key=lambda path: path.stat().st_mtime)
+                            shutil.copy2(newest, staging_dir / newest.name)
 
                     final_saved = {}
                     for path in staging_dir.iterdir():
@@ -726,6 +737,7 @@ def create_training_router(
                             "error": "storage quota state update failed", "stored": True,
                             "reconcile_needed": True,
                         })
+                    telemetry_failed = True
                     logging.getLogger("quota").warning(
                         "mark_reconcile_needed failed (training) user=%s",
                         request_user_id, exc_info=True,
@@ -770,6 +782,7 @@ def create_training_router(
                             "error": "storage quota settle failed", "stored": True,
                             "reconcile_needed": True,
                         })
+                    telemetry_failed = True
                 if backup_extra > 0 and force:
                     try:
                         await storage_quota_svc.mark_reconcile_needed(
@@ -794,11 +807,14 @@ def create_training_router(
                 "error": "storage quota unavailable", "detail": "lock_failed",
             })
 
-        return JSONResponse({
+        response = {
             "success": True,
             "sample_uuid": safe_uuid,
             "saved_files": saved,
-        })
+        }
+        if telemetry_failed:
+            response["telemetry_failed"] = True
+        return JSONResponse(response)
 
     @router.get("/api/storage/quota")
     async def api_storage_quota(
@@ -958,7 +974,7 @@ def create_training_router(
         if not _is_admin_request(authorization):
             raise HTTPException(status_code=403, detail="训练样本预览仅限管理员")
 
-        safe_uuid = _safe_filename(sample_uuid)
+        safe_uuid = _safe_sample_key(sample_uuid)
         sample_dir = _resolve_training_sample_dir(safe_uuid, storage_label)
 
         meta_obj = {}
@@ -1037,7 +1053,7 @@ def create_training_router(
         if not _is_admin_request(authorization):
             raise HTTPException(status_code=403, detail="缩略图查看仅限管理员")
 
-        safe_uuid = _safe_filename(sample_uuid)
+        safe_uuid = _safe_sample_key(sample_uuid)
         sample_dir = _resolve_training_sample_dir(safe_uuid, storage_label)
 
         target = next(
@@ -1107,7 +1123,7 @@ def create_training_router(
         imported = 0
         skipped = 0
         for su, sl in zip(sample_uuids, storage_labels):
-            safe_uuid = _safe_filename(str(su))
+            safe_uuid = _safe_sample_key(str(su))
             # storage_label 是真实目录名（可能含 @），_training_corpus_dir_for_label 内部已做校验
             sample_dir = _training_corpus_dir_for_label(str(sl)) / safe_uuid
             if not sample_dir.exists() or not sample_dir.is_dir():
@@ -1152,8 +1168,16 @@ def _safe_filename(name: str) -> str:
     return safe
 
 
+def _safe_sample_key(value: str) -> str:
+    """清洗样本键并剔除配额内部目录标记，防止伪装成 staging/backup。"""
+    safe = _safe_filename(value)
+    for marker in (".staging-", ".backup-committed-", ".backup-recovery-"):
+        safe = safe.replace(marker, "_")
+    return safe or uuid.uuid4().hex
+
+
 def _resolve_training_sample_dir(sample_uuid: str, storage_label: str) -> Path:
-    safe_uuid = _safe_filename(sample_uuid)
+    safe_uuid = _safe_sample_key(sample_uuid)
     if not storage_label:
         raise HTTPException(status_code=400, detail="storage_label 不能为空")
 

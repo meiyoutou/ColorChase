@@ -1162,22 +1162,24 @@ async def admin_storage_stats(
                 current = sq.physical_orphan_stats(root)
                 for key in aggregate:
                     aggregate[key] += int(current.get(key, 0) or 0)
-        return aggregate
 
-    physical = await asyncio.to_thread(scan_physical)
+        orphan_labels = set()
+        orphan_bytes = 0
+        for base in (STORAGE_TRAINING_CORPUS_DIR, STORAGE_USERS_DIR):
+            try:
+                for entry in base.iterdir():
+                    if (
+                        entry.is_dir() and not entry.is_symlink()
+                        and not entry.name.startswith(".")
+                        and entry.name not in known_labels
+                    ):
+                        orphan_labels.add(entry.name)
+                        orphan_bytes += sq.dir_usage_bytes(entry)
+            except OSError:
+                pass
+        return aggregate, sorted(orphan_labels), orphan_bytes
 
-    orphan_labels = set()
-    for base in (STORAGE_TRAINING_CORPUS_DIR, STORAGE_USERS_DIR):
-        try:
-            for entry in base.iterdir():
-                if (
-                    entry.is_dir() and not entry.is_symlink()
-                    and not entry.name.startswith(".")
-                    and entry.name not in known_labels
-                ):
-                    orphan_labels.add(entry.name)
-        except OSError:
-            pass
+    physical, orphan_labels, orphan_bytes = await asyncio.to_thread(scan_physical)
 
     return {
         "success": True,
@@ -1192,7 +1194,9 @@ async def admin_storage_stats(
         "denied_user_count": len(denied_users),
         "reconcile_needed_user_count": len(reconcile_needed_users),
         "physical_orphans": physical,
-        "orphan_storage_labels": sorted(orphan_labels),
+        "orphan_storage_label_count": len(orphan_labels),
+        "orphan_storage_labels": orphan_labels[:100],
+        "orphan_storage_bytes": orphan_bytes,
         "top_users": top,
     }
 
@@ -1204,10 +1208,11 @@ async def admin_storage_quota_reconcile(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """管理员触发某个用户单个 kind 的近似快照对账。
+    """管理员触发某个用户单个 kind 的稳定快照对账。
 
-    使用 quota-row lock 保护账面写回；不阻塞该用户所有 sample lock，因此结果是
-    扫描时刻的近似快照。配额未启用时拒绝且不扫描、不创建行。
+    reconcile_usage 独立调用会持有 quota-row lock；所有配额启用上传也先取得同一
+    user-kind row lock，因此扫描和账面写回期间不会有该用户同类样本并发交换。
+    配额未启用时拒绝且不扫描、不创建行。
     """
     from app.services import storage_quota as sq
     from app.settings import STORAGE_QUOTA_ENABLED
@@ -1225,7 +1230,10 @@ async def admin_storage_quota_reconcile(
     if not label:
         raise HTTPException(status_code=409, detail="用户缺少 storage_label，无法对账")
 
-    await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
+    try:
+        await sq.reconcile_usage(db, user_id=user.id, kind=kind, storage_label=label)
+    except sq.QuotaLockUnavailable:
+        raise HTTPException(status_code=503, detail="配额行锁不可用")
     # reconcile_usage 独立调用会自行取得 quota-row lock；重新读取数据库实际状态
     qrow = (
         await db.execute(

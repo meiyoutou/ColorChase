@@ -80,6 +80,7 @@ class StorageQuotaReservation(Base):
     __tablename__ = "storage_quota_reservations"
     __table_args__ = (
         Index("ix_reservation_user_kind_sample", "user_id", "kind", "sample_key"),
+        Index("ix_reservation_status_expires", "status", "expires_at"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)

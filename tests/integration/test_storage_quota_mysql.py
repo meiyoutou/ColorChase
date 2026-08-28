@@ -23,7 +23,15 @@ DB_URL = (
     if RAW_DB_URL.startswith("mysql+pymysql://") else RAW_DB_URL
 )
 DB_NAME = urlsplit(DB_URL.replace("mysql+aiomysql", "mysql")).path.lstrip("/") if DB_URL else ""
-SAFE_TEST_DB = bool(DB_URL and "test" in DB_NAME.lower())
+DB_NAME_LOWER = DB_NAME.lower()
+SAFE_TEST_DB = bool(
+    DB_URL
+    and (
+        DB_NAME_LOWER == "test"
+        or DB_NAME_LOWER.startswith("test_")
+        or DB_NAME_LOWER.endswith("_test")
+    )
+)
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(

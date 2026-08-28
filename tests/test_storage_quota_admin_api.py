@@ -80,3 +80,4 @@ def test_admin_storage_stats_exposes_reconcile_and_physical_fields(monkeypatch, 
     assert body["top_users"][0]["reconcile_sample_key"] == "sample-x"
     assert body["physical_orphans"]["recovery_backup_bytes"] == 3
     assert body["physical_orphans"]["recovery_backup_count"] == 1
+    assert body["orphan_storage_bytes"] == 0

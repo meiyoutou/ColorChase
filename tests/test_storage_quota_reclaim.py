@@ -23,6 +23,12 @@ class _Result:
     def scalars(self):
         return _Scalars(self.values)
 
+    def all(self):
+        return [
+            (row.reservation_id, row.user_id, row.kind, row.sample_key)
+            for row in self.values
+        ]
+
 
 class _CandidateSession:
     def __init__(self, base, candidates):

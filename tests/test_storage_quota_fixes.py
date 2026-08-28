@@ -85,10 +85,8 @@ def test_negative_delta_releases_quota(monkeypatch):
     monkeypatch.setattr(sqm, "_get_user_role", role)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_ENABLED", True)
     monkeypatch.setattr(sqm, "STORAGE_QUOTA_DRY_RUN", True)  # dry-run：仍需要记账
-    import datetime
-
     q = UserStorageQuota(user_id=1, kind="training", used_bytes=1000, reserved_bytes=0,
-                         reconciled_at=datetime.datetime.utcnow())
+                         reconciled_at=sqm.now_utc())
     memo["quotas"][(1, "training")] = q
 
     async def run():

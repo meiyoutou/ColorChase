@@ -13,6 +13,20 @@ def _old(path):
     os.utime(path, (timestamp, timestamp))
 
 
+def test_cleanup_main_default_off_never_opens_database(monkeypatch, capsys):
+    import app.settings as settings
+
+    monkeypatch.setattr(settings, "STORAGE_QUOTA_ENABLED", False)
+
+    class ForbiddenSession:
+        def __call__(self):
+            raise AssertionError("database must not be opened while quota is disabled")
+
+    monkeypatch.setattr(cleanup, "async_session", ForbiddenSession())
+    asyncio.run(cleanup.main())
+    assert "disabled" in capsys.readouterr().out.lower()
+
+
 def test_residual_cleanup_never_deletes_recovery_backup(tmp_path):
     committed = tmp_path / "sample.backup-committed-deadbeef"
     recovery = tmp_path / "sample.backup-recovery-deadbeef"

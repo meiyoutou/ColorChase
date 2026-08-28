@@ -127,6 +127,42 @@ def test_quota_operation_lock_reports_unavailable_when_row_missing(monkeypatch):
     assert _run(run()) == "unavailable"
 
 
+def test_quota_operation_lock_releases_row_when_sample_release_fails(monkeypatch):
+    events = []
+
+    async def fake_row(user_id, kind, **kw):
+        token = _tok(True, "row")
+
+        async def release():
+            events.append("row")
+            token.acquired = False
+
+        token.release = release
+        return token
+
+    async def fake_sample(user_id, kind, sample_key, **kw):
+        token = _tok(True, "sample")
+
+        async def release():
+            events.append("sample")
+            token.acquired = False
+            raise OSError("close failed")
+
+        token.release = release
+        return token
+
+    monkeypatch.setattr(sq, "acquire_quota_row_lock", fake_row)
+    monkeypatch.setattr(sq, "acquire_sample_lock", fake_sample)
+
+    async def run():
+        with pytest.raises(OSError):
+            async with quota_operation_lock(1, "training", "s"):
+                pass
+
+    _run(run())
+    assert events == ["sample", "row"]
+
+
 def test_quota_operation_lock_exposes_tokens(monkeypatch):
     async def fake_row(user_id, kind, **kw):
         return _tok(True, "row")

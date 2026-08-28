@@ -103,6 +103,12 @@ def _post_training(client, *, sample="sample1", target=b"NEW-T", result=b"NEW-R"
     )
 
 
+def test_internal_residual_markers_are_removed_from_user_sample_keys():
+    assert ".staging-" not in rt._safe_sample_key("sample.staging-deadbeef")
+    assert ".backup-committed-" not in rt._safe_sample_key("sample.backup-committed-deadbeef")
+    assert ".backup-recovery-" not in rt._safe_sample_key("sample.backup-recovery-deadbeef")
+
+
 def test_detection_route_uses_combination_lock_and_swaps_directory(monkeypatch, tmp_path):
     client, users, _corpus = _router(monkeypatch, tmp_path)
     events = _install_enabled_quota(monkeypatch)

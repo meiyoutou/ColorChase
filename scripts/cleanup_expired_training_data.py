@@ -135,7 +135,8 @@ def _residual_targets(root: Path):
     return targets
 
 
-def _cleanup_residuals(root: Path, dry_run: bool, now: float, stats: dict) -> None:
+def _cleanup_residuals(root: Path, dry_run: bool, now: float, stats: dict) -> int:
+    deleted = 0
     for entry in _residual_targets(root):
         try:
             age = now - entry.stat().st_mtime
@@ -153,9 +154,11 @@ def _cleanup_residuals(root: Path, dry_run: bool, now: float, stats: dict) -> No
             else:
                 entry.unlink()
             stats["deleted"] += 1
+            deleted += 1
         except OSError as exc:
             stats["failed"] += 1
             print(f"[failed] purge residual {entry}: {exc}")
+    return deleted
 
 
 async def main():
@@ -203,7 +206,15 @@ async def main():
                     session, uid=uid, label=label, root=root, kind=kind,
                     retention=retention, dry_run=dry_run, stats=stats,
                 )
-                _cleanup_residuals(root, dry_run, time.time(), stats)
+                residual_deleted = _cleanup_residuals(root, dry_run, time.time(), stats)
+                if residual_deleted and not dry_run:
+                    try:
+                        await sq.reconcile_usage(
+                            session, user_id=uid, kind=kind, storage_label=label
+                        )
+                    except Exception as exc:
+                        stats["reconcile_failed"] += 1
+                        print(f"[error] residual reconcile failed user={uid} kind={kind}: {exc}")
         print(f"cleanup finished. {stats}")
 
 

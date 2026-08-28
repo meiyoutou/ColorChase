@@ -29,6 +29,12 @@ USER_COLUMNS = {
 RESERVATION_COLUMNS = {
     "expires_at": "DATETIME NULL",
 }
+RESERVATION_INDEXES = {
+    "ix_reservation_status_expires": (
+        "CREATE INDEX `ix_reservation_status_expires` "
+        "ON `storage_quota_reservations` (`status`, `expires_at`)"
+    ),
+}
 
 
 def _load_url():
@@ -53,11 +59,23 @@ async def _columns(conn, table):
     return {row[0] for row in rows.all()}
 
 
+async def _indexes(conn, table):
+    rows = await conn.execute(
+        text(
+            "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:table"
+        ),
+        {"table": table},
+    )
+    return {row[0] for row in rows.all()}
+
+
 async def main(apply=False):
     engine = create_async_engine(_load_url(), pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
             changes = []
+            existing_tables = set()
             for table, expected in (
                 ("user_storage_quotas", USER_COLUMNS),
                 ("storage_quota_reservations", RESERVATION_COLUMNS),
@@ -66,9 +84,15 @@ async def main(apply=False):
                 if not existing:
                     print(f"[skip] {table} 不存在；先运行应用 init_db/create_all")
                     continue
+                existing_tables.add(table)
                 for column, ddl in expected.items():
                     if column not in existing:
                         changes.append(f"ALTER TABLE `{table}` ADD COLUMN `{column}` {ddl}")
+            if "storage_quota_reservations" in existing_tables:
+                reservation_indexes = await _indexes(conn, "storage_quota_reservations")
+                for name, ddl in RESERVATION_INDEXES.items():
+                    if name not in reservation_indexes:
+                        changes.append(ddl)
             if not changes:
                 print("存储配额 schema 已是最新，无需修改。")
                 return
